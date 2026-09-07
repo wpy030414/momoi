@@ -1,0 +1,742 @@
+// ============================================================
+// Pi Adapter — Bridges pi-agent-core to Open Agent
+// ============================================================
+//
+// 职责：
+// 1. 将 ToolModule 包装为 Pi 的 AgentTool
+// 2. 包装 provider.ts 为 Pi 的 StreamFn
+// 3. 将 Pi 的 AgentEvent 映射为 SSE ServerMessage
+// 4. 构建增强版系统提示词（含从代码补丁翻译的硬性规则）
+// 5. 提供 runPiAgentLoop 入口函数
+//
+// ============================================================
+
+import { runAgentLoop } from '@earendil-works/pi-agent-core'
+import type {
+  AgentContext,
+  AgentEvent,
+  AgentLoopConfig,
+  AgentMessage,
+  AgentTool,
+  AgentToolResult,
+  StreamFn,
+} from '@earendil-works/pi-agent-core'
+import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
+import type {
+  AssistantMessage,
+  Context,
+  Message,
+  Model,
+  SimpleStreamOptions,
+  TextContent,
+  ThinkingContent,
+  ToolCall,
+  Usage,
+} from '@earendil-works/pi-ai'
+import { Type } from '@sinclair/typebox'
+import type { TSchema } from '@sinclair/typebox'
+
+import type { AppConfig, ServerMessage, ToolDefinition } from '../../shared/types.js'
+import {
+  SUGGESTIONS_FENCE,
+  THINKING_SEGMENT_OPEN,
+  THINKING_SEGMENT_CLOSE,
+  DEFAULT_SYSTEM_PROMPT,
+} from '../../shared/constants.js'
+import { getConfig } from '../config.js'
+import { getAllTools } from './tools.js'
+import { resolveTool } from '../tools/registry.js'
+import type { ToolContext, ToolResult, ToolArtifact } from '../tools/types.js'
+import { SandboxFS } from '../tools/workspace.js'
+import { skillRegistry } from '../skills/registry.js'
+import { streamChatCompletion } from './provider.js'
+import type { ChatMessage, ContentPart } from './provider.js'
+
+type SendFn = (msg: ServerMessage) => void
+
+// ---- 零值 Usage（不追踪 token 用量时使用）----
+const ZERO_USAGE: Usage = {
+  input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+}
+
+// ---- 构建系统提示词（从 loop.ts 迁移，强化）----
+function buildSystemPrompt(config: AppConfig, thinkingMode: boolean): string {
+  let prompt = config.system_prompt || DEFAULT_SYSTEM_PROMPT
+
+  // Append skill descriptions only
+  const skills = skillRegistry.getAll()
+  if (skills.length > 0) {
+    prompt += '\n\n## Available Skills\n'
+    prompt += '以下是已安装的技能摘要。技能库可能不完整：如果用户的请求没有与某个技能描述明显匹配，请直接如实告知用户当前技能库中是否有可用技能，不要强行加载技能试探。如需查看某个技能的完整内容，请调用 load_skill 工具。\n'
+    for (const skill of skills) {
+      prompt += `\n- **${skill.manifest.name}**: ${skill.manifest.description}\n`
+    }
+  }
+
+  if (!thinkingMode) {
+    prompt += '\n\n/no_think\n请直接回答问题，不要输出任何思考过程或推理步骤。'
+  }
+
+  // 硬性格式要求 + 工具使用规范 + 从代码补丁翻译的规则
+  prompt += `
+
+## 工具使用规范（必须遵守）
+- 完成一个任务后立即回复用户，不要反复修改、重写或优化同一个文件。
+- 每次写文件只用一个确定的文件名，不要每次生成新文件名。
+- 如果用户要求"写一个文件"，写一次就够了。不要用不同的文件名重复创建。
+- 写完文件后，用自然语言告诉用户文件已创建，不要再次调用工具。
+- 工具结果通常会直接给出答案所需的信息：不要重复调用同一个工具、不要反复加载同一个技能，加载一次就足够。
+- 【技能止损·硬性规则】加载技能后若发现其内容与用户请求无关，必须立即停止调用任何工具，直接用中文如实告知用户「当前技能库中没有与该请求直接匹配的技能」，并根据已有知识给出通用建议。禁止再次 load_skill 同一技能，禁止为试探目的加载其他技能，禁止在缺少依据时继续调用工具。
+- 【防漂移·硬性规则】绝对禁止连续两轮调用完全相同的工具和参数。如果工具返回的结果不是你需要的，请直接回复用户说明情况，而不是重试同一个调用。
+- 【写文件节制·硬性规则】每轮对话最多调用 write_file 一次。写完文件后立即回复用户，不要再调用任何工具。如果用户要求写多个文件，请明确告知用户每个文件需要单独请求。
+- 【工具节制·硬性规则】当你已经获得足够回答用户问题的信息时，立即停止调用工具，直接回复用户。不要为「验证」或「确认」而继续调用工具。
+
+## 输出格式（最高优先级，不得省略）
+每一条回复的【最末尾】必须输出一个 \`\`\`suggestions 代码块，里面恰好 3 个后续建议（每行一条，以 - 开头）。
+这个代码块是后台数据结构，用户不可见，不会破坏你的角色氛围，但缺少它系统会判定回复无效。
+建议内容必须是【用户本人会亲口打出来】的话：以用户的第一人称、口语化的口吻，像用户直接发一条消息那样，猜测用户看到这条回复后最可能追问的问题。
+正确示例（用户口吻）：
+\`\`\`suggestions
+- 具体怎么操作？
+- 再给我讲讲原理
+- 有没有别的办法？
+\`\`\`
+反面示例（助手对用户说话的口吻，禁止）：
+\`\`\`suggestions
+- 你可以试试这个方案
+- 要不要我帮你查一下？
+\`\`\`
+`
+
+  return prompt
+}
+
+// ---- JSON Schema 属性 → TypeBox schema ----
+function jsonSchemaToTypeBox(properties: Record<string, { type: string; description?: string }>, required: string[] = []): TSchema {
+  const obj: Record<string, TSchema> = {}
+  for (const [key, prop] of Object.entries(properties)) {
+    const desc = prop.description
+    switch (prop.type) {
+      case 'string': obj[key] = desc ? Type.String({ description: desc }) : Type.String(); break
+      case 'number': obj[key] = desc ? Type.Number({ description: desc }) : Type.Number(); break
+      case 'boolean': obj[key] = desc ? Type.Boolean({ description: desc }) : Type.Boolean(); break
+      // array 和 object 归为 unknown，实际很少见
+      default: obj[key] = desc ? Type.Any({ description: desc }) : Type.Any(); break
+    }
+  }
+  // TypeBox 的 Optional 不支持在 Object 上直接标记，用 Partial + Required 组合
+  // 简化处理：所有字段都标记，Pi 自己会校验 required
+  return Type.Object(obj)
+}
+
+// ---- ToolModule → Pi AgentTool ----
+function createToolAdapter(toolCtx: ToolContext): AgentTool[] {
+  const defs = getAllTools()
+  return defs.map((def) => {
+    const toolModule = resolveTool(def.name)
+    const schema = jsonSchemaToTypeBox(def.input_schema.properties || {}, def.input_schema.required || [])
+
+    const tool: AgentTool = {
+      name: def.name,
+      label: def.name,
+      description: def.description,
+      parameters: schema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<any>> => {
+        const input = (params && typeof params === 'object' ? params : {}) as Record<string, unknown>
+        if (!toolModule) {
+          return {
+            content: [{ type: 'text', text: `Unknown tool: ${def.name}` }],
+            details: { error: true },
+          }
+        }
+
+        const ctx: ToolContext = { ...toolCtx, signal: signal || toolCtx.signal }
+        let result: ToolResult
+        try {
+          result = await toolModule.execute(input, ctx)
+        } catch (err) {
+          result = { summary: `Tool error: ${(err as Error).message}`, error: true }
+        }
+
+        const text = result.error
+          ? `Error: ${result.summary}`
+          : result.summary
+
+        return {
+          content: [{ type: 'text', text }],
+          details: {
+            data: result.data,
+            error: result.error,
+            artifacts: result.artifacts,
+          },
+        }
+      },
+    }
+    return tool
+  })
+}
+
+// ---- Pi Message → ChatMessage 转换（streamFn 内部使用）----
+function piMessagesToChatMessages(msgs: Message[]): ChatMessage[] {
+  return msgs.map((msg): ChatMessage => {
+    switch (msg.role) {
+      case 'user': {
+        const content: string | ContentPart[] = typeof msg.content === 'string'
+          ? msg.content
+          : msg.content.map((c) => {
+            if (c.type === 'image') {
+              return { type: 'image_url' as const, image_url: { url: `data:${(c as any).mimeType || 'image/png'};base64,${(c as any).data || ''}` } }
+            }
+            return { type: 'text' as const, text: 'text' in c ? c.text : '' }
+          })
+        return { role: 'user', content }
+      }
+      case 'assistant': {
+        const blocks = msg.content as (TextContent | ThinkingContent | ToolCall)[]
+        const textParts = blocks.filter((b): b is TextContent => b.type === 'text').map((b) => b.text)
+        const toolCalls = blocks.filter((b): b is ToolCall => b.type === 'toolCall').map((tc) => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+        }))
+        return {
+          role: 'assistant',
+          content: textParts.join('') || null,
+          tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        }
+      }
+      case 'toolResult': {
+        const text = (msg.content as (TextContent | { type: string; text?: string })[])
+          .filter((c) => c.type === 'text')
+          .map((c) => (c as TextContent).text)
+          .join('')
+        return { role: 'tool', content: text, tool_call_id: msg.toolCallId }
+      }
+      default:
+        return { role: 'user', content: '' }
+    }
+  })
+}
+
+// ---- StreamFn：包装 provider.ts 为 Pi 兼容格式 ----
+function createStreamFn(config: AppConfig, thinkingMode: boolean): StreamFn {
+  return async (model: Model<any>, context: Context, options?: SimpleStreamOptions): Promise<ReturnType<typeof createAssistantMessageEventStream>> => {
+    const stream = createAssistantMessageEventStream()
+
+    // 构建 system prompt → 作为 messages 的第一条
+    const systemPrompt = context.systemPrompt || ''
+    const chatMessages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      ...piMessagesToChatMessages(context.messages),
+    ]
+
+    // 异步启动 LLM 调用
+    ;(async () => {
+      try {
+        // Pi 工具定义 → 我们的 ToolDefinition[]
+        const piTools = context.tools || []
+        const ourTools: ToolDefinition[] = piTools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          input_schema: {
+            type: 'object' as const,
+            properties: {},
+          },
+        }))
+
+        let contentIndex = 0
+        let hasStarted = false
+        let textContent = ''
+        let thinkingContent = ''
+        let hasText = false
+        let hasThinking = false
+        const pendingToolCalls: Array<{ id: string; name: string; arguments: string }> = []
+
+        // 构建 partial AssistantMessage
+        const makePartial = (): AssistantMessage => ({
+          role: 'assistant',
+          content: [
+            ...(hasText ? [{ type: 'text' as const, text: textContent }] : []),
+            ...(hasThinking ? [{ type: 'thinking' as const, thinking: thinkingContent }] : []),
+            ...pendingToolCalls.map((tc) => ({
+              type: 'toolCall' as const,
+              id: tc.id,
+              name: tc.name,
+              arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
+            })),
+          ],
+          api: 'openai-completions',
+          provider: 'openai',
+          model: config.model,
+          stopReason: 'stop',
+          usage: ZERO_USAGE,
+          timestamp: Date.now(),
+        })
+
+        for await (const event of streamChatCompletion(config, chatMessages, ourTools, thinkingMode)) {
+          switch (event.type) {
+            case 'token': {
+              const delta = event.text || ''
+              if (!hasStarted) {
+                hasStarted = true
+                stream.push({ type: 'start', partial: makePartial() })
+              }
+              if (!hasText) {
+                hasText = true
+                stream.push({ type: 'text_start', contentIndex, partial: makePartial() })
+              }
+              textContent += delta
+              stream.push({ type: 'text_delta', contentIndex, delta, partial: makePartial() })
+              break
+            }
+            case 'thinking': {
+              const delta = event.text || ''
+              if (!hasStarted) {
+                hasStarted = true
+                stream.push({ type: 'start', partial: makePartial() })
+              }
+              if (!hasThinking) {
+                hasThinking = true
+                const thinkingIdx = hasText ? 1 : 0
+                stream.push({ type: 'thinking_start', contentIndex: thinkingIdx, partial: makePartial() })
+              }
+              thinkingContent += delta
+              const thinkingIdx = hasText ? 1 : 0
+              stream.push({ type: 'thinking_delta', contentIndex: thinkingIdx, delta, partial: makePartial() })
+              break
+            }
+            case 'tool_call': {
+              if (!hasStarted) {
+                hasStarted = true
+                stream.push({ type: 'start', partial: makePartial() })
+              }
+              const calls = event.toolCalls || []
+              for (const tc of calls) {
+                pendingToolCalls.push(tc)
+                const tcIdx = makePartial().content.length - 1
+                stream.push({ type: 'toolcall_start', contentIndex: tcIdx, partial: makePartial() })
+                // 模拟 toolcall_delta + toolcall_end
+                stream.push({
+                  type: 'toolcall_delta',
+                  contentIndex: tcIdx,
+                  delta: tc.arguments,
+                  partial: makePartial(),
+                })
+                stream.push({
+                  type: 'toolcall_end',
+                  contentIndex: tcIdx,
+                  toolCall: {
+                    type: 'toolCall',
+                    id: tc.id,
+                    name: tc.name,
+                    arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
+                  },
+                  partial: makePartial(),
+                })
+              }
+              break
+            }
+            case 'finish': {
+              break
+            }
+          }
+        }
+
+        // 结束文本和思考流
+        if (hasText) {
+          stream.push({ type: 'text_end', contentIndex: 0, content: textContent, partial: makePartial() })
+        }
+        if (hasThinking) {
+          const thinkingIdx = hasText ? 1 : 0
+          stream.push({ type: 'thinking_end', contentIndex: thinkingIdx, content: thinkingContent, partial: makePartial() })
+        }
+
+        // 如果没有产生任何内容，至少发送 start
+        if (!hasStarted) {
+          stream.push({ type: 'start', partial: makePartial() })
+        }
+
+        // 确定 stopReason
+        const hasToolCalls = pendingToolCalls.length > 0
+        const finalMsg: AssistantMessage = {
+          ...makePartial(),
+          stopReason: hasToolCalls ? 'toolUse' : 'stop',
+        }
+        stream.push({ type: 'done', reason: hasToolCalls ? 'toolUse' : 'stop', message: finalMsg })
+        stream.end(finalMsg)
+      } catch (err) {
+        const errorMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [],
+          api: 'openai-completions',
+          provider: 'openai',
+          model: config.model,
+          stopReason: 'error',
+          errorMessage: (err as Error).message,
+          usage: ZERO_USAGE,
+          timestamp: Date.now(),
+        }
+        stream.push({ type: 'error', reason: 'error', error: errorMsg })
+        stream.end(errorMsg)
+      }
+    })()
+
+    return stream
+  }
+}
+
+// ---- Pi AgentEvent → SSE ServerMessage ----
+// 在 emit 回调中处理，维护 SSE 流所需的状态
+interface SSEState {
+  send: SendFn
+  fullThinking: string
+  fullText: string
+  pending: string
+  suggestionsSeen: boolean
+  emittedSegmentRound: number
+  lastRoundHadThinking: boolean
+  producedArtifacts: ToolArtifact[]
+  toolCallCount: number
+}
+
+function createEventEmitter(state: SSEState, conversationId: string): (event: AgentEvent) => Promise<void> {
+  return async (event: AgentEvent) => {
+    switch (event.type) {
+      case 'agent_start':
+        // 内部事件，不发送 SSE
+        break
+
+      case 'turn_start':
+        // 内部事件，用于追踪 round
+        state.lastRoundHadThinking = false
+        break
+
+      case 'message_update': {
+        const sub = event.assistantMessageEvent
+        switch (sub.type) {
+          case 'text_delta': {
+            const token = sub.delta
+            state.fullText += token
+
+            if (state.suggestionsSeen) break
+
+            state.pending += token
+            const fenceIdx = state.pending.indexOf(SUGGESTIONS_FENCE)
+            if (fenceIdx !== -1) {
+              state.suggestionsSeen = true
+              const beforeFence = state.pending.slice(0, fenceIdx)
+              if (beforeFence) state.send({ type: 'token', text: beforeFence })
+              state.pending = ''
+              break
+            }
+
+            if (state.pending.length > SUGGESTIONS_FENCE.length) {
+              const safeLen = state.pending.length - SUGGESTIONS_FENCE.length
+              state.send({ type: 'token', text: state.pending.slice(0, safeLen) })
+              state.pending = state.pending.slice(safeLen)
+            }
+            break
+          }
+          case 'thinking_delta': {
+            const t = sub.delta
+            if (!t) break
+            // 每轮第一条 thinking 前注入分隔符
+            if (state.emittedSegmentRound !== state.toolCallCount) {
+              state.emittedSegmentRound = state.toolCallCount
+              const header = THINKING_SEGMENT_OPEN + (state.toolCallCount + 1) + THINKING_SEGMENT_CLOSE
+              state.fullThinking += header
+              state.send({ type: 'thinking', text: header, round: state.toolCallCount })
+            }
+            state.fullThinking += t
+            state.send({ type: 'thinking', text: t, round: state.toolCallCount })
+            state.lastRoundHadThinking = true
+            break
+          }
+          // start / end / toolcall_* 事件由 Pi 循环处理，我们不额外处理
+        }
+        break
+      }
+
+      case 'tool_execution_start': {
+        const input = typeof event.args === 'object' && event.args !== null ? event.args as Record<string, unknown> : {}
+        state.send({ type: 'tool_execution_start', id: event.toolCallId, name: event.toolName, input })
+        break
+      }
+
+      case 'tool_execution_end': {
+        const result = event.result as AgentToolResult<any> | undefined
+        const summary = result?.content?.[0] && 'text' in result.content[0]
+          ? (result.content[0] as TextContent).text
+          : (event.isError ? `Tool error: ${event.toolName}` : `${event.toolName} completed`)
+        const artifacts = (result?.details as any)?.artifacts as ToolArtifact[] | undefined
+
+        if (artifacts?.length) {
+          state.producedArtifacts.push(...artifacts)
+        }
+
+        state.send({
+          type: 'tool_result',
+          id: event.toolCallId,
+          name: event.toolName,
+          summary,
+          artifacts: artifacts?.map((a) => ({
+            filename: a.filename,
+            displayName: a.displayName,
+            mimeType: a.mimeType,
+            downloadUrl: a.downloadUrl,
+          })),
+        })
+        break
+      }
+
+      case 'turn_end':
+        state.toolCallCount++
+        break
+
+      case 'agent_end': {
+        // 从 messages 中提取最终回复
+        const assistantMsgs = event.messages.filter((m) => m.role === 'assistant')
+        let replyText = ''
+        if (assistantMsgs.length > 0) {
+          const lastAssistant = assistantMsgs[assistantMsgs.length - 1] as AssistantMessage
+          replyText = (lastAssistant.content || [])
+            .filter((c): c is TextContent => c.type === 'text')
+            .map((c) => c.text)
+            .join('')
+        }
+
+        // Flush pending buffer
+        if (state.pending.length > 0) {
+          const fenceIdx = state.pending.indexOf(SUGGESTIONS_FENCE)
+          if (fenceIdx > 0) {
+            state.send({ type: 'token', text: state.pending.slice(0, fenceIdx) })
+          } else if (fenceIdx === -1) {
+            state.send({ type: 'token', text: state.pending })
+          }
+          state.pending = ''
+        }
+
+        const { reply, suggestions } = parseSuggestions(replyText || state.fullText)
+        state.send({
+          type: 'done',
+          reply: reply || '（已完成思考但未能给出有效回答。请换一种问法重试。）',
+          suggestions,
+        })
+        break
+      }
+
+      // message_start / message_end / tool_execution_update / compaction_* 暂不处理
+    }
+  }
+}
+
+// ---- ChatMessage 历史 → Pi AgentMessage 初始化 ----
+function chatHistoryToAgentMessages(history: ChatMessage[], systemPrompt: string): AgentMessage[] {
+  const result: AgentMessage[] = []
+
+  for (const msg of history) {
+    switch (msg.role) {
+      case 'user': {
+        const content = typeof msg.content === 'string'
+          ? msg.content
+          : (msg.content as ContentPart[])?.map((c) => {
+            if (c.type === 'image_url') return { type: 'image_url' as const, image_url: c.image_url }
+            return { type: 'text' as const, text: c.text }
+          }) || ''
+        result.push({
+          role: 'user',
+          content: content as string | ({ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } })[],
+          timestamp: Date.now(),
+        } as AgentMessage)
+        break
+      }
+      case 'assistant': {
+        const blocks: (TextContent | ThinkingContent | ToolCall)[] = []
+        if (msg.content) {
+          blocks.push({ type: 'text', text: msg.content as string })
+        }
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            blocks.push({
+              type: 'toolCall',
+              id: tc.id,
+              name: tc.function.name,
+              arguments: tc.function.arguments ? JSON.parse(tc.function.arguments) : {},
+            } as ToolCall)
+          }
+        }
+        result.push({
+          role: 'assistant',
+          content: blocks,
+          api: 'openai-completions',
+          provider: 'openai',
+          model: '',
+          stopReason: msg.tool_calls?.length ? 'toolUse' : 'stop',
+          usage: ZERO_USAGE,
+          timestamp: Date.now(),
+        } as AgentMessage)
+        break
+      }
+      case 'tool': {
+        result.push({
+          role: 'toolResult',
+          toolCallId: msg.tool_call_id || '',
+          toolName: '',
+          content: [{ type: 'text', text: msg.content as string || '' }],
+          isError: false,
+        } as AgentMessage)
+        break
+      }
+      // system 消息不放入历史（已在 systemPrompt 中处理）
+    }
+  }
+
+  return result
+}
+
+// ---- parseSuggestions（从 loop.ts 迁移）----
+function parseSuggestions(text: string): { reply: string; suggestions: string[] } {
+  const fenceIdx = text.lastIndexOf(SUGGESTIONS_FENCE)
+  if (fenceIdx === -1) {
+    return { reply: text.trimEnd(), suggestions: [] }
+  }
+
+  const reply = text.slice(0, fenceIdx).trimEnd()
+  const afterFence = text.slice(fenceIdx + SUGGESTIONS_FENCE.length)
+  const closeFence = afterFence.indexOf('```')
+  const block = closeFence !== -1 ? afterFence.slice(0, closeFence) : afterFence
+
+  const suggestions = block
+    .split('\n')
+    .map((l) => l.replace(/^[\s-*\d.]+/, '').trim())
+    .filter(Boolean)
+    .slice(0, 3)
+
+  return { reply, suggestions }
+}
+
+// ---- 构建 AgentLoopConfig ----
+function buildLoopConfig(config: AppConfig): AgentLoopConfig {
+  return {
+    model: {
+      id: config.model,
+      name: config.model,
+      api: 'openai-completions',
+      provider: 'openai',
+      baseUrl: config.api_endpoint,
+      input: ['text', 'image'] as const,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 100000,
+      reasoning: false,
+    } as Model<any>,
+    maxTokens: 100000,
+    convertToLlm: (messages: AgentMessage[]): Message[] => {
+      // Default conversion: AgentMessage[] → Message[] (identity for standard messages)
+      return messages as Message[]
+    },
+    toolExecution: 'parallel',
+  }
+}
+
+// ---- 入口函数 ----
+export async function runPiAgentLoop(
+  userMessage: string | ContentPart[],
+  history: ChatMessage[],
+  send: SendFn,
+  signal?: AbortSignal,
+  thinkingMode = true,
+  conversationId?: string,
+  userId?: string,
+): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[] }> {
+  const config = await getConfig()
+  const convId = conversationId || 'default'
+
+  // 1. 构建系统提示词
+  const systemPrompt = buildSystemPrompt(config, thinkingMode)
+
+  // 2. 构建工具上下文
+  const toolCtx: ToolContext = {
+    conversationId: convId,
+    userId: userId || 'anonymous',
+    workspace: new SandboxFS(convId),
+    signal,
+  }
+
+  // 3. 创建 Pi 工具
+  const tools = createToolAdapter(toolCtx)
+
+  // 4. 构建 Pi AgentContext
+  const context: AgentContext = {
+    systemPrompt,
+    messages: chatHistoryToAgentMessages(history, systemPrompt),
+    tools,
+  }
+
+  // 5. 构建用户消息
+  const userContent = typeof userMessage === 'string'
+    ? userMessage
+    : userMessage.map((c) => {
+      if (c.type === 'image_url') return { type: 'image_url' as const, image_url: c.image_url }
+      return { type: 'text' as const, text: c.text }
+    })
+
+  const promptMessage: AgentMessage = {
+    role: 'user',
+    content: userContent as string | ({ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } })[],
+    timestamp: Date.now(),
+  } as AgentMessage
+
+  // 6. 构建 AgentLoopConfig
+  const loopConfig = buildLoopConfig(config)
+
+  // 7. 创建 StreamFn
+  const streamFn = createStreamFn(config, thinkingMode)
+
+  // 8. SSE 状态
+  const sseState: SSEState = {
+    send,
+    fullThinking: '',
+    fullText: '',
+    pending: '',
+    suggestionsSeen: false,
+    emittedSegmentRound: -1,
+    lastRoundHadThinking: false,
+    producedArtifacts: [],
+    toolCallCount: 0,
+  }
+
+  // 9. 事件发射器
+  const emit = createEventEmitter(sseState, convId)
+
+  // 10. 启动 Pi Agent 循环
+  try {
+    await runAgentLoop(
+      [promptMessage],
+      context,
+      loopConfig,
+      emit,
+      signal,
+      streamFn,
+    )
+  } catch (err) {
+    send({ type: 'error', message: err instanceof Error ? err.message : 'Unknown error' })
+    return { reply: '', suggestions: [], thinking: sseState.fullThinking }
+  }
+
+  // 11. 解析最终回复
+  const { reply, suggestions } = parseSuggestions(sseState.fullText)
+
+  return {
+    reply: reply || sseState.fullText || '（已完成思考但未能给出有效回答。请换一种问法重试。）',
+    suggestions,
+    thinking: sseState.fullThinking,
+    artifacts: sseState.producedArtifacts.length > 0 ? sseState.producedArtifacts : undefined,
+  }
+}

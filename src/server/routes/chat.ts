@@ -5,7 +5,7 @@ import fs from 'fs'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
 import { eq } from 'drizzle-orm'
-import { runChatLoop } from '../ai/loop.js'
+import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage, Attachment } from '../../shared/types.js'
 import { randomUUID } from 'crypto'
@@ -177,7 +177,7 @@ chatRoute.post('/', async (c) => {
       }
 
       // --- Run AI loop ---
-      const { reply, suggestions, thinking, artifacts } = await runChatLoop(
+      const { reply, suggestions, thinking, artifacts } = await runPiAgentLoop(
         userMessage, history, send, undefined,
         thinking_mode !== false, convId, userId,
       )

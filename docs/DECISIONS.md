@@ -331,7 +331,9 @@
 
 ---
 
-## D17：Pi 式并行批执行——工具调用并发执行
+## D17：Pi 式并行批执行——工具调用并发执行（已被 D21 取代）
+
+> ⚠️ **本决策已被 [D21](#d21pi-agent-core-迁移) 取代。** Pi 的 `runAgentLoop()` 原生支持 `toolExecution: 'parallel'`，无需自研并发执行逻辑。保留原文以记录自己实现时的权衡脉络。
 
 **日期**：2026-09-04
 
@@ -348,7 +350,9 @@
 
 ---
 
-## D18：write_file 防循环从硬拒绝改为软提醒
+## D18：write_file 防循环从硬拒绝改为软提醒（已被 D21 取代）
+
+> ⚠️ **本决策已被 [D21](#d21pi-agent-core-迁移) 取代。** write_file 节制现在通过系统提示词中的硬性规则约束，不再需要在代码中维护写文件计数器。
 
 **日期**：2026-09-04
 
@@ -376,7 +380,9 @@
 
 ---
 
-## D20：漂移检测——连续重复工具批次终止
+## D20：漂移检测——连续重复工具批次终止（已被 D21 取代）
+
+> ⚠️ **本决策已被 [D21](#d21pi-agent-core-迁移) 取代。** 漂移检测现在通过系统提示词中的「防漂移·硬性规则」约束，不再需要代码中维护 `lastToolBatchSig` 变量。
 
 **日期**：2026-09-04
 
@@ -387,3 +393,45 @@
 **原因**：系统提示词约束不够强，需要硬性检测；签名基于 (name + arguments) 的联合字符串，避免误判参数不同的合法重复调用。
 
 **影响**：新增 `lastToolBatchSig` 变量；`batchSig === lastToolBatchSig` 时 break 收口
+
+---
+
+## D21：Pi Agent Core 迁移——用成熟内核替换自研 Agent 循环
+
+**日期**：2026-09-07
+
+**背景**：项目自研 496 行 Agent 循环 (`src/server/ai/loop.ts`) 包含大量代码补丁：漂移检测 (`lastToolBatchSig`)、write_file 计数 (`writeFileCount`)、批量终止 (`terminate` 信号)、`finishReason='length'` 保护、收尾轮追加 (`runFinalAnswerRound`)、空回复兜底 (`lastFullText`)。这些补丁存在恰说明系统提示词不够强——一个真正好的 Agent 循环应让模型通过提示词自控，而非靠代码硬控。
+
+**决策**：用 `@earendil-works/pi-agent-core` 的 `runAgentLoop()` 生成器替换自研循环，将代码补丁翻译为系统提示词硬性规则。
+
+**原因**：
+- `runAgentLoop()` 工业级成熟度：多轮工具调用、并行执行、事件流、compaction 全部内置，无需自研
+- 代码量从 496 行自研循环 → 741 行适配层（含强提示词、工具适配、事件映射、消息转换），后者是声明式胶水代码而非控制流逻辑
+- 代码补丁逻辑转为提示词规则后，模型行为由「程序硬控」变为「AI 自觉遵守」，更符合 Agent 设计哲学
+- 移除自研循环消除了 5 个代码补丁类别的维护负担（漂移、写文件计数、终止、length 保护、兜底）
+- 工具参数校验从自研 JSON Schema 升级为 TypeBox 严格类型校验
+
+**技术细节**：
+- `pi-adapter.ts`（741 行）为适配层，包含：
+  - `buildSystemPrompt()`：系统提示词，新增防漂移、写文件节制、工具节制三条硬性规则
+  - `createToolAdapter()`：将 10 个 ToolModule 包装为 Pi AgentTool（TypeBox 参数 schema）
+  - `createStreamFn()`：包装 `provider.ts` 为 Pi 兼容 `StreamFn`
+  - `createEventEmitter()`：Pi `AgentEvent` → SSE `ServerMessage` 映射（含 suggestions fence 缓冲、思考片段注入）
+  - `chatHistoryToAgentMessages()`：`ChatMessage[]` → Pi `AgentMessage[]` 转换
+  - `runPiAgentLoop()`：入口函数，编排以上所有组件
+- `chat.ts` 仅替换一行 import 和调用（`runChatLoop` → `runPiAgentLoop`），其余逻辑不变
+- Pi 的 `AgentLoopConfig` 无 `maxToolRounds` 字段——模型自行决定何时停止，系统提示词中的「工具节制」规则替代了硬性轮次上限
+
+**取代的决策**：D17（Pi 式并行）、D18（write_file 软提醒）、D20（漂移检测）
+
+**备选与权衡**：
+- ❌ 继续修补自研循环：代码补丁会越积越多，与「用提示词引导行为」的设计哲学背道而驰
+- ❌ 使用 `pi-coding-agent`（TUI/CLI 完整框架）：引入 ModelRuntime、ResourceLoader、CLI 等不需要的依赖，过度耦合
+- ⚠️ 移除 `maxToolRounds` 硬性安全网：模型可能无限循环——但系统提示词中的「工具节制」规则 + Pi 自身的 compaction 机制提供了替代保护
+
+**影响**：
+- 删除 `src/server/ai/loop.ts`（496 行）
+- 新增 `src/server/ai/pi-adapter.ts`（741 行）
+- 新增依赖：`@earendil-works/pi-agent-core`、`@earendil-works/pi-ai`、`@sinclair/typebox`
+- `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 更新
+- 冒烟测试通过：流式对话、思考模式分段、工具调用、多轮工具、suggestions 解析全部正常

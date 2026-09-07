@@ -37,11 +37,11 @@
 │  └────────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │                     业务逻辑层                              │  │
-│  │  ┌─────────────┐  ┌───────────────┐  ┌────────────────┐  │  │
-│  │  │  ai/loop.ts │  │   tools/      │  │  skills/       │  │  │
-│  │  │ 聊天循环     │  │  内置工具系统  │  │  loader.ts     │  │  │
-│  │  │ (Pi 式设计)  │  │  (沙盒执行)   │  │  + registry    │  │  │
-│  │  └─────────────┘  └───────────────┘  └────────────────┘  │  │
+│  │  ┌──────────────────┐  ┌───────────────┐  ┌────────────────┐  │  │
+│  │  │ ai/pi-adapter.ts │  │   tools/      │  │  skills/       │  │  │
+│  │  │ Pi Agent Core    │  │  内置工具系统  │  │  loader.ts     │  │  │
+│  │  │ 适配层           │  │  (沙盒执行)   │  │  + registry    │  │  │
+│  │  └──────────────────┘  └───────────────┘  └────────────────┘  │  │
 │  │  ┌─────────────┐  ┌───────────────┐  ┌────────────────┐  │  │
 │  │  │ai/provider  │  │  config.ts    │  │   auth.ts      │  │  │
 │  │  │ API 客户端   │  │  配置管理      │  │  PIN+JWT 认证  │  │  │
@@ -72,27 +72,19 @@
   → 加载历史消息（最近 20 条）
   → 解析附件（图片→base64 多模态、xlsx→csv、pdf→text）
   → 文档附件复制到对话工作区（docx/pptx/xlsx/pdf）
-  → runChatLoop()（Pi 式设计：循环决定「下一步做什么」，程序提供能力并执行）
-    → buildSystemPrompt()（注入技能摘要 + 工具使用规范 + 格式指令）
-    → streamChatCompletion()（调用 OpenAI 兼容 API）
+  → runPiAgentLoop()（基于 @earendil-works/pi-agent-core 内核）
+    → buildSystemPrompt()（注入技能摘要 + 工具使用规范 + 防漂移/写文件节制/工具节制规则）
+    → createToolAdapter()（将 ToolModule 包装为 Pi AgentTool，TypeBox 参数校验）
+    → createStreamFn()（包装 provider.ts 为 Pi 兼容 StreamFn）
+    → runAgentLoop()（Pi 原生 Agent 循环，内置多轮工具调用 + 并行执行）
       → 逐 token 流式输出（SSE event: token）
-      → 流式输出思考过程（SSE event: thinking）
-      → 如果 finishReason == 'tool_calls'：
-          → 回填 assistant 消息（含 tool_calls）到上下文
-          → 发送 tool_execution_start 事件（SSE event: tool_execution_start）
-          → 并行执行所有工具（Promise.all），结果按模型发起顺序逐个回填
-          → write_file 温和提醒：每回合第 2 次调用仅提示，不做硬拒绝
-          → 工具产物（artifacts）通过 SSE 下发下载链接
-          → 将结果追加到消息上下文
-          → 漂移检测：同一批 (tool + args) 被连续调用两次 → 强制终止工具阶段
-          → 批终止检测：本批所有工具都返回 terminate: true → 提前收口
-          → 继续下一轮循环（最多 5 轮，MAX_TOOL_ROUNDS = 5）
-      → 如果 finishReason == 'length'（输出 token 上限截断）：
-          → 跳过工具执行，回填「未执行」错误结果，让模型用文本收尾
+      → 流式输出思考过程（SSE event: thinking，含分隔符分段）
+      → 工具调用：Pi 自动管理 tool_execution_start/end 事件
+      → 工具产物（artifacts）通过 SSE 下发下载链接
+      → 系统提示词硬性规则约束（防漂移、写文件节制、工具节制）
       → 最终回复（统一收口）：
           → 解析 suggestions 代码块
           → 发送 done 事件（完整回复 + 建议 + artifacts）
-          → 保底兜底：使用最近一次流式正文（lastFullText），绝不空回复
   → 保存助手消息到 DB（含 thinking、suggestions、artifacts 作为 attachments）
   → 客户端收到 done → 更新 UI → 刷新对话列表
 ```
@@ -148,8 +140,11 @@ AppConfig 字段：
 ```
 routes/chat.ts
   ├── health (GET /api/chat/health)
-  ├── ai/loop.ts
-  │     ├── ai/provider.ts（API 客户端）
+  ├── ai/pi-adapter.ts（Pi Agent Core 适配层）
+  │     ├── @earendil-works/pi-agent-core（runAgentLoop）
+  │     ├── @earendil-works/pi-ai（createAssistantMessageEventStream）
+  │     ├── @sinclair/typebox（工具参数 schema）
+  │     ├── ai/provider.ts（API 客户端——被 createStreamFn 包装）
   │     ├── ai/tools.ts（工具注册表 → 委托到 tools/registry.ts）
   │     ├── tools/registry.ts（内置工具聚合）
   │     │     ├── tools/file-tools.ts（read_file / write_file）

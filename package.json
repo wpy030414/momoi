@@ -13,6 +13,8 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-ai": "^0.85.1",
     "@hono/node-server": "^1.14.0",
     "@hono/node-ws": "^1.1.0",
     "@libsql/client": "^0.14.0",
@@ -22,6 +24,7 @@
     "@radix-ui/react-slot": "^1.1.0",
     "@radix-ui/react-tabs": "^1.1.0",
     "@radix-ui/react-tooltip": "^1.1.0",
+    "@sinclair/typebox": "^0.34.52",
     "adm-zip": "^0.6.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
