@@ -11,7 +11,7 @@ import { MenuDialog } from './components/settings/MenuDialog'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { Button } from './components/ui/button'
-import { PanelLeft, Plus, X, Check } from 'lucide-react'
+import { PanelLeft, X, Check } from 'lucide-react'
 import { api, getUser, setToken } from './lib/api'
 
 export function App() {
@@ -52,8 +52,19 @@ export function App() {
   }
 
   // Open group agent management dialog
-  const handleManageGroupAgents = (convId: string) => {
+  const handleManageGroupAgents = async (convId: string) => {
     setGroupManageConvId(convId)
+    // Pre-fetch current agents so the selection is initialized correctly
+    try {
+      const res = await api.getConversation(convId)
+      if (res.agents) {
+        setSelectedGroupAgents(res.agents.map((a: { id: string }) => a.id))
+      } else {
+        setSelectedGroupAgents(chat.groupAgents.map((a: { id: string }) => a.id))
+      }
+    } catch {
+      setSelectedGroupAgents(chat.groupAgents.map((a: { id: string }) => a.id))
+    }
     setGroupManageOpen(true)
   }
 
@@ -336,70 +347,75 @@ export function App() {
         </div>
       )}
 
-      {/* Group Member Management Dialog */}
-      {groupManageOpen && groupManageConvId && (() => {
-        const currentGroupAgents = chat.groupAgents
-        const availableAgents = agents.filter((a) => !currentGroupAgents.some((ga: { id: string }) => ga.id === a.id))
-        return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="bg-card rounded-xl border shadow-lg p-6 w-full max-w-sm mx-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">{t('sidebar.groupMembers')}</h3>
-                <button onClick={() => { setGroupManageOpen(false); setGroupManageConvId(null) }} className="hover:bg-muted rounded-md p-1">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground mb-2">{t('chat.currentMembers')}</p>
-              <div className="space-y-1.5 mb-4">
-                {currentGroupAgents.map((agent: { id: string; name: string; avatar: string }) => (
-                  <div key={agent.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border">
+      {/* Group Member Management Dialog (same UI as new group agent selection) */}
+      {groupManageOpen && groupManageConvId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-card rounded-xl border shadow-lg p-6 w-full max-w-sm mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">{t('sidebar.groupMembers')}</h3>
+              <button onClick={() => { setGroupManageOpen(false); setGroupManageConvId(null); setSelectedGroupAgents([]) }} className="hover:bg-muted rounded-md p-1">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">{t('chat.minAgentsRequired')}</p>
+            <div className="space-y-2 mb-6">
+              {agents.map((agent) => {
+                const isSelected = selectedGroupAgents.includes(agent.id)
+                return (
+                  <button
+                    key={agent.id}
+                    onClick={() => {
+                      setSelectedGroupAgents((prev) =>
+                        isSelected ? prev.filter((id) => id !== agent.id) : [...prev, agent.id],
+                      )
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
+                      isSelected ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
+                    }`}
+                  >
                     {agent.avatar ? (
-                      <img src={agent.avatar} alt={agent.name} className="w-7 h-7 rounded-full object-cover" />
+                      <img src={agent.avatar} alt={agent.name} className="w-8 h-8 rounded-full object-cover" />
                     ) : (
-                      <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
+                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium">
                         {agent.name.charAt(0)}
                       </div>
                     )}
-                    <span className="flex-1 text-sm font-medium">{agent.name}</span>
-                    {currentGroupAgents.length > 2 && (
-                      <button onClick={() => chat.removeAgentFromGroup(agent.id)} className="text-xs text-destructive hover:underline">
-                        {t('chat.removeAgent')}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-              {availableAgents.length > 0 && (
-                <>
-                  <p className="text-xs text-muted-foreground mb-2">{t('chat.addAgent')}</p>
-                  <div className="space-y-1.5 mb-4">
-                    {availableAgents.map((agent) => (
-                      <button
-                        key={agent.id}
-                        onClick={() => chat.addAgentToGroup(agent.id)}
-                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                      >
-                        {agent.avatar ? (
-                          <img src={agent.avatar} alt={agent.name} className="w-7 h-7 rounded-full object-cover" />
-                        ) : (
-                          <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
-                            {agent.name.charAt(0)}
-                          </div>
-                        )}
-                        <span className="flex-1 text-left text-sm">{agent.name}</span>
-                        <Plus className="h-4 w-4 text-muted-foreground" />
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-              <Button className="w-full" onClick={() => { setGroupManageOpen(false); setGroupManageConvId(null) }}>
+                    <span className="flex-1 text-left text-sm font-medium">{agent.name}</span>
+                    {isSelected && <Check className="h-4 w-4 text-primary" />}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => { setGroupManageOpen(false); setGroupManageConvId(null); setSelectedGroupAgents([]) }}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={selectedGroupAgents.length < 2}
+                onClick={async () => {
+                  if (selectedGroupAgents.length < 2) return
+                  const currentIds = chat.groupAgents.map((a: { id: string }) => a.id)
+                  const toAdd = selectedGroupAgents.filter((id) => !currentIds.includes(id))
+                  const toRemove = currentIds.filter((id: string) => !selectedGroupAgents.includes(id))
+                  // Batch add/remove
+                  for (const id of toAdd) await chat.addAgentToGroup(id)
+                  for (const id of toRemove) await chat.removeAgentFromGroup(id)
+                  setGroupManageOpen(false)
+                  setGroupManageConvId(null)
+                  setSelectedGroupAgents([])
+                }}
+              >
                 {t('common.confirm')}
               </Button>
             </div>
           </div>
-        )
-      })()}
+        </div>
+      )}
     </div>
   )
 }
