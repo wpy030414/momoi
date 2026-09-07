@@ -11,6 +11,29 @@ const DEFAULT_TIMEOUT_SEC = 30
 const MAX_TIMEOUT_SEC = 120
 const MAX_OUTPUT_CHARS = 30_000
 
+/**
+ * 子进程环境变量剔除名单（精确匹配，大写）。
+ * 进程 env 被完整继承，而目录沙盒只约束 cwd——`set` / `echo %VAR%` 可以读出
+ * 任意环境变量（包括 .env 注入的密钥），因此敏感 key 必须单独剔除。
+ * 新增密钥时优先走下方 *_API_KEY / *_TOKEN 等通用规则，特例才加进此名单。
+ */
+const BLOCKED_ENV_VARS = [
+  'ADMIN_KEY',
+]
+
+/** 剔除敏感变量后构造子进程 env（精确名单 + 通用规则） */
+function scrubEnv(): NodeJS.ProcessEnv {
+  const scrubbed: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue
+    const upper = key.toUpperCase()
+    if (BLOCKED_ENV_VARS.includes(upper)) continue
+    if (/(_API_?KEY|_TOKEN|_SECRET|PASSWORD|PASSWD|CREDENTIAL)/.test(upper)) continue
+    scrubbed[key] = value
+  }
+  return scrubbed
+}
+
 /** 破坏性系统命令黑名单（子串匹配，大小写不敏感） */
 const BLOCKED_SNIPPETS = [
   // 清盘 / 格式化 / 整盘写入
@@ -35,7 +58,7 @@ const BLOCKED_SNIPPETS = [
 export const bashTool: ToolModule = {
   definition: {
     name: 'bash',
-    description: 'Execute a shell command in a sandboxed workspace (受限 bash)。用于运行 openyida 等 CLI 工具、处理文件或执行脚本。命令在工作区沙盒目录下运行，带超时与输出截断；破坏性系统命令（格式化/清盘/关机/删除整盘等）会被拦截。',
+    description: 'Execute a shell command in a sandboxed workspace (受限 bash)。用于运行 openyida 等 CLI 工具、处理文件或执行脚本。命令在工作区沙盒目录下运行，带超时与输出截断；破坏性系统命令（格式化/清盘/关机/删除整盘等）会被拦截；含密钥的环境变量（API key / token / 密码等）不会传给子进程。',
     input_schema: {
       type: 'object',
       properties: {
@@ -98,7 +121,7 @@ export const bashTool: ToolModule = {
 
       const child = spawn(shell, isWin ? ['/d', '/s', '/c', full] : ['-c', full], {
         cwd,
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        env: { ...scrubEnv(), PYTHONIOENCODING: 'utf-8' },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         shell: false,
