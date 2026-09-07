@@ -15,6 +15,7 @@ export interface Conversation {
   id: string
   title: string
   agent_id: string
+  type: 'direct' | 'group'
   created_at: number
   updated_at: number
 }
@@ -29,6 +30,7 @@ export interface Message {
   tool_call_id?: string | null
   suggestions?: string[] | null
   attachments?: Attachment[] | null
+  agent_id?: string | null
   created_at: number
 }
 
@@ -95,13 +97,19 @@ export type { ThinkingSegment } from './thinking.js'
 
 export type ServerMessage =
   | { type: 'conversation_id'; id: string }
-  | { type: 'token'; text: string }
-  | { type: 'thinking'; text: string; round?: number }
-  | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_execution_start'; id?: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; id?: string; name: string; summary: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }
-  | { type: 'done'; reply: string; suggestions: string[] }
-  | { type: 'error'; message: string }
+  | { type: 'token'; text: string; agent_id?: string; agent_name?: string }
+  | { type: 'thinking'; text: string; round?: number; agent_id?: string; agent_name?: string }
+  | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown>; agent_id?: string; agent_name?: string }
+  | { type: 'tool_execution_start'; id?: string; name: string; input: Record<string, unknown>; agent_id?: string; agent_name?: string }
+  | { type: 'tool_result'; id?: string; name: string; summary: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }>; agent_id?: string; agent_name?: string }
+  | { type: 'agent_start'; agent_id: string; agent_name: string }
+  | { type: 'agent_done'; agent_id: string; agent_name: string; reply: string; suggestions: string[] }
+  | { type: 'group_start'; agent_ids: string[] }
+  | { type: 'group_done'; infinite?: boolean }
+  | { type: 'follow_up'; text: string }
+  | { type: 'infinite_mode_off' }
+  | { type: 'done'; reply: string; suggestions: string[]; agent_id?: string; agent_name?: string; infinite?: boolean }
+  | { type: 'error'; message: string; agent_id?: string; agent_name?: string }
 
 // ---- Admin Auth ----
 

@@ -1,10 +1,11 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core'
 
 export const conversations = sqliteTable('conversations', {
   id: text('id').primaryKey(),
   user_id: text('user_id').notNull().default(''),
   title: text('title').notNull().default('新对话'),
   agent_id: text('agent_id').notNull().default(''),
+  type: text('type').notNull().default('direct'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
 })
@@ -19,6 +20,7 @@ export const messages = sqliteTable('messages', {
   tool_call_id: text('tool_call_id'),
   suggestions: text('suggestions'),
   attachments: text('attachments'),
+  agent_id: text('agent_id'),
   created_at: integer('created_at').notNull(),
 })
 
@@ -35,3 +37,11 @@ export const agents = sqliteTable('agents', {
   avatar: text('avatar').notNull().default(''),
   created_at: integer('created_at').notNull(),
 })
+
+export const groupConversationAgents = sqliteTable('group_conversation_agents', {
+  conversation_id: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  agent_id: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  sort_order: integer('sort_order').notNull().default(0),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.conversation_id, table.agent_id] }),
+}))

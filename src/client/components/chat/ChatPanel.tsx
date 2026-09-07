@@ -4,16 +4,24 @@ import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import type { Attachment, ThinkingSegment } from '@/shared/types'
 
+interface AgentBrief {
+  id: string
+  name: string
+  avatar: string
+}
+
 interface ChatMessage {
   id?: number
   role: 'user' | 'assistant'
   content: string
   thinking?: string
   thinkingSegments?: ThinkingSegment[]
-  toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string }>
+  toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
   suggestions?: string[]
   attachments?: Attachment[]
   streaming?: boolean
+  agent_id?: string | null
+  agent_name?: string | null
 }
 
 interface ChatPanelProps {
@@ -24,12 +32,24 @@ interface ChatPanelProps {
   onRevert: (index: number) => Promise<string | null>
   backgroundImage?: string
   supportAttachments?: boolean
-  agents?: Array<{ id: string; name: string; avatar: string }>
+  agents?: AgentBrief[]
   selectedAgentId?: string | null
   onAgentChange?: (id: string) => void
+  /** Group chat mode */
+  isGroup?: boolean
+  groupAgents?: AgentBrief[]
+  onSendGroup?: (text: string, thinkingMode: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => void
+  /** Infinite mode */
+  infiniteMode?: boolean
+  onInfiniteModeChange?: (enabled: boolean) => void
 }
 
-export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, backgroundImage, supportAttachments, agents, selectedAgentId, onAgentChange }: ChatPanelProps) {
+export function ChatPanel({
+  messages, loading, onSend, onCancel, onRevert, backgroundImage, supportAttachments,
+  agents, selectedAgentId, onAgentChange,
+  isGroup, groupAgents, onSendGroup,
+  infiniteMode = false, onInfiniteModeChange,
+}: ChatPanelProps) {
   const { t } = useTranslation()
   const bottomRef = useRef<HTMLDivElement>(null)
   const [revertedText, setRevertedText] = useState<string>('')
@@ -65,7 +85,11 @@ export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, backg
   }
 
   const handleSend = (text: string, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => {
-    onSend(text, thinkingMode, attachments, selectedAgentId)
+    if (isGroup && onSendGroup) {
+      onSendGroup(text, thinkingMode, attachments, infiniteMode)
+    } else {
+      onSend(text, thinkingMode, attachments, selectedAgentId, false, undefined, infiniteMode)
+    }
   }
 
   return (
@@ -86,19 +110,17 @@ export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, backg
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-4 relative z-10">
         {!hasMessages ? (
-          /* Empty state: greeting + agent selector + input, left-aligned */
           <div className="flex items-center justify-center h-full">
             <div className="w-full max-w-3xl">
-              {/* Greeting line: "<time>好，我是<Agent selector>" */}
               <div className="mb-4 px-4">
-                {hasAgents ? (
+                {isGroup ? (
+                  <h2 className="text-xl font-semibold">{t('chat.groupGreeting')}</h2>
+                ) : hasAgents ? (
                   <h2 className="text-xl font-semibold flex items-center gap-1 flex-wrap">
                     <span>{timeGreeting}{t('chat.greetingSuffix')}</span>
                     <select
                       value={selectedAgentId || ''}
-                      onChange={(e) => {
-                        onAgentChange?.(e.target.value)
-                      }}
+                      onChange={(e) => onAgentChange?.(e.target.value)}
                       className="text-xl font-semibold bg-transparent border-none outline-none cursor-pointer text-primary underline underline-offset-4 decoration-primary/30 hover:decoration-primary"
                     >
                       {agents!.map((a) => (
@@ -111,59 +133,52 @@ export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, backg
                 )}
               </div>
 
-              {loading ? (
-                <div className="px-4">
-                  <button
-                    onClick={onCancel}
-                    className="w-full h-10 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
-                  >
-                    {t('chat.stopGenerating')}
-                  </button>
-                </div>
-              ) : (
-                <InputBar
-                  onSend={handleSend}
-                  disabled={loading}
-                  externalValue={revertedText}
-                  onExternalValueConsumed={handleExternalValueConsumed}
-                  thinkingMode={thinkingMode}
-                  onThinkingModeChange={setThinkingMode}
-                  supportAttachments={supportAttachments}
-                  noAgents={!hasAgents}
-                />
-              )}
+              {loading ? <div className="px-4"><div className="h-10" /></div> : null}
+              <InputBar
+                onSend={handleSend}
+                disabled={loading}
+                externalValue={revertedText}
+                onExternalValueConsumed={handleExternalValueConsumed}
+                thinkingMode={thinkingMode}
+                onThinkingModeChange={setThinkingMode}
+                infiniteMode={infiniteMode}
+                onInfiniteModeChange={onInfiniteModeChange || (() => {})}
+                supportAttachments={supportAttachments}
+                noAgents={!isGroup && !hasAgents}
+              />
             </div>
           </div>
         ) : (
-          <MessageList messages={messages} onSuggestion={handleSend} onRevert={handleRevert} agentAvatar={selectedAgentAvatar} />
+          <MessageList
+            messages={messages}
+            onSuggestion={(text) => {
+              if (isGroup && onSendGroup) onSendGroup(text, thinkingMode, undefined, infiniteMode)
+              else onSend(text, thinkingMode, undefined, selectedAgentId, false, undefined, infiniteMode)
+            }}
+            onRevert={handleRevert}
+            agentAvatar={isGroup ? null : selectedAgentAvatar}
+            agents={isGroup ? (groupAgents || []) : undefined}
+          />
         )}
         <div ref={bottomRef} />
       </div>
 
-      {/* Input area — bottom-sticky, only when conversation has started */}
+      {/* Input area */}
       {hasMessages && (
         <div className="relative z-10">
-          {loading ? (
-            <div className="max-w-3xl mx-auto w-full px-4 pb-4">
-              <button
-                onClick={onCancel}
-                className="w-full h-10 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
-              >
-                {t('chat.stopGenerating')}
-              </button>
-            </div>
-          ) : (
-            <InputBar
-              onSend={handleSend}
-              disabled={loading}
-              externalValue={revertedText}
-              onExternalValueConsumed={handleExternalValueConsumed}
-              thinkingMode={thinkingMode}
-              onThinkingModeChange={setThinkingMode}
-              supportAttachments={supportAttachments}
-              noAgents={!hasAgents}
-            />
-          )}
+          {loading ? <div className="max-w-3xl mx-auto w-full px-4 pb-4"><div className="h-10" /></div> : null}
+          <InputBar
+            onSend={handleSend}
+            disabled={loading}
+            externalValue={revertedText}
+            onExternalValueConsumed={handleExternalValueConsumed}
+            thinkingMode={thinkingMode}
+            onThinkingModeChange={setThinkingMode}
+            infiniteMode={infiniteMode}
+            onInfiniteModeChange={onInfiniteModeChange || (() => {})}
+            supportAttachments={supportAttachments}
+            noAgents={!isGroup && !hasAgents}
+          />
         </div>
       )}
     </div>

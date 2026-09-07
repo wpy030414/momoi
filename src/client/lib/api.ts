@@ -74,11 +74,20 @@ export const api = {
 
   // Conversations
   listConversations: () => request<{ conversations: import('@/shared/types').Conversation[] }>('/api/conversations'),
-  getConversation: (id: string) => request<{ conversation: import('@/shared/types').Conversation; messages: import('@/shared/types').Message[] }>(`/api/conversations/${id}`),
+  getConversation: (id: string) => request<{ conversation: import('@/shared/types').Conversation; messages: import('@/shared/types').Message[]; agents?: Array<{ id: string; name: string; avatar: string }> }>(`/api/conversations/${id}`),
   createConversation: (title?: string) => request<{ conversation: import('@/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title }) }),
+  createGroupConversation: (agentIds: string[]) => request<{ conversation: import('@/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: '群组对话', type: 'group', agent_ids: agentIds }) }),
   deleteConversation: (id: string) => request<{ success: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   renameConversation: (id: string, title: string) => request<{ conversation: import('@/shared/types').Conversation }>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   revertMessages: (conversationId: string, messageId: number) => request<{ success: boolean }>(`/api/conversations/${conversationId}/messages/${messageId}`, { method: 'DELETE' }),
+
+  // Group Chat
+  getGroupAgents: (convId: string) => request<{ agents: Array<{ id: string; name: string; avatar: string }> }>(`/api/group/${convId}/agents`),
+  addGroupAgent: (convId: string, agentId: string) => request<{ success: boolean }>(`/api/group/${convId}/agents`, { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
+  removeGroupAgent: (convId: string, agentId: string) => request<{ success: boolean }>(`/api/group/${convId}/agents/${agentId}`, { method: 'DELETE' }),
+
+  // Infinite Mode
+  setInfiniteMode: (conversationId: string, enabled: boolean) => request<{ success: boolean; enabled: boolean }>('/api/chat/infinite-mode', { method: 'POST', body: JSON.stringify({ conversation_id: conversationId, enabled }) }),
 
   // App config
   getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; show_github: boolean; agents: Array<{ id: string; name: string; avatar: string }> }>('/api/app-name'),

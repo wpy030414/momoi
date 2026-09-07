@@ -18,6 +18,10 @@ interface ChatMessage {
   attachments?: Attachment[]
   streaming?: boolean
   created_at?: string
+  /** Group chat: which agent sent this message */
+  agent_id?: string | null
+  /** Group chat: agent display name */
+  agent_name?: string | null
 }
 
 const MAX_RETRIES = 3
@@ -31,6 +35,8 @@ export function useChat() {
   const [loading, setLoading] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const infiniteModeRef = useRef(false)
+  const infiniteDoneRef = useRef(false)  // set to true when infinite_mode_off received
 
   // Load conversations on mount
   useEffect(() => {
@@ -57,6 +63,7 @@ export function useChat() {
             toolCalls: m.tool_calls as any || undefined,
             suggestions: m.suggestions as any || undefined,
             attachments: m.attachments as any || undefined,
+            agent_id: m.agent_id ?? null,
           }))
         )
       })
@@ -86,10 +93,11 @@ export function useChat() {
               role: m.role as 'user' | 'assistant',
               content: m.content,
               thinking: m.thinking || undefined,
-            thinkingSegments: decodeThinkingToSegments(m.thinking),
+              thinkingSegments: decodeThinkingToSegments(m.thinking),
               toolCalls: m.tool_calls as any || undefined,
               suggestions: m.suggestions as any || undefined,
               attachments: m.attachments as any || undefined,
+              agent_id: m.agent_id ?? null,
             }))
           )
         })
@@ -115,13 +123,14 @@ export function useChat() {
     })
   }, [])
 
-  const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null) => {
+  const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean) => {
     if (!text.trim() || loading) return
 
     const userMsg: ChatMessage = { role: 'user', content: text, attachments }
     const assistantMsg: ChatMessage = { role: 'assistant', content: '', streaming: true, thinkingSegments: [] }
-    setMessages((prev) => [...prev, userMsg, assistantMsg])
+    setMessages((prev) => [...prev, userMsg, ...(groupMode ? [] : [assistantMsg])])
     setLoading(true)
+    infiniteModeRef.current = infiniteMode || false
 
     const abort = new AbortController()
     abortRef.current = abort
@@ -156,6 +165,9 @@ export function useChat() {
             _retry: isRetry,
             thinking_mode: thinkingMode,
             attachments: attachments || undefined,
+            conversation_type: groupMode ? 'group' : undefined,
+            agent_ids: groupMode && groupAgentIds ? groupAgentIds : undefined,
+            infinite_mode: infiniteMode || undefined,
           }),
           signal: abort.signal,
         })
@@ -277,6 +289,7 @@ export function useChat() {
             toolCalls: m.tool_calls as any || undefined,
             suggestions: m.suggestions as any || undefined,
             attachments: m.attachments as any || undefined,
+            agent_id: m.agent_id ?? null,
           }))
         )
       } catch {
@@ -395,6 +408,61 @@ export function useChat() {
           return [...prev.slice(0, -1), { ...last, content: t('chat.errorMessage', { message: msg.message }), streaming: false }]
         })
         break
+
+      // --- Group Chat Events ---
+      case 'agent_start':
+        // Start a new agent message bubble in group chat
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: '',
+            streaming: true,
+            agent_id: msg.agent_id,
+            agent_name: msg.agent_name,
+            thinkingSegments: [],
+          },
+        ])
+        break
+
+      case 'agent_done':
+        // Mark this agent's message as complete
+        setMessages((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant' || last.agent_id !== msg.agent_id) return prev
+          return [...prev.slice(0, -1), {
+            ...last,
+            content: msg.reply || last.content,
+            suggestions: msg.suggestions,
+            streaming: false,
+          }]
+        })
+        break
+
+      case 'group_done':
+        if (!infiniteModeRef.current) {
+          setLoading(false)
+        }
+        break
+
+      case 'infinite_mode_off':
+        // Server-side infinite mode ended (user turned off or hit 500 limit)
+        setLoading(false)
+        break
+
+      case 'follow_up':
+        // Infinite mode: neutral agent generated a follow-up question
+        // For direct chat: create user + new streaming assistant message
+        // For group chat: just create user message (agent_start will create agent bubbles)
+        setMessages((prev) => {
+          const isGroupChat = prev.some((m) => m.agent_id)
+          return [
+            ...prev,
+            { role: 'user', content: msg.text },
+            ...(isGroupChat ? [] : [{ role: 'assistant', content: '', streaming: true, thinkingSegments: [] }]),
+          ]
+        })
+        break
     }
   }
 
@@ -422,6 +490,7 @@ export function useChat() {
           toolCalls: m.tool_calls as any || undefined,
           suggestions: m.suggestions as any || undefined,
           attachments: m.attachments as any || undefined,
+          agent_id: m.agent_id ?? null,
         }))
       )
     } catch (err) {

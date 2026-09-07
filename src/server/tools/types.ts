@@ -4,6 +4,7 @@
 
 import type { ToolDefinition } from '../../shared/types.js'
 import type { SandboxFS } from './workspace.js'
+import type { MentionSignal } from './group-mention-tool.js'
 
 /** Context passed to every tool's execute function */
 export interface ToolContext {
@@ -11,6 +12,8 @@ export interface ToolContext {
   userId: string
   workspace: SandboxFS
   signal?: AbortSignal
+  /** Group chat: @mention signal shared between orchestrator and at_mention tool */
+  mentionSignal?: MentionSignal
 }
 
 /** Optional artifact: a file produced by a tool, surfaced to the user */

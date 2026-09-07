@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { db } from '../db.js'
-import { conversations, messages } from '../schema.js'
+import { conversations, messages, groupConversationAgents, agents } from '../schema.js'
 import { eq, and, desc, gte } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import path from 'path'
@@ -36,6 +36,22 @@ conversationsRoute.get('/:id', async (c) => {
 
   const msgs = await db.select().from(messages).where(eq(messages.conversation_id, id)).orderBy(messages.created_at).all()
 
+  // For group conversations, also return the agent list
+  let groupAgents: Array<{ id: string; name: string; avatar: string }> | undefined
+  if ((conv as any).type === 'group') {
+    const rows = await db.select({
+      agent_id: groupConversationAgents.agent_id,
+      name: agents.name,
+      avatar: agents.avatar,
+    })
+      .from(groupConversationAgents)
+      .innerJoin(agents, eq(groupConversationAgents.agent_id, agents.id))
+      .where(eq(groupConversationAgents.conversation_id, id))
+      .orderBy(groupConversationAgents.sort_order)
+      .all()
+    groupAgents = rows.map((r) => ({ id: r.agent_id, name: r.name, avatar: r.avatar }))
+  }
+
   return c.json({
     conversation: conv,
     messages: msgs.map((m) => ({
@@ -44,6 +60,7 @@ conversationsRoute.get('/:id', async (c) => {
       suggestions: m.suggestions ? JSON.parse(m.suggestions) : null,
       attachments: m.attachments ? JSON.parse(m.attachments) : null,
     })),
+    agents: groupAgents,
   })
 })
 
@@ -52,11 +69,28 @@ conversationsRoute.post('/', async (c) => {
   const userId = getUserId(c)
   if (!userId) return c.json({ error: 'Unauthorized' }, 401)
 
-  const body = await c.req.json<{ title?: string; agent_id?: string }>()
+  const body = await c.req.json<{ title?: string; agent_id?: string; type?: 'direct' | 'group'; agent_ids?: string[] }>()
   const id = randomUUID()
   const now = Math.floor(Date.now() / 1000)
 
-  await db.insert(conversations).values({ id, user_id: userId, title: body.title || 'New Chat', agent_id: body.agent_id || '', created_at: now, updated_at: now }).run()
+  await db.insert(conversations).values({
+    id, user_id: userId,
+    title: body.title || (body.type === 'group' ? '群组对话' : 'New Chat'),
+    agent_id: body.agent_id || '',
+    type: body.type || 'direct',
+    created_at: now, updated_at: now,
+  }).run()
+
+  // Insert group agent associations
+  if (body.type === 'group' && body.agent_ids && body.agent_ids.length > 0) {
+    for (let i = 0; i < body.agent_ids.length; i++) {
+      await db.insert(groupConversationAgents).values({
+        conversation_id: id,
+        agent_id: body.agent_ids[i],
+        sort_order: i,
+      }).run()
+    }
+  }
 
   const conv = await db.select().from(conversations).where(eq(conversations.id, id)).get()
   return c.json({ conversation: conv }, 201)

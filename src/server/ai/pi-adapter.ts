@@ -47,6 +47,8 @@ import { getConfig, getAgent, listAgents } from '../config.js'
 import { getAllTools } from './tools.js'
 import { resolveTool } from '../tools/registry.js'
 import type { ToolContext, ToolResult, ToolArtifact } from '../tools/types.js'
+import type { MentionSignal } from '../tools/group-mention-tool.js'
+import { createMentionTool } from '../tools/group-mention-tool.js'
 import { SandboxFS } from '../tools/workspace.js'
 import { skillRegistry } from '../skills/registry.js'
 import { streamChatCompletion } from './provider.js'
@@ -62,7 +64,7 @@ const ZERO_USAGE: Usage = {
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
-function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean): string {
+function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isGroup: boolean = false, infiniteMode: boolean = false): string {
   let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT
 
   // Append skill descriptions only
@@ -110,6 +112,32 @@ function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean): st
 \`\`\`
 `
 
+  if (infiniteMode) {
+    // 无限演算模式：不输出 suggestions 代码块（由中立 Agent 接管追问）
+    prompt = prompt.replace(/## 输出格式[\s\S]*?```\n`/, '')
+    prompt += `
+## 无限演算模式
+你正处于无限演算模式中。在此模式下：
+- 你不需要输出 \`\`\`suggestions 代码块
+- 你只需要自然地回复用户，像在聊天一样——可以很简短，也可以很详细
+- 回复完毕后，会有一位中立观察者根据上下文自动生成追问
+- 你可以像真人聊天一样使用括号动作描述，如（笑了笑）、（托腮思考）
+- 保持对话自然流畅，不要每轮都长篇大论
+`
+  }
+
+  if (isGroup) {
+    prompt += `
+## 群组对话规则
+你正在参与一个群组对话。其他 Agent 也可能回复用户。
+- 如果你需要某个特定 Agent 的专业知识来更好地回答用户问题，请使用 at_mention 工具 @他们。
+- 被 @ 的 Agent 会立即回复，其他 Agent 本轮会被跳过。
+- 只在你确实需要对方回答用户问题或提供互补知识时才使用 at_mention，不要为了社交而 @。
+- 不要 @ 你自己。
+- 每次对话最多使用一次 at_mention。
+`
+  }
+
   return prompt
 }
 
@@ -134,7 +162,7 @@ function jsonSchemaToTypeBox(properties: Record<string, { type: string; descript
 // ---- ToolModule → Pi AgentTool ----
 function createToolAdapter(toolCtx: ToolContext): AgentTool[] {
   const defs = getAllTools()
-  return defs.map((def) => {
+  const tools = defs.map((def) => {
     const toolModule = resolveTool(def.name)
     const schema = jsonSchemaToTypeBox(def.input_schema.properties || {}, def.input_schema.required || [])
 
@@ -180,6 +208,43 @@ function createToolAdapter(toolCtx: ToolContext): AgentTool[] {
     }
     return tool
   })
+
+  // Group chat: add @mention tool if mentionSignal is available
+  if (toolCtx.mentionSignal) {
+    const mentionToolModule = createMentionTool(toolCtx.mentionSignal)
+    const mentionSchema = jsonSchemaToTypeBox(
+      mentionToolModule.definition.input_schema.properties || {},
+      mentionToolModule.definition.input_schema.required || [],
+    )
+    const mentionTool: AgentTool = {
+      name: mentionToolModule.definition.name,
+      label: mentionToolModule.definition.name,
+      description: mentionToolModule.definition.description,
+      parameters: mentionSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<any>> => {
+        const input = (params && typeof params === 'object' ? params : {}) as Record<string, unknown>
+        const ctx: ToolContext = { ...toolCtx, signal: signal || toolCtx.signal }
+        let result: ToolResult
+        try {
+          result = await mentionToolModule.execute(input, ctx)
+        } catch (err) {
+          result = { summary: `Tool error: ${(err as Error).message}`, error: true }
+        }
+        const text = result.error ? `Error: ${result.summary}` : result.summary
+        return {
+          content: [{ type: 'text', text }],
+          details: { data: result.data, error: result.error },
+        }
+      },
+    }
+    tools.push(mentionTool)
+  }
+
+  return tools
 }
 
 // ---- Pi Message → ChatMessage 转换（streamFn 内部使用）----
@@ -655,6 +720,9 @@ export async function runPiAgentLoop(
   conversationId?: string,
   userId?: string,
   agentId?: string,
+  mentionSignal?: MentionSignal,
+  isGroup = false,
+  infiniteMode = false,
 ): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[] }> {
   const config = await getConfig()
 
@@ -681,7 +749,7 @@ export async function runPiAgentLoop(
   const convId = conversationId || 'default'
 
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt(agentSystemPrompt, thinkingMode)
+  const systemPrompt = buildSystemPrompt(agentSystemPrompt, thinkingMode, isGroup, infiniteMode)
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {
@@ -689,6 +757,7 @@ export async function runPiAgentLoop(
     userId: userId || 'anonymous',
     workspace: new SandboxFS(convId),
     signal,
+    mentionSignal,
   }
 
   // 3. 创建 Pi 工具

@@ -38,15 +38,27 @@
     "greetingMorning": "早上好",
     "greetingAfternoon": "下午好",
     "greetingEvening": "晚上好",
-    "greetingSuffix": "，我是"
+    "greetingSuffix": "，我是",
+    "groupChat": "群组对话",
+    "groupGreeting": "群组对话已就绪",
+    "addAgent": "添加",
+    "removeAgent": "移除",
+    "selectAgents": "选择 Agent",
+    "minAgentsRequired": "至少需要 2 个 Agent",
+    "agentThinking": "{{name}} 正在思考…",
+    "agentReplied": "{{name}} 已回复",
+    "infiniteMode": "无限演算",
+    "currentMembers": "当前成员"
   },
   "sidebar": {
     "newChat": "新对话",
+    "newGroupChat": "新群组对话",
     "noConversations": "暂无对话",
     "recent": "最近",
     "rename": "重命名",
     "saveAsTxt": "另存为 TXT",
-    "delete": "删除"
+    "delete": "删除",
+    "groupMembers": "群成员"
   },
   "menu": {
     "title": "设置",

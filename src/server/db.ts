@@ -28,6 +28,10 @@ async function migrate() {
     if (!hasAgentId) {
       await client.execute("ALTER TABLE conversations ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''")
     }
+    const hasType = convRes.rows.some((r) => r.name === 'type')
+    if (!hasType) {
+      await client.execute("ALTER TABLE conversations ADD COLUMN type TEXT NOT NULL DEFAULT 'direct'")
+    }
   }
 
   const msgRes = await client.execute('PRAGMA table_info(messages)')
@@ -39,6 +43,10 @@ async function migrate() {
     const hasAttachments = msgRes.rows.some((r) => r.name === 'attachments')
     if (!hasAttachments) {
       await client.execute('ALTER TABLE messages ADD COLUMN attachments TEXT')
+    }
+    const hasMsgAgentId = msgRes.rows.some((r) => r.name === 'agent_id')
+    if (!hasMsgAgentId) {
+      await client.execute('ALTER TABLE messages ADD COLUMN agent_id TEXT')
     }
   }
 
@@ -88,8 +96,16 @@ async function migrate() {
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
+    CREATE TABLE IF NOT EXISTS group_conversation_agents (
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (conversation_id, agent_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
   `)
 }
 

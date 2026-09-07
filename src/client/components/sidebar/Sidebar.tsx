@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
-import { Plus, MessageSquare, MoreVertical, Download, Trash2, Pencil, Settings, User } from 'lucide-react'
+import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users } from 'lucide-react'
 import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation } from '@/shared/types'
@@ -12,10 +12,12 @@ interface SidebarProps {
   activeId: string | null
   onSelect: (id: string) => void
   onNew: () => void
+  onNewGroup: () => void
   onRename: (id: string, title: string) => void
   onDelete: (id: string) => void
   onExport: (id: string) => void
   onMenuClick: () => void
+  onManageGroupAgents?: (convId: string) => void
   appName: string
   currentUser: string
   showGithub?: boolean
@@ -26,7 +28,7 @@ interface MenuState {
   anchorRect: DOMRect
 }
 
-export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, onDelete, onExport, onMenuClick, appName, currentUser, showGithub = true }: SidebarProps) {
+export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMenuClick, onManageGroupAgents, appName, currentUser, showGithub = true }: SidebarProps) {
   const { t } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -101,10 +103,14 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, on
       </div>
 
       {/* New chat button */}
-      <div className="p-3">
+      <div className="p-3 space-y-2">
         <Button className="w-full gap-2" onClick={onNew}>
           <Plus className="h-4 w-4" />
           {t('sidebar.newChat')}
+        </Button>
+        <Button className="w-full gap-2" variant="outline" onClick={onNewGroup}>
+          <MessagesSquare className="h-4 w-4" />
+          {t('sidebar.newGroupChat')}
         </Button>
       </div>
 
@@ -128,7 +134,11 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, on
               }`}
               onClick={() => { if (renamingId !== conv.id) onSelect(conv.id) }}
             >
-              <MessageSquare className="h-4 w-4 flex-shrink-0" />
+              {(conv as any).type === 'group' ? (
+                <MessagesSquare className="h-4 w-4 flex-shrink-0" />
+              ) : (
+                <MessageSquare className="h-4 w-4 flex-shrink-0" />
+              )}
               {renamingId === conv.id ? (
                 <input
                   ref={inputRef}
@@ -187,6 +197,15 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, on
             <Pencil className="h-3.5 w-3.5" />
             {t('sidebar.rename')}
           </button>
+          {(conversations.find((c) => c.id === menu.convId) as any)?.type === 'group' && onManageGroupAgents && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+              onClick={() => { onManageGroupAgents(menu.convId); closeMenu() }}
+            >
+              <Users className="h-3.5 w-3.5" />
+              {t('sidebar.groupMembers')}
+            </button>
+          )}
           <button
             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
             onClick={() => { onExport(menu.convId); closeMenu() }}

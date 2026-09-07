@@ -27,9 +27,11 @@ interface MessageBubbleProps {
   onRevert?: () => void
   /** Agent avatar URL (base64 data URL) */
   agentAvatar?: string | null
+  /** Group chat: agent display name */
+  agentName?: string
 }
 
-export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, agentAvatar }: MessageBubbleProps) {
+export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, agentAvatar, agentName }: MessageBubbleProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const [confirmingRevert, setConfirmingRevert] = useState(false)
@@ -53,6 +55,10 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
       <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-row-reverse gap-2' : ''}`}>
         {/* Content column */}
         <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
+          {/* Agent name label for group chat */}
+          {!isUser && agentName && (
+            <div className="text-xs text-muted-foreground mb-1 ml-1">{agentName}</div>
+          )}
           {/* Thinking block — 优先按分段展示（多轮思考），否则回退到整段 */}
 
           {message.thinking && (

@@ -38,15 +38,27 @@
     "greetingMorning": "Good morning",
     "greetingAfternoon": "Good afternoon",
     "greetingEvening": "Good evening",
-    "greetingSuffix": ", I'm "
+    "greetingSuffix": ", I'm ",
+    "groupChat": "Group Chat",
+    "groupGreeting": "Group chat ready",
+    "addAgent": "Add",
+    "removeAgent": "Remove",
+    "selectAgents": "Select Agents",
+    "minAgentsRequired": "At least 2 agents required",
+    "agentThinking": "{{name}} is thinking...",
+    "agentReplied": "{{name}} replied",
+    "infiniteMode": "Infinite",
+    "currentMembers": "Current Members"
   },
   "sidebar": {
     "newChat": "New Chat",
+    "newGroupChat": "New Group Chat",
     "noConversations": "No conversations yet",
     "recent": "Recent",
     "rename": "Rename",
     "saveAsTxt": "Save as TXT",
-    "delete": "Delete"
+    "delete": "Delete",
+    "groupMembers": "Members"
   },
   "menu": {
     "title": "Settings",

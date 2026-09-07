@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Brain, Paperclip, X, Upload } from 'lucide-react'
+import { Brain, Infinity, Loader2, Paperclip, X, Upload } from 'lucide-react'
 import { getToken } from '../../lib/api'
 
 interface Attachment {
@@ -17,12 +17,14 @@ interface InputBarProps {
   onExternalValueConsumed?: () => void
   thinkingMode: boolean
   onThinkingModeChange: (enabled: boolean) => void
+  infiniteMode: boolean
+  onInfiniteModeChange: (enabled: boolean) => void
   supportAttachments?: boolean
   /** Whether to show the "no agents" disabled state */
   noAgents?: boolean
 }
 
-export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, supportAttachments, noAgents }: InputBarProps) {
+export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, noAgents }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -148,16 +150,28 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
           className="w-full resize-none bg-transparent text-sm focus:outline-none disabled:opacity-50 max-h-[200px] leading-relaxed py-1"
         />
         <div className="flex items-center justify-between pt-2">
-          <button
-            onClick={() => onThinkingModeChange(!thinkingMode)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-              thinkingMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-            }`}
-            title={t('chat.deepThinking')}
-          >
-            <Brain className="h-3.5 w-3.5" />
-            <span>{t('chat.deepThinking')}</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => onThinkingModeChange(!thinkingMode)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                thinkingMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              }`}
+              title={t('chat.deepThinking')}
+            >
+              <Brain className="h-3.5 w-3.5" />
+              <span>{t('chat.deepThinking')}</span>
+            </button>
+            <button
+              onClick={() => onInfiniteModeChange(!infiniteMode)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                infiniteMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              }`}
+              title={t('chat.infiniteMode')}
+            >
+              <Infinity className="h-3.5 w-3.5" />
+              <span>{t('chat.infiniteMode')}</span>
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             {supportAttachments !== false && (
               <button
@@ -174,9 +188,13 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
             <button
               onClick={handleSend}
               disabled={isInputDisabled || uploading || !hasContent}
-              className="px-4 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              className="px-4 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all inline-flex items-center justify-center min-w-[64px]"
             >
-              {t('chat.send')}
+              {disabled ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                t('chat.send')
+              )}
             </button>
           </div>
         </div>
