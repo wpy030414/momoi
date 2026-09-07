@@ -14,6 +14,7 @@ export interface Attachment {
 export interface Conversation {
   id: string
   title: string
+  agent_id: string
   created_at: number
   updated_at: number
 }
@@ -46,10 +47,19 @@ export interface AppConfig {
   app_background: string  // base64 data URL, empty = no custom background
   api_endpoint: string
   api_key: string
-  model: string
-  system_prompt: string
   support_attachments: boolean
   show_github: boolean
+}
+
+// ---- Agent ----
+
+export interface Agent {
+  id: string
+  name: string
+  model: string
+  system_prompt: string
+  avatar: string
+  created_at: number
 }
 
 // ---- Tool Definition ----

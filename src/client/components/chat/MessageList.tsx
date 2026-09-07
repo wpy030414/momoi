@@ -17,9 +17,10 @@ interface MessageListProps {
   messages: ChatMessage[]
   onSuggestion?: (text: string) => void
   onRevert?: (index: number) => void
+  agentAvatar?: string | null
 }
 
-export function MessageList({ messages, onSuggestion, onRevert }: MessageListProps) {
+export function MessageList({ messages, onSuggestion, onRevert, agentAvatar }: MessageListProps) {
   // Only the last assistant message shows its suggestion chips — older ones
   // were for a past turn and are meaningless as "what to ask next".
   const lastAssistantIdx = [...messages]
@@ -37,6 +38,7 @@ export function MessageList({ messages, onSuggestion, onRevert }: MessageListPro
           onSuggestion={onSuggestion}
           showSuggestions={idx === lastAssistantIdxFromEnd}
           onRevert={msg.role === 'user' && msg.id ? () => onRevert?.(idx) : undefined}
+          agentAvatar={agentAvatar}
         />
       ))}
     </div>

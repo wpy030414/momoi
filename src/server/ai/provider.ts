@@ -33,6 +33,7 @@ interface PendingToolCall {
 
 export async function* streamChatCompletion(
   config: AppConfig,
+  model: string,
   messages: ChatMessage[],
   tools: ToolDefinition[],
   thinkingMode = true,
@@ -40,7 +41,7 @@ export async function* streamChatCompletion(
   const url = `${config.api_endpoint.replace(/\/$/, '')}/chat/completions`
 
   const body: Record<string, unknown> = {
-    model: config.model,
+    model,
     messages,
     stream: true,
     max_tokens: 100000,

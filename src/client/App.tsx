@@ -5,7 +5,7 @@ import { useAdmin } from './hooks/useAdmin'
 import { useTheme } from './hooks/useTheme'
 import { Sidebar } from './components/sidebar/Sidebar'
 import { ChatPanel } from './components/chat/ChatPanel'
-import { SettingsDialog } from './components/settings/SettingsDialog'
+import { AdminScreen } from './components/admin/AdminScreen'
 import { MenuDialog } from './components/settings/MenuDialog'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
@@ -18,7 +18,7 @@ export function App() {
   const chat = useChat()
   const admin = useAdmin()
   const { theme, setTheme } = useTheme()
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [adminViewOpen, setAdminViewOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [changePinOpen, setChangePinOpen] = useState(false)
   const [appName, setAppName] = useState('Open Agent')
@@ -26,6 +26,8 @@ export function App() {
   const [supportAttachments, setSupportAttachments] = useState(false)
   const [showGithub, setShowGithub] = useState(true)
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
+  const [agents, setAgents] = useState<Array<{ id: string; name: string; avatar: string }>>([])
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
       return window.innerWidth >= 768
@@ -69,12 +71,16 @@ export function App() {
       }
       setSupportAttachments(!!r.support_attachments)
       setShowGithub(r.show_github !== false)
+      if (r.agents?.length > 0) {
+        setAgents(r.agents)
+        setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
+      }
     }).catch(() => {})
   }, [])
 
-  // Re-fetch appName + favicon when admin settings close (user may have changed them)
+  // Re-fetch appName + agents when admin view closes (user may have changed them)
   useEffect(() => {
-    if (!settingsOpen) {
+    if (!adminViewOpen) {
       api.getAppName().then((r) => {
         setAppName(r.app_name)
         if (r.app_favicon) {
@@ -84,9 +90,16 @@ export function App() {
         setBackgroundImage(r.app_background || '')
         setSupportAttachments(!!r.support_attachments)
         setShowGithub(r.show_github !== false)
+        if (r.agents?.length > 0) {
+          setAgents(r.agents)
+          setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
+        } else {
+          setAgents([])
+          setSelectedAgentId(null)
+        }
       }).catch(() => {})
     }
-  }, [settingsOpen])
+  }, [adminViewOpen])
 
   // Update document title when appName changes
   useEffect(() => {
@@ -104,17 +117,43 @@ export function App() {
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [])
 
-  // 100dvh in globals.css + interactive-widget=resizes-content in viewport meta
-  // already handle the virtual keyboard correctly — no JS needed.
-
   const handleLanguageChange = (lang: string) => {
     i18n.changeLanguage(lang)
   }
 
   const handleAdminSettings = () => {
     setMenuOpen(false)
-    // Radix Dialog 关闭时需要等待焦点管理完成，再打开新 Dialog
-    setTimeout(() => setSettingsOpen(true), 300)
+    // Radix Dialog 关闭时需要等待焦点管理完成，再打开新页面
+    setTimeout(() => {
+      setAdminViewOpen(true)
+      history.pushState(null, '', '#/settings')
+    }, 300)
+  }
+
+  const closeAdminView = () => {
+    setAdminViewOpen(false)
+    // Clear hash if currently on settings
+    if (window.location.hash === '#/settings') {
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }
+
+  // Sync adminViewOpen with hash #/settings (mount + browser back/forward)
+  useEffect(() => {
+    const onHashChange = () => {
+      setAdminViewOpen(window.location.hash === '#/settings')
+    }
+    // Check on mount
+    if (window.location.hash === '#/settings') {
+      setAdminViewOpen(true)
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+
+  // Show admin settings as full-page view (accessible even without login)
+  if (adminViewOpen) {
+    return <AdminScreen onBack={closeAdminView} admin={admin} />
   }
 
   // Show login screen if not logged in
@@ -175,6 +214,9 @@ export function App() {
           onRevert={chat.revertMessage}
           backgroundImage={backgroundImage}
           supportAttachments={supportAttachments}
+          agents={agents}
+          selectedAgentId={selectedAgentId}
+          onAgentChange={setSelectedAgentId}
         />
       </div>
 
@@ -198,9 +240,6 @@ export function App() {
         onOpenChange={setChangePinOpen}
         username={currentUser}
       />
-
-      {/* Settings Dialog (admin) */}
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} admin={admin} />
     </div>
   )
 }

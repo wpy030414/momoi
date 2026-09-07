@@ -43,7 +43,7 @@ import {
   THINKING_SEGMENT_CLOSE,
   DEFAULT_SYSTEM_PROMPT,
 } from '../../shared/constants.js'
-import { getConfig } from '../config.js'
+import { getConfig, getAgent, listAgents } from '../config.js'
 import { getAllTools } from './tools.js'
 import { resolveTool } from '../tools/registry.js'
 import type { ToolContext, ToolResult, ToolArtifact } from '../tools/types.js'
@@ -62,8 +62,8 @@ const ZERO_USAGE: Usage = {
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
-function buildSystemPrompt(config: AppConfig, thinkingMode: boolean): string {
-  let prompt = config.system_prompt || DEFAULT_SYSTEM_PROMPT
+function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean): string {
+  let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT
 
   // Append skill descriptions only
   const skills = skillRegistry.getAll()
@@ -225,7 +225,7 @@ function piMessagesToChatMessages(msgs: Message[]): ChatMessage[] {
 }
 
 // ---- StreamFn：包装 provider.ts 为 Pi 兼容格式 ----
-function createStreamFn(config: AppConfig, thinkingMode: boolean): StreamFn {
+function createStreamFn(agentModel: string, config: AppConfig, thinkingMode: boolean): StreamFn {
   return async (model: Model<any>, context: Context, options?: SimpleStreamOptions): Promise<ReturnType<typeof createAssistantMessageEventStream>> => {
     const stream = createAssistantMessageEventStream()
 
@@ -273,13 +273,13 @@ function createStreamFn(config: AppConfig, thinkingMode: boolean): StreamFn {
           ],
           api: 'openai-completions',
           provider: 'openai',
-          model: config.model,
+          model: agentModel,
           stopReason: 'stop',
           usage: ZERO_USAGE,
           timestamp: Date.now(),
         })
 
-        for await (const event of streamChatCompletion(config, chatMessages, ourTools, thinkingMode)) {
+        for await (const event of streamChatCompletion(config, agentModel, chatMessages, ourTools, thinkingMode)) {
           switch (event.type) {
             case 'token': {
               const delta = event.text || ''
@@ -376,7 +376,7 @@ function createStreamFn(config: AppConfig, thinkingMode: boolean): StreamFn {
           content: [],
           api: 'openai-completions',
           provider: 'openai',
-          model: config.model,
+          model: agentModel,
           stopReason: 'error',
           errorMessage: (err as Error).message,
           usage: ZERO_USAGE,
@@ -622,11 +622,11 @@ function parseSuggestions(text: string): { reply: string; suggestions: string[] 
 }
 
 // ---- 构建 AgentLoopConfig ----
-function buildLoopConfig(config: AppConfig): AgentLoopConfig {
+function buildLoopConfig(agentModel: string, config: AppConfig): AgentLoopConfig {
   return {
     model: {
-      id: config.model,
-      name: config.model,
+      id: agentModel,
+      name: agentModel,
       api: 'openai-completions',
       provider: 'openai',
       baseUrl: config.api_endpoint,
@@ -654,12 +654,34 @@ export async function runPiAgentLoop(
   thinkingMode = true,
   conversationId?: string,
   userId?: string,
+  agentId?: string,
 ): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[] }> {
   const config = await getConfig()
+
+  // Resolve agent: use specified agentId, or fall back to first available agent
+  let agentModel = config.api_endpoint ? 'gpt-4o' : '' // fallback
+  let agentSystemPrompt = DEFAULT_SYSTEM_PROMPT
+
+  if (agentId) {
+    const agent = await getAgent(agentId)
+    if (agent) {
+      agentModel = agent.model
+      agentSystemPrompt = agent.system_prompt
+    }
+  }
+
+  if (!agentId || !agentModel) {
+    // Fallback to first available agent
+    const allAgents = await listAgents()
+    if (allAgents.length > 0) {
+      agentModel = allAgents[0].model
+      agentSystemPrompt = allAgents[0].system_prompt
+    }
+  }
   const convId = conversationId || 'default'
 
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt(config, thinkingMode)
+  const systemPrompt = buildSystemPrompt(agentSystemPrompt, thinkingMode)
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {
@@ -694,10 +716,10 @@ export async function runPiAgentLoop(
   } as AgentMessage
 
   // 6. 构建 AgentLoopConfig
-  const loopConfig = buildLoopConfig(config)
+  const loopConfig = buildLoopConfig(agentModel, config)
 
   // 7. 创建 StreamFn
-  const streamFn = createStreamFn(config, thinkingMode)
+  const streamFn = createStreamFn(agentModel, config, thinkingMode)
 
   // 8. SSE 状态
   const sseState: SSEState = {

@@ -13,15 +13,16 @@ interface Attachment {
 interface InputBarProps {
   onSend: (text: string, attachments?: Attachment[]) => void
   disabled?: boolean
-  /** External value to pre-fill the textarea (e.g. after revert) */
   externalValue?: string
   onExternalValueConsumed?: () => void
   thinkingMode: boolean
   onThinkingModeChange: (enabled: boolean) => void
   supportAttachments?: boolean
+  /** Whether to show the "no agents" disabled state */
+  noAgents?: boolean
 }
 
-export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, supportAttachments }: InputBarProps) {
+export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, supportAttachments, noAgents }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -30,12 +31,12 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // When externalValue changes, fill the textarea and focus it
+  const isInputDisabled = disabled || noAgents
+
   useEffect(() => {
     if (externalValue !== undefined && externalValue !== '') {
       setText(externalValue)
       onExternalValueConsumed?.()
-      // Auto-resize
       requestAnimationFrame(() => {
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto'
@@ -48,7 +49,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
 
   const handleSend = () => {
     const trimmed = text.trim()
-    if ((!trimmed && attachments.length === 0) || disabled || uploading) return
+    if ((!trimmed && attachments.length === 0) || isInputDisabled || uploading) return
     onSend(trimmed, attachments.length > 0 ? attachments : undefined)
     setText('')
     setAttachments([])
@@ -74,7 +75,6 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
-
     setUploading(true)
     setUploadError('')
     try {
@@ -84,8 +84,6 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
         formData.append('file', file)
         const res = await fetch('/api/upload', {
           method: 'POST',
-          // /api/upload requires the user JWT; do NOT set Content-Type here,
-          // the browser must generate the multipart boundary itself.
           headers: { Authorization: `Bearer ${getToken() || ''}` },
           body: formData,
         })
@@ -115,20 +113,13 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
   return (
     <div className="max-w-3xl mx-auto w-full px-4 pb-4">
       <div className="rounded-xl border bg-background px-4 py-3 focus-within:ring-2 focus-within:ring-ring transition-shadow">
-        {/* Attachment chips */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-3">
             {attachments.map((att, idx) => (
-              <div
-                key={idx}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted text-xs max-w-[200px]"
-              >
+              <div key={idx} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted text-xs max-w-[200px]">
                 <Paperclip className="h-3 w-3 flex-shrink-0" />
                 <span className="truncate">{att.name}</span>
-                <button
-                  onClick={() => removeAttachment(idx)}
-                  className="ml-0.5 hover:text-destructive flex-shrink-0"
-                >
+                <button onClick={() => removeAttachment(idx)} className="ml-0.5 hover:text-destructive flex-shrink-0">
                   <X className="h-3 w-3" />
                 </button>
               </div>
@@ -136,15 +127,10 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
           </div>
         )}
 
-        {/* Upload error — visible, dismissible */}
         {uploadError && (
           <div className="flex items-start gap-1.5 mb-2 px-2 py-1.5 rounded-md bg-destructive/10 text-destructive text-xs">
             <span className="flex-1 break-words">{t('chat.uploadFailed', { message: uploadError })}</span>
-            <button
-              onClick={() => setUploadError('')}
-              className="hover:text-destructive/70 flex-shrink-0 mt-0.5"
-              aria-label="dismiss"
-            >
+            <button onClick={() => setUploadError('')} className="hover:text-destructive/70 flex-shrink-0 mt-0.5">
               <X className="h-3 w-3" />
             </button>
           </div>
@@ -156,8 +142,8 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           onInput={handleInput}
-          placeholder={t('chat.inputPlaceholder')}
-          disabled={disabled}
+          placeholder={noAgents ? t('settings.agentRequired') : t('chat.inputPlaceholder')}
+          disabled={isInputDisabled}
           rows={3}
           className="w-full resize-none bg-transparent text-sm focus:outline-none disabled:opacity-50 max-h-[200px] leading-relaxed py-1"
         />
@@ -165,9 +151,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
           <button
             onClick={() => onThinkingModeChange(!thinkingMode)}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-              thinkingMode
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              thinkingMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
             title={t('chat.deepThinking')}
           >
@@ -175,33 +159,21 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
             <span>{t('chat.deepThinking')}</span>
           </button>
           <div className="flex items-center gap-2">
-            {/* Attachment button */}
             {supportAttachments !== false && (
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={disabled || uploading}
+                disabled={isInputDisabled || uploading}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 title={t('chat.addAttachment')}
               >
-                {uploading ? (
-                  <Upload className="h-3.5 w-3.5 animate-pulse" />
-                ) : (
-                  <Paperclip className="h-3.5 w-3.5" />
-                )}
+                {uploading ? <Upload className="h-3.5 w-3.5 animate-pulse" /> : <Paperclip className="h-3.5 w-3.5" />}
                 <span>{uploading ? t('chat.uploading') : t('chat.addAttachment')}</span>
               </button>
             )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={handleFileSelect}
-            />
-            {/* Send button — text style */}
+            <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
             <button
               onClick={handleSend}
-              disabled={disabled || uploading || !hasContent}
+              disabled={isInputDisabled || uploading || !hasContent}
               className="px-4 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
               {t('chat.send')}

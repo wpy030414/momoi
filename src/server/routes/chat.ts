@@ -32,8 +32,8 @@ chatRoute.post('/', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const body = await c.req.json<{ message: string; conversation_id?: string; _retry?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }> }>()
-  const { message, conversation_id, _retry, thinking_mode, attachments } = body
+  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }> }>()
+  const { message, conversation_id, agent_id, _retry, thinking_mode, attachments } = body
 
   if (!message?.trim()) {
     return c.json({ error: 'Empty message' }, 400)
@@ -72,7 +72,7 @@ chatRoute.post('/', async (c) => {
         convId = randomUUID()
         const now = Math.floor(Date.now() / 1000)
         const title = message.slice(0, 40) || 'New Chat'
-        await db.insert(conversations).values({ id: convId, user_id: userId, title, created_at: now, updated_at: now }).run()
+        await db.insert(conversations).values({ id: convId, user_id: userId, title, agent_id: agent_id || '', created_at: now, updated_at: now }).run()
       } else {
         // Verify conversation belongs to user
         const conv = await db.select().from(conversations).where(eq(conversations.id, convId)).get()
@@ -180,6 +180,7 @@ chatRoute.post('/', async (c) => {
       const { reply, suggestions, thinking, artifacts } = await runPiAgentLoop(
         userMessage, history, send, undefined,
         thinking_mode !== false, convId, userId,
+        agent_id || undefined,
       )
 
       // --- Save assistant message ---

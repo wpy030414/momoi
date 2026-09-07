@@ -4,6 +4,7 @@ export const conversations = sqliteTable('conversations', {
   id: text('id').primaryKey(),
   user_id: text('user_id').notNull().default(''),
   title: text('title').notNull().default('新对话'),
+  agent_id: text('agent_id').notNull().default(''),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
 })
@@ -24,4 +25,13 @@ export const messages = sqliteTable('messages', {
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull().default(''),
+})
+
+export const agents = sqliteTable('agents', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().default(''),
+  model: text('model').notNull().default(''),
+  system_prompt: text('system_prompt').notNull().default(''),
+  avatar: text('avatar').notNull().default(''),
+  created_at: integer('created_at').notNull(),
 })

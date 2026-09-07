@@ -52,11 +52,11 @@ conversationsRoute.post('/', async (c) => {
   const userId = getUserId(c)
   if (!userId) return c.json({ error: 'Unauthorized' }, 401)
 
-  const body = await c.req.json<{ title?: string }>()
+  const body = await c.req.json<{ title?: string; agent_id?: string }>()
   const id = randomUUID()
   const now = Math.floor(Date.now() / 1000)
 
-  await db.insert(conversations).values({ id, user_id: userId, title: body.title || 'New Chat', created_at: now, updated_at: now }).run()
+  await db.insert(conversations).values({ id, user_id: userId, title: body.title || 'New Chat', agent_id: body.agent_id || '', created_at: now, updated_at: now }).run()
 
   const conv = await db.select().from(conversations).where(eq(conversations.id, id)).get()
   return c.json({ conversation: conv }, 201)

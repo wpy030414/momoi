@@ -81,12 +81,18 @@ export const api = {
   revertMessages: (conversationId: string, messageId: number) => request<{ success: boolean }>(`/api/conversations/${conversationId}/messages/${messageId}`, { method: 'DELETE' }),
 
   // App config
-  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; show_github: boolean }>('/api/app-name'),
+  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; show_github: boolean; agents: Array<{ id: string; name: string; avatar: string }> }>('/api/app-name'),
 
   // Admin
   adminAuth: (key: string) => request<{ token: string; expires_at: number }>('/api/admin/auth', { method: 'POST', body: JSON.stringify({ key }) }),
   getConfig: (token: string) => request<import('@/shared/types').AppConfig>('/api/admin/config', { headers: { Authorization: `Bearer ${token}` } }),
   updateConfig: (token: string, config: Partial<import('@/shared/types').AppConfig>) => request<import('@/shared/types').AppConfig>('/api/admin/config', { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(config) }),
+
+  // Admin - Agent CRUD
+  listAdminAgents: (token: string) => request<{ agents: import('@/shared/types').Agent[] }>('/api/admin/agents', { headers: { Authorization: `Bearer ${token}` } }),
+  createAgent: (token: string, data: { name: string; model: string; system_prompt: string; avatar?: string }) => request<{ agent: import('@/shared/types').Agent }>('/api/admin/agents', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(data) }),
+  updateAgent: (token: string, id: string, data: { name?: string; model?: string; system_prompt?: string; avatar?: string }) => request<{ agent: import('@/shared/types').Agent }>(`/api/admin/agents/${id}`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(data) }),
+  deleteAgent: (token: string, id: string) => request<{ success: boolean }>(`/api/admin/agents/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }),
   listAdminSkills: (token: string) => request<{ skills: import('@/shared/types').InstalledSkill[] }>('/api/admin/skills', { headers: { Authorization: `Bearer ${token}` } }),
   installSkill: (token: string, name: string) => request('/api/admin/skills/install', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ name }) }),
   uninstallSkill: (token: string, name: string) => request(`/api/admin/skills/${name}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }),

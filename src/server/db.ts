@@ -24,6 +24,10 @@ async function migrate() {
     if (!hasUserId) {
       await client.execute("ALTER TABLE conversations ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
     }
+    const hasAgentId = convRes.rows.some((r) => r.name === 'agent_id')
+    if (!hasAgentId) {
+      await client.execute("ALTER TABLE conversations ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''")
+    }
   }
 
   const msgRes = await client.execute('PRAGMA table_info(messages)')
@@ -38,12 +42,21 @@ async function migrate() {
     }
   }
 
+  const agentRes = await client.execute('PRAGMA table_info(agents)')
+  if (agentRes.rows.length > 0) {
+    const hasAvatar = agentRes.rows.some((r) => r.name === 'avatar')
+    if (!hasAvatar) {
+      await client.execute("ALTER TABLE agents ADD COLUMN avatar TEXT NOT NULL DEFAULT ''")
+    }
+  }
+
   // --- Main DDL (safe: IF NOT EXISTS on everything) ---
   await client.executeMultiple(`
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL DEFAULT '新对话',
+      agent_id TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL DEFAULT (unixepoch()),
       updated_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
@@ -64,6 +77,15 @@ async function migrate() {
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS agents (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      system_prompt TEXT NOT NULL DEFAULT '',
+      avatar TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);

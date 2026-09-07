@@ -8,8 +8,11 @@ import fs from 'fs'
 
 // Initialize database (side effect: creates tables)
 import './db.js'
+// Auto-create Default agent from legacy global config if no agents exist
+await migrateDefaultAgent()
 
 import { env } from './config.js'
+import { migrateDefaultAgent } from './config.js'
 import { conversationsRoute } from './routes/conversations.js'
 import { adminRoute } from './routes/admin.js'
 import { appRoute } from './routes/app.js'

@@ -15,3 +15,21 @@ export const DEFAULT_SYSTEM_PROMPT = ''
 export const DEFAULT_APP_NAME = 'Open Agent'
 export const DEFAULT_API_ENDPOINT = 'https://api.openai.com/v1'
 export const DEFAULT_MODEL = 'gpt-4o'
+
+// Agent 默认值
+export const DEFAULT_AGENT_NAME = 'Open Agent'
+export const DEFAULT_AGENT_MODEL = 'gpt-4o'
+export const DEFAULT_AGENT_SYSTEM_PROMPT = ''
+
+// 预设常用模型列表
+export const COMMON_MODELS = [
+  'gpt-4o',
+  'gpt-4-turbo',
+  'gpt-4',
+  'gpt-3.5-turbo',
+  'claude-sonnet-4-20250514',
+  'claude-opus-4-20250514',
+  'claude-3.5-sonnet',
+  'deepseek-chat',
+  'deepseek-reasoner',
+]

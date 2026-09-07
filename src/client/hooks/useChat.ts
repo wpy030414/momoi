@@ -115,7 +115,7 @@ export function useChat() {
     })
   }, [])
 
-  const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => {
+  const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null) => {
     if (!text.trim() || loading) return
 
     const userMsg: ChatMessage = { role: 'user', content: text, attachments }
@@ -152,6 +152,7 @@ export function useChat() {
           body: JSON.stringify({
             message: text,
             conversation_id: convId || undefined,
+            agent_id: agentId || undefined,
             _retry: isRetry,
             thinking_mode: thinkingMode,
             attachments: attachments || undefined,

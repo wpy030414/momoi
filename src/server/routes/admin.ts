@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import { adminAuthMiddleware, signAdminToken, verifyAdminKey } from '../auth.js'
-import { getConfig, updateConfig } from '../config.js'
+import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent } from '../config.js'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
 import { skillRegistry } from '../skills/loader.js'
@@ -25,6 +25,8 @@ adminRoute.post('/auth', async (c) => {
 
 // Protected routes below
 adminRoute.use('/config', adminAuthMiddleware)
+adminRoute.use('/agents', adminAuthMiddleware)
+adminRoute.use('/agents/*', adminAuthMiddleware)
 adminRoute.use('/skills/*', adminAuthMiddleware)
 // '/stats' alone does NOT match sub-paths (e.g. /stats/conversations) in Hono —
 // mount both the exact and wildcard forms so every stats endpoint is protected.
@@ -42,6 +44,41 @@ adminRoute.put('/config', async (c) => {
   const body = await c.req.json()
   const config = await updateConfig(body)
   return c.json(config)
+})
+
+// ---- Agent CRUD ----
+
+adminRoute.get('/agents', async (c) => {
+  const agents = await listAgents()
+  return c.json({ agents })
+})
+
+adminRoute.post('/agents', async (c) => {
+  const body = await c.req.json<{ name: string; model: string; system_prompt: string; avatar?: string }>()
+  if (!body.name?.trim()) {
+    return c.json({ error: 'Agent name is required' }, 400)
+  }
+  const agent = await createAgent(body.name.trim(), body.model || '', body.system_prompt || '', body.avatar || '')
+  return c.json({ agent })
+})
+
+adminRoute.put('/agents/:id', async (c) => {
+  const id = c.req.param('id')
+  const body = await c.req.json<{ name?: string; model?: string; system_prompt?: string; avatar?: string }>()
+  const agent = await updateAgent(id, body)
+  if (!agent) {
+    return c.json({ error: 'Agent not found' }, 404)
+  }
+  return c.json({ agent })
+})
+
+adminRoute.delete('/agents/:id', async (c) => {
+  const id = c.req.param('id')
+  const ok = await deleteAgent(id)
+  if (!ok) {
+    return c.json({ error: 'Agent not found' }, 404)
+  }
+  return c.json({ success: true })
 })
 
 // Statistics: overall counts

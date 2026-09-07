@@ -25,9 +25,11 @@ interface MessageBubbleProps {
   showSuggestions?: boolean
   /** Called when user clicks revert button on a user message */
   onRevert?: () => void
+  /** Agent avatar URL (base64 data URL) */
+  agentAvatar?: string | null
 }
 
-export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert }: MessageBubbleProps) {
+export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, agentAvatar }: MessageBubbleProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const [confirmingRevert, setConfirmingRevert] = useState(false)
@@ -35,10 +37,16 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''} group`}>
       {/* Avatar */}
-      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center overflow-hidden ${
         isUser ? 'bg-primary text-primary-foreground' : 'bg-secondary'
       }`}>
-        {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+        {isUser ? (
+          <User className="h-4 w-4" />
+        ) : agentAvatar ? (
+          <img src={agentAvatar} alt="agent" className="h-full w-full object-cover" />
+        ) : (
+          <Bot className="h-4 w-4" />
+        )}
       </div>
 
       {/* Content wrapper — groups content column + revert row as one flex item */}
