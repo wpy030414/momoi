@@ -435,3 +435,40 @@
 - 新增依赖：`@earendil-works/pi-agent-core`、`@earendil-works/pi-ai`、`@sinclair/typebox`
 - `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 更新
 - 冒烟测试通过：流式对话、思考模式分段、工具调用、多轮工具、suggestions 解析全部正常
+
+---
+
+## D22：群聊上下文传递规范——他人发言以 user 角色 + 名字前缀注入
+
+**日期**：2026-09-07
+
+**背景**：群聊模式下用户发一条消息、多个 Agent 相继回复时，后回复的 Agent 经常复述/照抄前一个 Agent 的内容，出现「两个 Agent 回复一模一样」的现象。E2E 抓流对比确认：香子兰的回复开头与巧克力的回复逐字相同（先完整复述，末尾才加上自己的话）。
+
+**根因**：`group-orchestrator` 把前一个 Agent 的回复以 `role: 'assistant'` 注入后续 Agent 的上下文 —— 模型会把 assistant 角色的消息视为「自己之前说过的话」，于是把自己的回答写成对那段话的复述/延续。
+
+**决策**：
+1. 群聊上下文中，其他 Agent 的发言一律以 `role: 'user'` + `[Agent名字]: 内容` 前缀注入（`prepareGroupHistory` + 累计历史 push），模型据此区分「他人发言」「用户提问」与「自己该说的」。
+2. 系统提示词（`buildSystemPrompt` 的群组规则）明确说明 `[名字]: ` 开头的消息是他人/自己的历史发言，禁止复述、引用或延续，要求给出自己视角的独立回答。
+3. 连带修复：历史加载（`chat.ts`）保留 `agent_id` 字段，第二轮及以后仍能还原发言者身份；无限模式的中立 Agent 追问上下文同样显示 Agent 名字而非 UUID。
+
+**影响**：
+- `provider.ts`：`ChatMessage` 增加可选 `agent_id` 字段
+- `group-orchestrator.ts`：新增 `prepareGroupHistory`；累计历史改用 user 角色
+- `chat.ts`：history 与 reloadHistory 保留 agent_id；中立追问上下文显示名字
+- `pi-adapter.ts`：群组规则提示词重写
+
+---
+
+## D23：SSE 写入串行化——防止流关闭时尾部事件丢失
+
+**日期**：2026-09-07
+
+**背景**：E2E 测试发现群聊 SSE 流总是缺少最后一个 Agent 的 `agent_done` 与 `group_done` 事件（服务端日志显示 `send` 已调用成功，客户端却收不到），导致客户端一直处于 loading 状态。
+
+**根因**：Hono 的 `SSEStreamingApi.writeSSE` 是异步的，而 `chat.ts` 的 `send` 同步调用且不等待其完成；`streamSSE` 回调一结束，`finally` 中立即 `stream.close()`，**尚未 flush 的尾部事件被直接丢弃**（`agent_done`、`group_done` 是连续同步入队的最后几个事件，最容易丢失）。
+
+**决策**：`send` 内部维护串行写入链（`writeChain`），每条消息排队等待前一条真正写入完成后才写入；`streamSSE` 回调在 `finally` 中 `await writeChain`，保证所有事件 flush 后才关闭连接。
+
+**影响**：
+- `chat.ts`：`send` 重写为串行 promise 链；回调末尾 `await writeChain`
+- 消除了 SSE 事件乱序与尾部丢失的一类竞态（此前 `writeSSE` 并发 fire-and-forget 也可能乱序）

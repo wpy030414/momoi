@@ -39,6 +39,31 @@ function shuffleArray<T>(arr: T[]): T[] {
   return result
 }
 
+/**
+ * 群聊上下文格式化：
+ * 把历史中「其他 Agent 产生的 assistant 消息」重写为
+ * `[Agent名字]: 内容` 的 user 角色消息。
+ *
+ * 原因：模型会把 assistant 角色消息当作「自己说过的话」，
+ * 导致后续 Agent 复述/延续他人内容（群聊回复雷同）。
+ * 以 user 角色 + 名字前缀注入后，模型能明确区分「他人发言」与「用户提问」，
+ * 从而给出自己视角的独立回答。无 agent_id 的旧消息保持原样。
+ */
+function prepareGroupHistory(history: ChatMessage[], agentNameById: Map<string, string>): ChatMessage[] {
+  return history.map((msg) => {
+    if (msg.role === 'assistant' && msg.agent_id) {
+      const name = agentNameById.get(msg.agent_id)
+      if (name) {
+        return {
+          role: 'user',
+          content: `[${name}]: ${msg.content ?? ''}`,
+        }
+      }
+    }
+    return msg
+  })
+}
+
 function findAgentIdByName(name: string, agentIds: string[]): string | null {
   // Simple case-insensitive match — we'll need to resolve via getAgent for exact match
   return null // Will be resolved by the orchestrator via getAgent
@@ -54,12 +79,23 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
 
   send({ type: 'group_start', agent_ids: shuffled })
 
+  // Preload agent name map (parallel, avoids repeated getAgent calls in the loop)
+  const agentNameById = new Map<string, string>()
+  await Promise.all(
+    agentIds.map(async (id) => {
+      const agent = await getAgent(id)
+      if (agent) agentNameById.set(id, agent.name)
+    }),
+  )
+
   const repliedAgents = new Set<string>()
   let remaining = [...shuffled]
   let mentionDepth = 0
 
-  // Accumulate history so each agent sees previous agents' replies
-  const accumulatedHistory: ChatMessage[] = [...history]
+  // Accumulate history so each agent sees previous agents' replies.
+  // 其他 Agent 的发言统一转为 `[名字]: 内容` 的 user 消息，
+  // 避免模型将其误认为「自己说过的话」而复述/照抄。
+  const accumulatedHistory: ChatMessage[] = prepareGroupHistory(history, agentNameById)
 
   while (remaining.length > 0) {
     if (signal?.aborted) break
@@ -107,9 +143,11 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
       }
 
       // Append this agent's reply to the accumulated history
-      // so subsequent agents can see what was said before them
+      // so subsequent agents can see what was said before them.
+      // NOTE: use user role + `[名字]: ` prefix — assistant role would make
+      // the model treat it as its own words and repeat/parrot it.
       accumulatedHistory.push({
-        role: 'assistant',
+        role: 'user',
         content: `[${agent.name}]: ${reply}`,
       })
 

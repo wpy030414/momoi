@@ -15,6 +15,8 @@ export interface ChatMessage {
     function: { name: string; arguments: string }
   }>
   tool_call_id?: string
+  /** 群聊：该消息由哪个 Agent 产生（用于上下文身份还原） */
+  agent_id?: string | null
 }
 
 export interface StreamEvent {

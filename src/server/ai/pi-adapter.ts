@@ -129,7 +129,10 @@ function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isG
   if (isGroup) {
     prompt += `
 ## 群组对话规则
-你正在参与一个群组对话。其他 Agent 也可能回复用户。
+你正在参与一个群组对话，其他 Agent 也可能回复用户。请遵守：
+- 对话历史中所有以 \`[Agent名字]: \` 开头的消息，都是【其他 Agent】或你之前的发言记录，不是用户说的。
+- 不要复述、引用或延续其他 Agent 已经说过的内容，也不要假装那些话是你说的。
+- 根据用户的最新消息，用你自己的人设独立、自然地回答。即使其他 Agent 已经回答过同样的问题，你也只需给出你自己视角的观点，不要重复对方的措辞。
 - 如果你需要某个特定 Agent 的专业知识来更好地回答用户问题，请使用 at_mention 工具 @他们。
 - 被 @ 的 Agent 会立即回复，其他 Agent 本轮会被跳过。
 - 只在你确实需要对方回答用户问题或提供互补知识时才使用 at_mention，不要为了社交而 @。

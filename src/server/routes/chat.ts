@@ -78,17 +78,20 @@ chatRoute.post('/', async (c) => {
 
   return streamSSE(c, async (stream) => {
     let aborted = false
+    // Hono 的 writeSSE 是异步的；串行化写入并跟踪 pending 写入，
+    // 防止流关闭时尾部事件（agent_done / group_done）未 flush 被丢弃。
+    let writeChain: Promise<void> = Promise.resolve()
     const send = (msg: ServerMessage) => {
       if (aborted) return
-      try {
-        stream.writeSSE({ data: JSON.stringify(msg), event: 'message' })
-      } catch {
-        aborted = true
-        const isTerminal = msg.type === 'done' || msg.type === 'error'
-        if (isTerminal) {
-          console.warn('Failed to send terminal event to client:', msg.type, '- stream already closed')
-        }
-      }
+      writeChain = writeChain
+        .then(() => stream.writeSSE({ data: JSON.stringify(msg), event: 'message' }))
+        .catch((err) => {
+          aborted = true
+          const isTerminal = msg.type === 'done' || msg.type === 'error'
+          if (isTerminal) {
+            console.warn('Failed to send terminal event to client:', msg.type, '- stream already closed')
+          }
+        })
     }
 
     // Keepalive — prevent proxies/browsers from closing idle SSE
@@ -166,6 +169,7 @@ chatRoute.post('/', async (c) => {
           content: m.content,
           tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
           tool_call_id: m.tool_call_id || undefined,
+          agent_id: m.agent_id || null,
         }))
 
       // --- Tell client the conversation ID ---
@@ -269,12 +273,13 @@ chatRoute.post('/', async (c) => {
         const allMsgs = await db.select().from(messages)
           .where(eq(messages.conversation_id, convId))
           .orderBy(messages.created_at).all()
+        const agents = await listAgents()
+        const agentNameById = new Map(agents.map((a) => [a.id, a.name]))
         const context = allMsgs.slice(-20).map((m) =>
-          m.role === 'user' ? `用户: ${m.content}` : `[${m.agent_id || '助手'}]: ${m.content}`
+          m.role === 'user' ? `用户: ${m.content}` : `[${m.agent_id ? (agentNameById.get(m.agent_id) || m.agent_id) : '助手'}]: ${m.content}`
         ).join('\n')
 
         const config = await getConfig()
-        const agents = await listAgents()
         const model = agents[0]?.model || 'gpt-4o'
         const followUp = await generateNeutralFollowUp(config, model, context)
         if (followUp) {
@@ -297,6 +302,7 @@ chatRoute.post('/', async (c) => {
           content: m.content,
           tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
           tool_call_id: m.tool_call_id || undefined,
+          agent_id: m.agent_id || null,
         }))
       }
 
@@ -401,6 +407,8 @@ chatRoute.post('/', async (c) => {
       send({ type: 'error', message: errMsg })
     } finally {
       clearInterval(keepalive)
+      // 等待所有 SSE 事件真正 flush 到响应流，再让 Hono 关闭连接
+      await writeChain
     }
   })
 })
