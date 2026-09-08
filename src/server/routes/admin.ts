@@ -7,17 +7,18 @@ import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
 import { skillRegistry } from '../skills/loader.js'
-import { cleanMacOSArtifacts, hasZipSlip, resolveZipRoot, sanitizeSkillName } from '../lib/zip.js'
+import { cleanMacOSArtifacts, findUnsafeZipEntry, resolveZipRoot, sanitizeSkillName } from '../lib/zip.js'
 import { parseAgentPackage, computeConflicts, planCommit, resolveDefaultModel } from '../agents-import/parser.js'
 import {
   ImportStageLimitError,
-  deleteStagedImport,
   getStagedImport,
   hashSkillDir,
   installSkillTree,
   stageImport,
+  takeStagedImport,
 } from '../agents-import/store.js'
 import type { AgentImportCommitRequest } from '../../shared/types.js'
+import { randomUUID } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import AdmZip from 'adm-zip'
@@ -194,12 +195,13 @@ adminRoute.post('/agents/import', async (c) => {
   })
 })
 
-// Commit a staged import: apply persona decisions, install skills, then drop the staging entry
+// Commit a staged import: atomically claim the staging entry, apply persona decisions, install skills
 adminRoute.post('/agents/import/:import_id/commit', async (c) => {
   const importId = c.req.param('import_id')
-  const staged = getStagedImport(importId)
-  if (staged.state === 'missing') return c.json({ error: 'Import not found' }, 404)
-  if (staged.state === 'expired') return c.json({ error: 'Import expired' }, 410)
+  // 先窥视（不消耗）：请求体畸形或决议非法时仍可修正后重试
+  const peeked = getStagedImport(importId)
+  if (peeked.state === 'missing') return c.json({ error: 'Import not found' }, 404)
+  if (peeked.state === 'expired') return c.json({ error: 'Import expired' }, 410)
 
   let body: unknown
   try {
@@ -216,11 +218,17 @@ adminRoute.post('/agents/import/:import_id/commit', async (c) => {
   }
 
   const existingAgents = await listAgents()
-  const report = computeConflicts(staged.data, existingAgents, installedSkillHashes())
-  const plan = planCommit(staged.data, body as AgentImportCommitRequest, report, resolveDefaultModel(existingAgents))
+  const report = computeConflicts(peeked.data, existingAgents, installedSkillHashes())
+  const plan = planCommit(peeked.data, body as AgentImportCommitRequest, report, resolveDefaultModel(existingAgents))
   if (plan.requestError) {
     return c.json({ error: plan.requestError }, 400)
   }
+
+  // 原子取用：取出即删除，写入开始后不再回滚。两个并发 commit 只有一个能越过此点，
+  // 另一个 404，因此逐条写入期间不会被重复导入。
+  const staged = takeStagedImport(importId)
+  if (staged.state === 'missing') return c.json({ error: 'Import not found' }, 404)
+  if (staged.state === 'expired') return c.json({ error: 'Import expired' }, 410)
 
   const imported: Array<{ id: string; name: string }> = []
   const overwritten: Array<{ id: string; name: string }> = []
@@ -296,7 +304,6 @@ adminRoute.post('/agents/import/:import_id/commit', async (c) => {
   }
   if (skillsChanged) skillRegistry.refresh()
 
-  deleteStagedImport(importId)
   return c.json({ imported, overwritten, skipped, skills: skillResult, errors })
 })
 
@@ -383,7 +390,8 @@ adminRoute.get('/skills', (c) => {
 
 // Upload skill from zip
 adminRoute.post('/skills/upload', async (c) => {
-  const tmpDir = path.resolve('skills', `__upload_tmp_${Date.now()}`)
+  // 时间戳 + 随机后缀：并发上传不会共用同一临时目录
+  const tmpDir = path.resolve('skills', `__upload_tmp_${Date.now()}_${randomUUID().slice(0, 8)}`)
   try {
     const body = await c.req.parseBody()
     const file = body['file']
@@ -399,9 +407,14 @@ adminRoute.post('/skills/upload', async (c) => {
     const buffer = Buffer.from(await file.arrayBuffer())
     const zip = new AdmZip(buffer)
 
-    // Zip slip protection
-    if (hasZipSlip(zip)) {
-      return c.json({ error: 'Invalid zip: path traversal detected' }, 400)
+    // 解压前整包拒绝不安全条目：'..' 穿越、':'（盘符 / NTFS 备用数据流）与控制字符。
+    // extractAllTo 会把 `evil.txt:payload` 这类名字直接落盘为隐藏数据流，故必须在写盘前拒绝。
+    const unsafeEntry = findUnsafeZipEntry(zip)
+    if (unsafeEntry) {
+      const error = unsafeEntry.includes('..')
+        ? 'Invalid zip: path traversal detected'
+        : `Invalid zip: unsafe entry name "${unsafeEntry}"`
+      return c.json({ error }, 400)
     }
 
     // Detect wrapper directory
@@ -427,7 +440,6 @@ adminRoute.post('/skills/upload', async (c) => {
     const raw = fs.readFileSync(skillPath, 'utf-8')
     const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/)
     if (!match) {
-      fs.rmSync(tmpDir, { recursive: true })
       return c.json({ error: 'Invalid SKILL.md: missing frontmatter' }, 400)
     }
 
@@ -442,13 +454,11 @@ adminRoute.post('/skills/upload', async (c) => {
     }
 
     if (!skillName) {
-      fs.rmSync(tmpDir, { recursive: true })
       return c.json({ error: 'Invalid SKILL.md: name is required in frontmatter' }, 400)
     }
 
     const sanitized = sanitizeSkillName(skillName)
     if (!sanitized.ok) {
-      fs.rmSync(tmpDir, { recursive: true })
       return c.json({ error: `Invalid SKILL.md: ${sanitized.error}` }, 400)
     }
 
@@ -459,19 +469,15 @@ adminRoute.post('/skills/upload', async (c) => {
     }
     fs.renameSync(actualDir, destDir)
 
-    // Clean up temp directory
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true })
-    }
-
     skillRegistry.refresh()
     return c.json({ success: true, skills: skillRegistry.getAll() })
   } catch (err: any) {
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true })
-    }
     console.error('Skill upload failed:', err)
     return c.json({ error: err.message || 'Upload failed' }, 500)
+  } finally {
+    // 成功/失败（含缺 SKILL.md、缺 frontmatter、缺 name 等早退分支）统一清理临时目录，
+    // 不把 skills/__upload_tmp_* 留给 skillRegistry.refresh() 注册
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true })
   }
 })
 

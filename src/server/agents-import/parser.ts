@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import AdmZip from 'adm-zip'
-import { hasZipSlip, resolveZipRoot, sanitizeSkillName } from '../lib/zip.js'
+import { hasUnsafeFileName, hasZipSlip, resolveZipRoot, sanitizeSkillName } from '../lib/zip.js'
 import { DEFAULT_AGENT_MODEL, NEUTRAL_AGENT_ID, NEUTRAL_AGENT_NAME } from '../../shared/constants.js'
 import type { Agent, AgentOrigin } from '../../shared/types.js'
 import type {
@@ -509,8 +509,8 @@ function discoverSkills(files: Map<string, Buffer>, errors: string[]): SkillCand
       const rel = path.slice(prefix.length)
       if (!rel || rel.startsWith('__MACOSX') || rel.endsWith('.DS_Store')) continue
       const segments = rel.split('/')
-      // ':' 同时覆盖盘符（C:）与 NTFS 备用数据流（file:stream），与 sanitizeSkillName 语义一致
-      if (hasControlChars(rel) || rel.includes(':') || segments.some((s) => s === '' || s === '.' || s === '..')) {
+      // 控制字符与 ':'（盘符 / NTFS 备用数据流）由共享谓词判定，与 sanitizeSkillName 语义一致
+      if (hasUnsafeFileName(rel) || segments.some((s) => s === '' || s === '.' || s === '..')) {
         errors.push(`skills/${dir}: unsafe file path "${rel}" was skipped`)
         unsafe = true
         continue

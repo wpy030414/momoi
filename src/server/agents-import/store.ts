@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { sanitizeSkillName } from '../lib/zip.js'
+import { hasUnsafeFileName, sanitizeSkillName } from '../lib/zip.js'
 import { hashFileTree } from './parser.js'
 import type { ParsedPackage, SkillFileEntry } from './types.js'
 
@@ -82,6 +82,18 @@ export function getStagedImport(importId: string, now = Date.now()): StagedLooku
   const entry = stagedImports.get(importId)
   if (entry) return { state: 'ok', data: entry.data }
   return expiredIds.has(importId) ? { state: 'expired' } : { state: 'missing' }
+}
+
+/**
+ * 原子取用：同一次同步调用内取出并删除暂存条目，并发 commit 只有一个能拿到数据。
+ * 未命中时的 404/410 语义与 getStagedImport 一致。
+ */
+export function takeStagedImport(importId: string, now = Date.now()): StagedLookup {
+  pruneExpiredImports(now)
+  const entry = stagedImports.get(importId)
+  if (!entry) return expiredIds.has(importId) ? { state: 'expired' } : { state: 'missing' }
+  stagedImports.delete(importId)
+  return { state: 'ok', data: entry.data }
 }
 
 export function deleteStagedImport(importId: string): void {
@@ -169,13 +181,14 @@ export function installSkillTree(
   const existed = fs.existsSync(dest)
   if (existed && !overwrite) return { ok: false, error: 'skill is already installed' }
 
-  const tmpDir = path.resolve(root, `import-tmp-${randomUUID()}`)
+  // 下划线不在技能名允许的字符集内（[a-z0-9-]+），故该前缀不可能与合法技能名冲突
+  const tmpDir = path.resolve(root, `import_tmp_${randomUUID()}`)
   try {
     fs.mkdirSync(tmpDir, { recursive: true })
     for (const file of files) {
       // ':' 覆盖盘符与 NTFS 备用数据流（file:stream），与 sanitizeSkillName 语义一致
-      if (file.path.includes(':')) {
-        throw new Error(`skill file path contains ":" (alternate data stream): ${file.path}`)
+      if (hasUnsafeFileName(file.path)) {
+        throw new Error(`skill file path contains ":" (alternate data stream) or control characters: ${file.path}`)
       }
       const target = path.resolve(tmpDir, file.path)
       if (!target.startsWith(tmpDir + path.sep)) {

@@ -34,8 +34,9 @@
 | `src/server/agents-import/parser.ts` | zip 解析、双形态发现、清单校验、persona/技能提取（纯函数，无 DB 依赖） |
 | `src/server/agents-import/types.ts` | 解析中间类型（包级错误/警告、候选、冲突） |
 | `src/server/agents-import/store.ts` | 待确认导入的内存暂存（TTL 24h），先例：`chat.ts` 的 `infiniteState` |
-| `src/server/lib/zip.ts` | 从 `routes/admin.ts` 提取的 zip 安全 helper（防穿越、包装目录、macOS 清理；三者行为不变）+ 新增名称净化（见解析逻辑 9） |
+| `src/server/lib/zip.ts` | 从 `routes/admin.ts` 提取的 zip 安全 helper（防穿越、包装目录、macOS 清理；三者行为不变）+ 新增名称净化与条目安全校验（见解析逻辑 9） |
 | `src/server/routes/admin.ts` | 新增导入路由（挂载 `adminAuthMiddleware`）；技能上传改为引用共享 helper |
+| `src/server/skills/loader.ts` | 技能扫描跳过上传/安装临时目录（`__upload_tmp_*`、`import-tmp-*`），残留目录不会注册为 `unknown` |
 | `src/server/config.ts` | `createAgent`/`updateAgent` 支持 `origin` |
 | `src/server/db.ts` | `agents.origin` 列迁移（`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE` 预检） |
 | `src/shared/types.ts` | `Agent` 增加可选 `origin`；导入相关 API 类型 |
@@ -108,9 +109,14 @@
 | 非 zip / 超过 50MB | 400（复用技能上传语义） |
 | zip 路径穿越 | 400 |
 | 既无扩展清单也无 `agents/` 通用层 | 400 `{ "error": "Not an agent import package" }` |
-| `plugin.json` 违反 closed-schema 或扩展层路径越出插件根 | 400，整包拒绝 |
+| `plugin.json` 违反 closed-schema | 400，整包拒绝 |
+| 扩展清单路径（`extensions."xrl.momoi".manifest` 或默认 `xrl.momoi/plugin.json`）越出插件根或文件缺失 | 400，整包拒绝 |
+| persona `primary` 越出插件根或缺失 | 该项记入 `errors`，其余候选继续（隔离边界） |
+| persona `avatar` 越出插件根 / 缺失 / 超 5MB / 未知格式 | 记入 `warnings`，候选保留但不带头像 |
 | `formatVersion` 非 1 | 400，整包拒绝（未知协议版本） |
 | 单个 persona/技能文件缺失或 id 非法 | 该项移入 `errors`，不影响其余（隔离边界） |
+
+同一类「路径越界」按引用位置分三档：扩展清单越界整包 400；`primary` 越界是候选级 `errors`；`avatar` 越界只记 `warnings` 且候选保留——三者的判定见解析逻辑 2/7。
 
 ### POST /api/admin/agents/import/:import_id/commit
 
@@ -138,7 +144,8 @@
   - 同名且内容一致：跳过并计入 `skipped`。
 - `import_id` 不存在或过期 → 404 / 410。
 - 请求体非对象、`personas` 或 `skills` 缺失/非数组 → 400（形状校验先于决议映射，避免非可迭代值抛 500）。
-- 提交成功即从暂存删除。单条失败：记入 `errors`，其余不回滚（逐条提交语义）。
+- 通过形状校验与决议映射后，暂存条目被**原子取用**（同一次调用内取出并删除）：两个并发 commit 只有一个能继续写入，另一个 404，不会在逐条写入期间重复导入；畸形请求体 / 非法决议返回 400 时条目仍保留，可修正后重试。
+- 单条失败：记入 `errors`，其余不回滚（逐条提交语义）。
 
 **成功 200**：
 
@@ -165,6 +172,8 @@
 7. 系统提示词正文 = `primary` 文件原文 `trim()`；头像文件转 dataURL 前限制 5MB。
 8. 中立 Agent（`NEUTRAL_AGENT_ID`、`role='neutral'`、名 `中立 Agent`）**不参与冲突比对**，也不得被任何 persona 覆盖；候选 id 或显示名与之相同时记入 `errors`。
 9. **名称与路径净化**：技能名与 persona id 只接受 `[a-z0-9-]+`（与 Agent Skills 规范一致）；含 `..`、`/`、`\`、绝对路径或控制字符的名称一律拒绝并记 `errors`。技能目录内的文件路径拒绝控制字符、空段、`..` 与 `:`（含盘符与 NTFS 备用数据流）。落盘前校验 `path.resolve` 结果仍位于 `skills/` 内。既有技能上传端点的 frontmatter `name` 未经净化（`admin.ts:245` 直接 `path.resolve('skills', name)`），本轮提取共享 helper 时一并补上，两条路径共用同一净化函数；`DELETE /api/admin/skills/:name` 的路径参数同样未经净化（URL 编码的 `../` 可穿越删除 `skills/` 之外的目录），一并净化，非法名返回 400。
+   - 上传端点整包解压前先用共享校验 `findUnsafeZipEntry` 拒绝含 `..`、`:` 或控制字符的条目（400）——`extractAllTo` 会把 `evil.txt:payload` 直接落盘为 NTFS 备用数据流，故必须在写盘前拒绝；导入解析器不落盘，按上款逐文件跳过并记 `errors`（隔离边界）。
+   - 失败路径（缺 SKILL.md / 缺 frontmatter / 缺 name / 非法名 / 解压异常）统一在 `finally` 清理 `skills/__upload_tmp_*`；临时目录名含随机后缀，避免并发上传互删。
 
 ## UI 行为
 

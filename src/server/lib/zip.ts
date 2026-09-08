@@ -13,6 +13,29 @@ export function hasZipSlip(zip: AdmZip): boolean {
   return false
 }
 
+/**
+ * Unsafe file name segment: `:` (Windows drive prefix or NTFS alternate data
+ * stream, e.g. `evil.txt:payload`) or a control character. Mirrors the
+ * corresponding rejections in `sanitizeSkillName` so skill upload, package
+ * import and directory install share one predicate.
+ */
+export function hasUnsafeFileName(name: string): boolean {
+  return name.includes(':') || hasControlChars(name)
+}
+
+/**
+ * First unsafe zip entry name — traversal (`..`), alternate data stream (`:`)
+ * or control characters — or null when every entry is safe. Callers that
+ * extract the whole archive (skill upload) must reject the package before
+ * writing anything to disk.
+ */
+export function findUnsafeZipEntry(zip: AdmZip): string | null {
+  for (const entry of zip.getEntries()) {
+    if (entry.entryName.includes('..') || hasUnsafeFileName(entry.entryName)) return entry.entryName
+  }
+  return null
+}
+
 /** Determine if a zip has a single wrapper directory */
 export function resolveZipRoot(zip: AdmZip): { wrapperDir: string | null } {
   const entries = zip

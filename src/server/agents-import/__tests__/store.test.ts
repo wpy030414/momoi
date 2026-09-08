@@ -11,6 +11,7 @@ import {
   installSkillTree,
   resetImportStore,
   stageImport,
+  takeStagedImport,
 } from '../store.js'
 import { extensionPackage } from './fixtures/index.js'
 
@@ -42,6 +43,25 @@ describe('import staging store', () => {
     expect(getStagedImport(id, 1_000 + IMPORT_TTL_MS - 1).state).toBe('ok')
     expect(getStagedImport(id, 1_000 + IMPORT_TTL_MS).state).toBe('expired')
     expect(getStagedImport('never-staged', 1_000).state).toBe('missing')
+  })
+
+  it('takeStagedImport：取出即删除，第二次取用返回 missing', () => {
+    const id = stageImport(parseFixture(), 1_000)
+
+    const first = takeStagedImport(id, 2_000)
+    expect(first.state).toBe('ok')
+    if (first.state !== 'ok') return
+    expect(first.data.package.name).toBe('placeholder-plugin')
+
+    // 原子取用：不需要（也不允许）再单独 delete
+    expect(takeStagedImport(id, 2_000).state).toBe('missing')
+    expect(getStagedImport(id, 2_000).state).toBe('missing')
+  })
+
+  it('takeStagedImport：过期返回 expired，未知 id 返回 missing', () => {
+    const id = stageImport(parseFixture(), 1_000)
+    expect(takeStagedImport(id, 1_000 + IMPORT_TTL_MS).state).toBe('expired')
+    expect(takeStagedImport('never-staged', 1_000).state).toBe('missing')
   })
 })
 

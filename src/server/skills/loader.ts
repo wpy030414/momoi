@@ -62,6 +62,18 @@ function parseFrontmatter(content: string): { frontmatter: Frontmatter; body: st
   }
 }
 
+/** 上传/安装用的临时目录前缀：其中的 SKILL.md 不属于已装技能 */
+// 前缀含下划线：技能名只允许 [a-z0-9-]+，因此不会与任何合法技能名冲突
+const TEMP_DIR_PREFIXES = ['__upload_tmp_', 'import_tmp_']
+
+/**
+ * 临时目录不参与技能扫描：上传或导入写入中途（或失败残留）的目录可能含
+ * 无 frontmatter 的 SKILL.md，若被登记就会在技能表里出现名为 `unknown` 的技能。
+ */
+function isTempSkillDir(name: string): boolean {
+  return TEMP_DIR_PREFIXES.some((prefix) => name.startsWith(prefix))
+}
+
 function loadSkill(skillDir: string): InstalledSkill | null {
   const skillPath = path.join(skillDir, 'SKILL.md')
   if (!fs.existsSync(skillPath)) return null
@@ -110,13 +122,13 @@ function scanSkillsDir(): InstalledSkill[] {
     }
 
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue
+      if (!entry.isDirectory() || isTempSkillDir(entry.name)) continue
       walk(path.join(dir, entry.name))
     }
   }
 
   for (const entry of fs.readdirSync(SKILLS_DIR, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
+    if (!entry.isDirectory() || isTempSkillDir(entry.name)) continue
     walk(path.join(SKILLS_DIR, entry.name))
   }
   return skills
