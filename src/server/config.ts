@@ -11,6 +11,8 @@ import {
   DEFAULT_AGENT_MODEL,
   DEFAULT_AGENT_SYSTEM_PROMPT,
   DEFAULT_MODEL,
+  NEUTRAL_AGENT_NAME,
+  NEUTRAL_AGENT_ID,
 } from '../shared/constants.js'
 
 // .env values (read at startup, not hot-reloadable)
@@ -70,6 +72,7 @@ export async function listAgents(): Promise<Agent[]> {
     model: r.model,
     system_prompt: r.system_prompt,
     avatar: r.avatar,
+    role: r.role as Agent['role'],
     created_at: r.created_at,
   }))
 }
@@ -83,12 +86,13 @@ export async function getAgent(id: string): Promise<Agent | null> {
     model: row.model,
     system_prompt: row.system_prompt,
     avatar: row.avatar,
+    role: row.role as Agent['role'],
     created_at: row.created_at,
   }
 }
 
-export async function createAgent(name: string, model: string, systemPrompt: string, avatar = ''): Promise<Agent> {
-  const id = randomUUID()
+export async function createAgent(name: string, model: string, systemPrompt: string, avatar = '', role: Agent['role'] = 'default'): Promise<Agent> {
+  const id = role === 'neutral' ? NEUTRAL_AGENT_ID : randomUUID()
   const now = Math.floor(Date.now() / 1000)
   await db.insert(agents).values({
     id,
@@ -96,9 +100,10 @@ export async function createAgent(name: string, model: string, systemPrompt: str
     model,
     system_prompt: systemPrompt,
     avatar,
+    role,
     created_at: now,
   }).run()
-  return { id, name, model, system_prompt: systemPrompt, avatar, created_at: now }
+  return { id, name, model, system_prompt: systemPrompt, avatar, role, created_at: now }
 }
 
 export async function updateAgent(id: string, partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar'>>): Promise<Agent | null> {
@@ -122,7 +127,7 @@ export async function deleteAgent(id: string): Promise<boolean> {
   return true
 }
 
-// ---- Migration: auto-create Default agent from legacy global config ----
+// ---- Migration: auto-create Default agent + Neutral Agent from legacy global config ----
 
 export async function migrateDefaultAgent(): Promise<void> {
   const existingAgents = await listAgents()
@@ -134,4 +139,8 @@ export async function migrateDefaultAgent(): Promise<void> {
 
   await createAgent(DEFAULT_AGENT_NAME, oldModel, oldPrompt)
   console.log(`[migrate] Created default agent "${DEFAULT_AGENT_NAME}" with model "${oldModel}"`)
+
+  // Create neutral agent: reuses first agent's model, no name/avatar editing
+  await createAgent(NEUTRAL_AGENT_NAME, oldModel, '', '', 'neutral')
+  console.log(`[migrate] Created neutral agent "${NEUTRAL_AGENT_NAME}" with model "${oldModel}"`)
 }

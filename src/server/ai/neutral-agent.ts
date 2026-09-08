@@ -20,10 +20,15 @@ export async function generateNeutralFollowUp(
   config: AppConfig,
   agentModel: string,
   conversationContext: string,
+  extraSystemPrompt?: string,
 ): Promise<string | null> {
   try {
+    const systemPrompt = extraSystemPrompt
+      ? `${NEUTRAL_SYSTEM_PROMPT}\n\n--- 额外指示 ---\n${extraSystemPrompt}`
+      : NEUTRAL_SYSTEM_PROMPT
+
     const messages: ChatMessage[] = [
-      { role: 'system', content: NEUTRAL_SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: `以下是一段对话的上下文，请以用户的口吻生成一个最自然的追问：\n\n${conversationContext}\n\n追问：` },
     ]
 

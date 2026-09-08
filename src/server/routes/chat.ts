@@ -12,6 +12,7 @@ import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage, Attachment } from '../../shared/types.js'
 import { randomUUID } from 'crypto'
 import { getConfig, listAgents } from '../config.js'
+import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { SandboxFS } from '../tools/workspace.js'
@@ -276,8 +277,10 @@ chatRoute.post('/', async (c) => {
         ).join('\n')
 
         const config = await getConfig()
-        const model = agents[0]?.model || 'gpt-4o'
-        const followUp = await generateNeutralFollowUp(config, model, context)
+        const neutralAgent = agents.find((a) => a.id === NEUTRAL_AGENT_ID)
+        const model = neutralAgent?.model || agents[0]?.model || 'gpt-4o'
+        const extraPrompt = neutralAgent?.system_prompt?.trim() || undefined
+        const followUp = await generateNeutralFollowUp(config, model, context, extraPrompt)
         if (followUp) {
           send({ type: 'follow_up', text: followUp })
           const now = Math.floor(Date.now() / 1000)

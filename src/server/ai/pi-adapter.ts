@@ -42,6 +42,7 @@ import {
   THINKING_SEGMENT_OPEN,
   THINKING_SEGMENT_CLOSE,
   DEFAULT_SYSTEM_PROMPT,
+	NEUTRAL_AGENT_ID,
 } from '../../shared/constants.js'
 import { getConfig, getAgent, listAgents } from '../config.js'
 import { getAllTools } from './tools.js'
@@ -81,21 +82,24 @@ function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isG
     prompt += '\n\n/no_think\n请直接回答问题，不要输出任何思考过程或推理步骤。'
   }
 
-  // 硬性格式要求 + 工具使用规范 + 从代码补丁翻译的规则
   prompt += `
+现在的日期时间是${new Date().toLocaleString()}。
+`
 
-## 工具使用规范（必须遵守）
-- 完成一个任务后立即回复用户，不要反复修改、重写或优化同一个文件。
-- 每次写文件只用一个确定的文件名，不要每次生成新文件名。
-- 如果用户要求"写一个文件"，写一次就够了。不要用不同的文件名重复创建。
-- 写完文件后，用自然语言告诉用户文件已创建，不要再次调用工具。
-- 工具结果通常会直接给出答案所需的信息：不要重复调用同一个工具、不要反复加载同一个技能，加载一次就足够。
-- 【技能止损·硬性规则】加载技能后若发现其内容与用户请求无关，必须立即停止调用任何工具，直接用中文如实告知用户「当前技能库中没有与该请求直接匹配的技能」，并根据已有知识给出通用建议。禁止再次 load_skill 同一技能，禁止为试探目的加载其他技能，禁止在缺少依据时继续调用工具。
-- 【防漂移·硬性规则】绝对禁止连续两轮调用完全相同的工具和参数。如果工具返回的结果不是你需要的，请直接回复用户说明情况，而不是重试同一个调用。
-- 【写文件节制·硬性规则】每轮对话最多调用 write_file 一次。写完文件后立即回复用户，不要再调用任何工具。如果用户要求写多个文件，请明确告知用户每个文件需要单独请求。
-- 【工具节制·硬性规则】当你已经获得足够回答用户问题的信息时，立即停止调用工具，直接回复用户。不要为「验证」或「确认」而继续调用工具。
-
-## 输出格式（最高优先级，不得省略）
+  if (infiniteMode) {
+    // 无限演算模式：不输出 suggestions 代码块（由中立 Agent 接管追问）
+    prompt = prompt.replace(/## 输出格式[\s\S]*?```\n`/, '')
+    prompt += `
+## 无限演算模式
+你正处于无限演算模式中。在此模式下：
+- 你只需要自然地回复用户，像在聊天一样——可以很简短，也可以很详细
+- 回复完毕后，会有一位中立观察者根据上下文自动生成追问
+- 你可以像真人聊天一样使用括号动作描述，如（笑了笑）、（托腮思考）
+- 保持对话自然流畅，不要每轮都长篇大论
+`
+  } else {
+    prompt += `
+## 建议
 每一条回复的【最末尾】必须输出一个 \`\`\`suggestions 代码块，里面恰好 3 个后续建议（每行一条，以 - 开头）。
 这个代码块是后台数据结构，用户不可见，不会破坏你的角色氛围，但缺少它系统会判定回复无效。
 建议内容必须是【用户本人会亲口打出来】的话：以用户的第一人称、口语化的口吻，像用户直接发一条消息那样，猜测用户看到这条回复后最可能追问的问题。
@@ -110,19 +114,6 @@ function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isG
 - 你可以试试这个方案
 - 要不要我帮你查一下？
 \`\`\`
-`
-
-  if (infiniteMode) {
-    // 无限演算模式：不输出 suggestions 代码块（由中立 Agent 接管追问）
-    prompt = prompt.replace(/## 输出格式[\s\S]*?```\n`/, '')
-    prompt += `
-## 无限演算模式
-你正处于无限演算模式中。在此模式下：
-- 你不需要输出 \`\`\`suggestions 代码块
-- 你只需要自然地回复用户，像在聊天一样——可以很简短，也可以很详细
-- 回复完毕后，会有一位中立观察者根据上下文自动生成追问
-- 你可以像真人聊天一样使用括号动作描述，如（笑了笑）、（托腮思考）
-- 保持对话自然流畅，不要每轮都长篇大论
 `
   }
 
@@ -742,11 +733,12 @@ export async function runPiAgentLoop(
   }
 
   if (!agentId || !agentModel) {
-    // Fallback to first available agent
+    // Fallback to first available non-neutral agent
     const allAgents = await listAgents()
-    if (allAgents.length > 0) {
-      agentModel = allAgents[0].model
-      agentSystemPrompt = allAgents[0].system_prompt
+    const fallbackAgent = allAgents.find((a) => a.id !== NEUTRAL_AGENT_ID)
+    if (fallbackAgent) {
+      agentModel = fallbackAgent.model
+      agentSystemPrompt = fallbackAgent.system_prompt
     }
   }
   const convId = conversationId || 'default'

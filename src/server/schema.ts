@@ -36,6 +36,7 @@ export const agents = sqliteTable('agents', {
   model: text('model').notNull().default(''),
   system_prompt: text('system_prompt').notNull().default(''),
   avatar: text('avatar').notNull().default(''),
+  role: text('role').notNull().default('default'),
   created_at: integer('created_at').notNull(),
 })
 

@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import { adminAuthMiddleware, signAdminToken, verifyAdminKey } from '../auth.js'
 import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent } from '../config.js'
+import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
 import { skillRegistry } from '../skills/loader.js'
@@ -65,6 +66,13 @@ adminRoute.post('/agents', async (c) => {
 adminRoute.put('/agents/:id', async (c) => {
   const id = c.req.param('id')
   const body = await c.req.json<{ name?: string; model?: string; system_prompt?: string; avatar?: string }>()
+
+  // Neutral agent: only model and system_prompt can be changed
+  if (id === NEUTRAL_AGENT_ID) {
+    delete body.name
+    delete body.avatar
+  }
+
   const agent = await updateAgent(id, body)
   if (!agent) {
     return c.json({ error: 'Agent not found' }, 404)
@@ -74,6 +82,12 @@ adminRoute.put('/agents/:id', async (c) => {
 
 adminRoute.delete('/agents/:id', async (c) => {
   const id = c.req.param('id')
+
+  // Neutral agent cannot be deleted
+  if (id === NEUTRAL_AGENT_ID) {
+    return c.json({ error: 'Neutral agent cannot be deleted' }, 403)
+  }
+
   const ok = await deleteAgent(id)
   if (!ok) {
     return c.json({ error: 'Agent not found' }, 404)

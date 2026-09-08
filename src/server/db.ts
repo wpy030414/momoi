@@ -48,6 +48,7 @@ async function migrate() {
       model TEXT NOT NULL DEFAULT '',
       system_prompt TEXT NOT NULL DEFAULT '',
       avatar TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT 'default',
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 

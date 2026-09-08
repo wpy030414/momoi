@@ -4,6 +4,7 @@ import { conversations, messages, groupConversationAgents, agents } from '../sch
 import { eq, and, desc, gte, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
+import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 
 function getUserId(c: any): string {
   return c.get('userId') || ''
@@ -82,6 +83,7 @@ conversationsRoute.post('/', async (c) => {
   // Insert group agent associations
   if (body.type === 'group' && body.agent_ids && body.agent_ids.length > 0) {
     for (let i = 0; i < body.agent_ids.length; i++) {
+      if (body.agent_ids[i] === NEUTRAL_AGENT_ID) continue // skip neutral agent
       await db.insert(groupConversationAgents).values({
         conversation_id: id,
         agent_id: body.agent_ids[i],

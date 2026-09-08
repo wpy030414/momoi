@@ -61,6 +61,7 @@ export interface Agent {
   model: string
   system_prompt: string
   avatar: string
+  role: 'default' | 'neutral'
   created_at: number
 }
 

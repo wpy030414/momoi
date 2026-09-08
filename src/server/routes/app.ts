@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getConfig, listAgents } from '../config.js'
+import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 
 export const appRoute = new Hono()
 
@@ -13,6 +14,6 @@ appRoute.get('/', async (c) => {
     app_background: config.app_background,
     support_attachments: config.support_attachments,
     show_github: config.show_github,
-    agents: agents.map((a) => ({ id: a.id, name: a.name, avatar: a.avatar })),
+    agents: agents.filter((a) => a.id !== NEUTRAL_AGENT_ID).map((a) => ({ id: a.id, name: a.name, avatar: a.avatar })),
   })
 })

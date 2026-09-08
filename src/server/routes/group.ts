@@ -5,8 +5,9 @@
 import { Hono } from 'hono'
 import { db } from '../db.js'
 import { conversations, groupConversationAgents, agents } from '../schema.js'
-import { eq, and, sql } from 'drizzle-orm'
+import { eq, and, sql, ne } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
+import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 
 function getUserId(c: any): string {
   return c.get('userId') || ''
@@ -40,7 +41,7 @@ groupRoute.get('/:id/agents', async (c) => {
   })
     .from(groupConversationAgents)
     .innerJoin(agents, eq(groupConversationAgents.agent_id, agents.id))
-    .where(eq(groupConversationAgents.conversation_id, convId))
+    .where(and(eq(groupConversationAgents.conversation_id, convId), ne(agents.id, NEUTRAL_AGENT_ID)))
     .orderBy(groupConversationAgents.sort_order)
     .all()
 
@@ -62,6 +63,7 @@ groupRoute.post('/:id/agents', async (c) => {
   const body = await c.req.json<{ agent_id: string }>()
 
   if (!body.agent_id) return c.json({ error: 'agent_id required' }, 400)
+  if (body.agent_id === NEUTRAL_AGENT_ID) return c.json({ error: 'Neutral agent cannot be added to group chat' }, 403)
 
   // Verify conversation ownership
   const conv = await db.select()
