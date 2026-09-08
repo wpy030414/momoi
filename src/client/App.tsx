@@ -10,6 +10,7 @@ import { MenuDialog } from './components/settings/MenuDialog'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { Button } from './components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
 import { PanelLeft, X, Check } from 'lucide-react'
 import { api, getUser, setToken } from './lib/api'
 
@@ -27,6 +28,7 @@ export function App() {
   const [showGithub, setShowGithub] = useState(true)
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
   const [agents, setAgents] = useState<Array<{ id: string; name: string; avatar: string }>>([])
+  const [agentsLoading, setAgentsLoading] = useState(true)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -41,6 +43,10 @@ export function App() {
   const [groupManageOpen, setGroupManageOpen] = useState(false)
   const [groupManageConvId, setGroupManageConvId] = useState<string | null>(null)
   const [infiniteMode, setInfiniteMode] = useState(false)
+
+  // Delete confirmation
+  const [deleteConvId, setDeleteConvId] = useState<string | null>(null)
+  const [deleteConvTitle, setDeleteConvTitle] = useState('')
 
   // Toggle infinite mode: notify server to enable/disable the loop
   const handleInfiniteModeChange = async (enabled: boolean) => {
@@ -65,6 +71,20 @@ export function App() {
       setSelectedGroupAgents(chat.groupAgents.map((a: { id: string }) => a.id))
     }
     setGroupManageOpen(true)
+  }
+
+  // Delete conversation with confirmation
+  const handleDeleteConversation = (id: string) => {
+    const conv = chat.conversations.find((c) => c.id === id)
+    setDeleteConvId(id)
+    setDeleteConvTitle(conv?.title || '')
+  }
+
+  const confirmDeleteConversation = async () => {
+    if (!deleteConvId) return
+    await chat.deleteConversation(deleteConvId)
+    setDeleteConvId(null)
+    setDeleteConvTitle('')
   }
 
   const handleLogin = (username: string, token: string) => {
@@ -107,7 +127,7 @@ export function App() {
         setAgents(r.agents)
         setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
       }
-    }).catch(() => {})
+    }).catch(() => {}).finally(() => setAgentsLoading(false))
   }, [])
 
   // Re-fetch appName + agents when admin view closes (user may have changed them)
@@ -209,7 +229,7 @@ export function App() {
           onNew={chat.createConversation}
           onNewGroup={() => setGroupDialogOpen(true)}
           onRename={chat.renameConversation}
-          onDelete={chat.deleteConversation}
+          onDelete={handleDeleteConversation}
           onExport={chat.exportConversation}
           onMenuClick={() => setMenuOpen(true)}
           onManageGroupAgents={handleManageGroupAgents}
@@ -249,6 +269,7 @@ export function App() {
           backgroundImage={backgroundImage}
           supportAttachments={supportAttachments}
           agents={agents}
+          agentsLoading={agentsLoading}
           selectedAgentId={selectedAgentId}
           onAgentChange={setSelectedAgentId}
           isGroup={chat.isGroupMode}
@@ -415,6 +436,26 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* Delete conversation confirmation dialog */}
+      <Dialog open={!!deleteConvId} onOpenChange={(open) => { if (!open) { setDeleteConvId(null); setDeleteConvTitle('') } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('sidebar.delete')}</DialogTitle>
+            <DialogDescription>
+              {t('sidebar.deleteConfirm', { name: deleteConvTitle })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDeleteConvId(null); setDeleteConvTitle('') }}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteConversation}>
+              {t('sidebar.delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

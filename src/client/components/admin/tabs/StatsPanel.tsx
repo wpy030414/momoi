@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
 import { api } from '../../../lib/api'
@@ -87,9 +87,8 @@ export function StatsPanel({ token }: StatsPanelProps) {
                 </thead>
                 <tbody>
                   {paginatedConversations.map((conv) => (
-                    <>
+                    <React.Fragment key={conv.id}>
                       <tr
-                        key={conv.id}
                         className={`border-t cursor-pointer hover:bg-muted/30 transition-colors ${expandedConvId === conv.id ? 'bg-muted/50' : ''}`}
                         onClick={() => handleRowClick(conv.id)}
                       >
@@ -127,7 +126,7 @@ export function StatsPanel({ token }: StatsPanelProps) {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

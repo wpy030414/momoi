@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import Markdown from 'react-markdown'
+import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 interface MessageContentProps {
@@ -9,6 +10,39 @@ interface MessageContentProps {
 }
 
 const STREAM_THROTTLE_MS = 120
+
+/** Custom markdown components — shadcn-style table rendering */
+const markdownComponents: Components = {
+  hr: ({ ...props }) => (
+    <hr className="my-4 border-border" {...props} />
+  ),
+  table: ({ children, ...props }) => (
+    <div className="my-4 overflow-x-auto rounded-lg border">
+      <table className="w-full text-sm" {...props}>
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children, ...props }) => (
+    <thead className="bg-muted/50" {...props}>{children}</thead>
+  ),
+  tbody: ({ children, ...props }) => (
+    <tbody className="divide-y" {...props}>{children}</tbody>
+  ),
+  tr: ({ children, ...props }) => (
+    <tr className="border-b last:border-b-0" {...props}>{children}</tr>
+  ),
+  th: ({ children, ...props }) => (
+    <th className="px-3 py-2 text-left font-medium text-muted-foreground" {...props}>
+      {children}
+    </th>
+  ),
+  td: ({ children, ...props }) => (
+    <td className="px-3 py-2" {...props}>
+      {children}
+    </td>
+  ),
+}
 
 export function MessageContent({ content, streaming }: MessageContentProps) {
   // Throttle content updates during streaming to avoid re-parsing markdown
@@ -50,7 +84,7 @@ export function MessageContent({ content, streaming }: MessageContentProps) {
           const chart = part.replace(/```mermaid\n?/, '').replace(/\n?```$/, '')
           return <MermaidBlock key={idx} chart={chart} />
         }
-        return <Markdown key={idx} remarkPlugins={[remarkGfm]}>{part}</Markdown>
+        return <Markdown key={idx} remarkPlugins={[remarkGfm]} components={markdownComponents}>{part}</Markdown>
       })}
     </div>
   )

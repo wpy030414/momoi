@@ -58,6 +58,7 @@
     "rename": "重命名",
     "saveAsTxt": "另存为 TXT",
     "delete": "删除",
+    "deleteConfirm": "确定要删除会话「{{name}}」吗？此操作不可撤销。",
     "groupMembers": "群成员"
   },
   "menu": {
@@ -133,6 +134,7 @@
     "toastAgentDeleted": "智能体已删除",
     "toastSkillUploaded": "技能已上传",
     "toastSkillRemoved": "技能已移除",
+    "skillDeleteConfirm": "确定要卸载这个技能吗？此操作不可撤销，将删除技能目录。",
     "noSkills": "暂无已安装的技能",
     "uploadSkill": "上传技能 (.zip)",
     "authFailed": "验证失败"

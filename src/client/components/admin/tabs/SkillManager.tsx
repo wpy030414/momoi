@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
 import { Upload } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
@@ -16,6 +17,7 @@ export function SkillManager({ token }: SkillManagerProps) {
   const [fetching, setFetching] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [deleteSkillName, setDeleteSkillName] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -41,6 +43,19 @@ export function SkillManager({ token }: SkillManagerProps) {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
+  const confirmUninstallSkill = async () => {
+    if (!deleteSkillName) return
+    try {
+      await api.uninstallSkill(token, deleteSkillName)
+      const r = await api.listAdminSkills(token)
+      setSkills(r.skills)
+      toast({ title: t('settings.toastSkillRemoved'), variant: 'success' })
+    } catch (err) {
+      console.error('Failed to uninstall skill:', err)
+    }
+    setDeleteSkillName(null)
+  }
+
   return (
     <div className="space-y-4 pt-4">
       <div className="flex items-center gap-2">
@@ -62,17 +77,34 @@ export function SkillManager({ token }: SkillManagerProps) {
               <p className="font-medium">{s.manifest?.name || s.name}</p>
               <p className="text-sm text-muted-foreground">{s.manifest?.description || s.description}</p>
             </div>
-            <Button variant="destructive" size="sm" onClick={async () => {
-              await api.uninstallSkill(token, s.manifest?.name || s.name)
-              const r = await api.listAdminSkills(token)
-              setSkills(r.skills)
-              toast({ title: t('settings.toastSkillRemoved'), variant: 'success' })
+            <Button variant="destructive" size="sm" onClick={() => {
+              setDeleteSkillName(s.manifest?.name || s.name)
             }}>
               {t('common.remove')}
             </Button>
           </div>
         ))
       )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteSkillName} onOpenChange={(open) => { if (!open) setDeleteSkillName(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('common.remove')}</DialogTitle>
+            <DialogDescription>
+              {t('settings.skillDeleteConfirm')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteSkillName(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="destructive" onClick={confirmUninstallSkill}>
+              {t('common.remove')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

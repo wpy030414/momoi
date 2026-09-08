@@ -58,6 +58,7 @@
     "rename": "Rename",
     "saveAsTxt": "Save as TXT",
     "delete": "Delete",
+    "deleteConfirm": "Delete conversation \"{{name}}\"? This action cannot be undone.",
     "groupMembers": "Members"
   },
   "menu": {
@@ -134,6 +135,7 @@
     "toastAgentDeleted": "Agent deleted",
     "toastSkillUploaded": "Skill uploaded",
     "toastSkillRemoved": "Skill removed",
+    "skillDeleteConfirm": "Uninstall this skill? This action cannot be undone and will delete the skill directory.",
     "noSkills": "No skills installed",
     "uploadSkill": "Upload Skill (.zip)",
     "authFailed": "Auth failed"

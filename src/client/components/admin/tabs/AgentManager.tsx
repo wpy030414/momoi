@@ -30,7 +30,7 @@ function AgentRow({
   formModel: string; setFormModel: (v: string) => void
   formSystemPrompt: string; setFormSystemPrompt: (v: string) => void
   formAvatar: string; setFormAvatar: (v: string) => void
-  avatarInputRef: React.RefObject<HTMLInputElement>
+  avatarInputRef: React.RefObject<HTMLInputElement | null>
   handleAvatarChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   loading: boolean
   t: (key: string) => string

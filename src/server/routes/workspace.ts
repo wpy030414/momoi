@@ -68,7 +68,7 @@ workspaceRoute.get('/:conversationId/file/*', async (c) => {
     const mime = guessMime(ext)
     const encodedName = encodeURIComponent(path.basename(filePath))
 
-    return new Response(buffer, {
+    return new Response(new Uint8Array(buffer), {
       headers: {
         'Content-Type': mime,
         'Content-Length': String(buffer.length),
