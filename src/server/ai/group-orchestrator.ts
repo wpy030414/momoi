@@ -86,6 +86,21 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
   const repliedAgents = new Set<string>()
   let remaining = [...shuffled]
   let mentionDepth = 0
+  let mentionedBy: string | null = null
+
+  // Parse user message for @AgentName mentions — insert them to the front of the queue
+  if (typeof userMessage === 'string') {
+    const userMentions = parseUserMentions(userMessage, agentNameById)
+    if (userMentions.length > 0) {
+      // Insert mentioned agents at the front, preserving their order in the user message,
+      // and deduplicate (remove from later positions in remaining)
+      for (const mid of userMentions.reverse()) {
+        remaining = [mid, ...remaining.filter(id => id !== mid)]
+      }
+      // Set mentionedBy to "user" so the system prompt can acknowledge it
+      mentionedBy = '用户'
+    }
+  }
 
   // Accumulate history so each agent sees previous agents' replies.
   // 其他 Agent 的发言统一转为 `[名字]: 内容` 的 user 消息，
@@ -110,9 +125,13 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
     // Reset mention signal for this agent
     const mentionSignal: MentionSignal = {
       triggered: false,
-      agentName: null,
+      agentNames: [],
       message: null,
     }
+
+    // Consume mention signal for this agent, then reset
+    const currentMentionedBy = mentionedBy
+    mentionedBy = null
 
     try {
       const { reply, suggestions, thinking, artifacts } = await runPiAgentLoop(
@@ -131,6 +150,7 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         false, // infiniteMode
         agent.name,
         Array.from(agentNameById.values()),
+        currentMentionedBy,
       )
 
       repliedAgents.add(agentId)
@@ -159,18 +179,31 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
       })
 
       // Check for @mention signal
-      if (mentionSignal.triggered && mentionSignal.agentName) {
+      if (mentionSignal.triggered && mentionSignal.agentNames.length > 0) {
         mentionDepth++
         if (mentionDepth > MAX_MENTION_REDIRECTS) {
           console.warn('Group chat: max mention redirects reached, stopping')
           break
         }
 
-        // Find the target agent by name
-        const targetAgentId = await resolveAgentByName(mentionSignal.agentName, agentIds)
-        if (targetAgentId && !repliedAgents.has(targetAgentId)) {
-          // Clear remaining queue — only the mentioned agent replies
-          remaining = [targetAgentId]
+        // Resolve all mentioned agent names to IDs
+        const resolved = new Set<string>()
+        for (const name of mentionSignal.agentNames) {
+          const id = await resolveAgentByName(name, agentNameById)
+          if (id) resolved.add(id)
+        }
+
+        if (resolved.size > 0) {
+          for (const id of resolved) {
+            // Allow bonus reply for agents who already spoke
+            if (repliedAgents.has(id)) {
+              repliedAgents.delete(id)
+            }
+          }
+          // Insert all mentioned agents at the front, preserving their order in the call
+          remaining = [...resolved, ...remaining.filter(id => !resolved.has(id))]
+          // Pass who mentioned them so the agents' system prompts can acknowledge it
+          mentionedBy = agent.name
         }
       }
     } catch (err) {
@@ -190,20 +223,71 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
   send({ type: 'group_done' })
 }
 
-async function resolveAgentByName(name: string, agentIds: string[]): Promise<string | null> {
-  const lowerName = name.toLowerCase().trim()
-  for (const id of agentIds) {
-    const agent = await getAgent(id)
-    if (agent && agent.name.toLowerCase().trim() === lowerName) {
-      return id
+/**
+ * Parse user message for @AgentName patterns and return matching agent IDs.
+ * Agents are returned in the order they appear in the message.
+ *
+ * Handles fuzzy matching:
+ * - @巧克力你好 → progressively truncates "巧克力你好" → "巧克力你" → "巧克力" matches!
+ * - @巧克 (incomplete) → agent name "巧克力" contains "巧克" → matches!
+ * - @巧 (too short, ambiguous) → skipped (minimum 2 chars for fuzzy match)
+ */
+function parseUserMentions(userMessage: string, agentNameById: Map<string, string>): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+  // Match @ followed by word characters or CJK characters
+  const mentionRe = /@([\w一-鿿぀-ゟ゠-ヿ]+)/g
+  let match: RegExpExecArray | null
+  while ((match = mentionRe.exec(userMessage)) !== null) {
+    const rawName = match[1].trim()
+    const agentId = findBestAgentMatch(rawName, agentNameById)
+    if (agentId && !seen.has(agentId)) {
+      seen.add(agentId)
+      result.push(agentId)
     }
   }
-  // Fuzzy match: name contains
-  for (const id of agentIds) {
-    const agent = await getAgent(id)
-    if (agent && agent.name.toLowerCase().includes(lowerName)) {
-      return id
+  return result
+}
+
+/**
+ * Try to match a raw name string against known agent names using progressive truncation.
+ *
+ * Strategy: start with the full matched string, then try progressively shorter prefixes.
+ * This handles cases like "@巧克力你好" where the regex greedily matches too much.
+ *
+ * For each prefix, we try:
+ * 1. Exact match (case-insensitive, trimmed)
+ * 2. Agent name contains prefix (fuzzy, min 2 chars to avoid false positives)
+ *
+ * Returns the first matching agent ID, or null if no match.
+ */
+function findBestAgentMatch(rawName: string, agentNameById: Map<string, string>): string | null {
+  // Progressive truncation: try from longest to shortest prefix
+  for (let len = rawName.length; len >= 1; len--) {
+    const prefix = rawName.slice(0, len).toLowerCase().trim()
+    if (!prefix) continue
+
+    // 1. Exact match
+    for (const [id, agentName] of agentNameById) {
+      if (agentName.toLowerCase().trim() === prefix) {
+        return id
+      }
+    }
+
+    // 2. Fuzzy: agent name contains the prefix (only for substantial prefixes)
+    // Extreme case: if user types "@巧克" and there's "巧克力Bonbon",
+    // we still match because agent name contains the prefix.
+    if (prefix.length >= 2) {
+      for (const [id, agentName] of agentNameById) {
+        if (agentName.toLowerCase().includes(prefix)) {
+          return id
+        }
+      }
     }
   }
   return null
+}
+
+async function resolveAgentByName(name: string, agentNameById: Map<string, string>): Promise<string | null> {
+  return findBestAgentMatch(name, agentNameById)
 }

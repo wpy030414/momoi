@@ -6,7 +6,7 @@ import type { ToolModule, ToolContext, ToolResult } from './types.js'
 
 export interface MentionSignal {
   triggered: boolean
-  agentName: string | null
+  agentNames: string[]
   message: string | null
 }
 
@@ -15,43 +15,45 @@ export function createMentionTool(mentionSignal: MentionSignal): ToolModule {
     definition: {
       name: 'at_mention',
       description:
-        'Call a specific agent by name to respond to your question or pass the conversation to them. ' +
-        'Use this when you need another agent\'s expertise or want them to reply next — ' +
-        'the mentioned agent will respond immediately, and other agents will be skipped for this round. ' +
-        'Always provide a clear, self-contained message or question for the target agent.',
+        'Mention one or more agents in the group chat to interact with them — greet them, invite their opinions, ' +
+        'joke with them, or ask for their expertise. This is a natural social tool, like @someone in a real group chat. ' +
+        'ALWAYS include the "@AgentName" mention naturally in your reply text alongside this tool call. ' +
+        'The mentioned agents will reply in this round, but other agents will still speak too.',
       input_schema: {
         type: 'object',
         properties: {
-          agent_name: {
-            type: 'string',
-            description: 'The exact name of the agent to mention (e.g. "Vanilla", "Coconut")',
+          agent_names: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'The exact names of the agents to mention (e.g. ["Vanilla", "Coconut"]). Can be a single agent or multiple.',
           },
           message: {
             type: 'string',
-            description: 'The message or question you want to send to the mentioned agent',
+            description: 'The message or question you want to send to the mentioned agents',
           },
         },
-        required: ['agent_name', 'message'],
+        required: ['agent_names', 'message'],
       },
     },
     execute: async (input: Record<string, unknown>, _ctx: ToolContext): Promise<ToolResult> => {
-      const agentName = (input.agent_name as string).trim()
+      const agentNamesRaw = input.agent_names as string[]
       const message = (input.message as string).trim()
 
-      if (!agentName || !message) {
+      if (!agentNamesRaw || agentNamesRaw.length === 0 || !message) {
         return {
-          summary: 'Error: both agent_name and message are required.',
+          summary: 'Error: both agent_names (non-empty array) and message are required.',
           error: true,
         }
       }
 
       mentionSignal.triggered = true
-      mentionSignal.agentName = agentName
+      mentionSignal.agentNames = agentNamesRaw.map(n => n.trim())
       mentionSignal.message = message
 
+      const names = mentionSignal.agentNames.map(n => `@${n}`).join(' ')
       return {
-        summary: `@${agentName} has been mentioned. They will respond next with your message: "${message}"`,
-        terminate: true,
+        summary: `${names} have been mentioned. They will respond in this round with your message: "${message}"`,
+        terminate: false,
       }
     },
   }
