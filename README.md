@@ -55,6 +55,8 @@ pnpm dev
 | `DINGTALK_APP_KEY` | | 钉钉应用 AppKey（可选） |
 | `DINGTALK_APP_SECRET` | | 钉钉应用 AppSecret（可选） |
 
+> ⚠️ **进程环境变量优先于 `.env`**：若系统已导出同名变量（例如 `OPENAI_API_KEY`），`.env` 中的同名项会被静默忽略。遇到「配置改了但不生效」或 401 时，先确认：`echo $env:OPENAI_API_KEY`（Windows）/ `echo $OPENAI_API_KEY`（macOS/Linux）。
+
 ## 配置项
 
 管理员面板或 API 可在运行时修改以下配置：
