@@ -80,7 +80,7 @@
 - 技能通过递归扫描 `skills/` 目录树自动发现（任何含 SKILL.md 的目录都注册为技能）
 - `load_skill` 返回内容上限 50K 字符，超出截断
 
-### D-T05：为什么需要工具循环防护（已演进）
+### D-T05：为什么需要工具循环防护（已演进 → 被 D21 替代）
 
 **问题**：AI 可能陷入工具调用死循环（如反复 `write_file` 同一个文件）。
 
@@ -88,15 +88,14 @@
 
 **决策演进**：
 - **初版（D-T05）**：`write_file` 第 2 次调用硬拒绝、第 3 次强制退出
-- **当前（D18）**：改为软提醒——第 2 次调用返回温和提示（"已经是第 N 次调用，写完请回复用户"），但正常执行，不强制拒绝
+- **D18**：改为软提醒——第 2 次调用返回温和提示（"已经是第 N 次调用，写完请回复用户"），但正常执行，不强制拒绝
+- **D21（Pi Agent Core 迁移）**：代码级防护机制（漂移检测、write_file 计数器、轮数限制）已被 Pi Agent Core 内置循环替代。系统提示词中的硬性规则（防漂移、write_file 克制、工具调用节制）成为主要防护手段
 
 **原因**：硬拒绝阻塞了合理的多文件写入场景（如生成报告含多个图表）；软提醒既防止无限循环，又允许合法多文件写入。
 
-**新增防护机制**：
-- **漂移检测**：检测连续重复的工具批次签名（`name + arguments` 联合字符串），发现后强制终止
-- **批量终止**：`ToolResult.terminate` 信号——本批所有工具都要求终止时提前收口
-- **输出截断终止**：`finishReason === 'length'` 时跳过工具执行，回填错误消息
-- **统一收口**：每一条路径都有终态（`done` 事件），绝不静默退出
+**当前状态（D21）**：代码级防护（漂移检测、write_file 计数器、MAX_TOOL_ROUNDS）已在 Pi Agent Core 迁移中被移除，改为系统提示词硬性规则控制。Pi Agent Core 内置的循环管理提供更优雅的多轮工具调用。
+
+### D-T07：Pi 式并行批执行（已由 Pi Agent Core 替代）
 
 ### D-T06：为什么需要 bash 工具
 
@@ -112,16 +111,13 @@
 - Windows 用 cmd.exe，其余用 /bin/sh，自动切 UTF-8 代码页
 - **环境变量脱敏**：`spawn` 前经 `scrubEnv()` 剔除敏感变量（精确名单：`ADMIN_KEY`；通用规则：名称含 `_API_KEY`/`_APIKEY`/`_TOKEN`/`_SECRET`/`PASSWORD`/`PASSWD`/`CREDENTIAL` 的变量），防止 `set` / `echo %VAR%` 读出 `.env` 注入的密钥
 
-### D-T07：Pi 式并行批执行
+### D-T07：Pi 式并行批执行（已由 Pi Agent Core 替代）
 
 **问题**：传统 AI Agent 每轮工具调用串行执行，模型需要 N 轮才能完成 N 个工具，延迟高。
 
 **决策**：同一轮内所有工具通过 `Promise.all` 并发执行，但结果按模型发起顺序回填，上下文不乱序。
 
-**依据**：
-- 并发执行：无依赖的工具并行跑，减少总轮次
-- 顺序回填：`tool_call_id` 保证上下文不乱序，即使并行执行也按顺序回填
-- 批量终止：`ToolResult.terminate` 信号——本批所有工具都要求终止时提前收口
+**当前状态（D21）**：并行批执行逻辑已由 Pi Agent Core（`@earendil-works/pi-agent-core`）的 `runAgentLoop` 内置实现。`pi-adapter.ts` 配置 `toolExecution: 'parallel'` 即可启用。原有 `loop.ts` 中的手动管理代码已移除。
 
 ## 涉及文件
 
@@ -135,9 +131,11 @@
 | `src/server/tools/document-tools.ts` | 文档工具：`read_document`、`write_document` |
 | `src/server/tools/skill-tools.ts` | 技能工具：`load_skill`、`list_skill_files` |
 | `src/server/tools/bash-tool.ts` | Bash 命令执行：`bash`（受限沙盒执行） |
+| `src/server/tools/dingtalk-token.ts` | 钉钉 Access Token 管理：`dingtalk_token`（OAuth2 双层缓存） |
+| `src/server/tools/group-mention-tool.ts` | @mention 工具：`at_mention`（Agent 间点名调用） |
 | `src/server/tools/index.ts` | 统一导出 |
 | `src/server/ai/tools.ts` | 调用 `getToolDefinitions()` 聚合工具定义 |
-| `src/server/ai/loop.ts` | 工具调用循环：并行执行、收集结果、防护死循环、漂移检测 |
+| `src/server/ai/pi-adapter.ts` | Pi Agent 适配层：工具适配 + 循环入口 + 事件映射 |
 | `src/server/routes/workspace.ts` | 工作区文件下载路由（需认证） |
 
 ## 数据模型
@@ -410,6 +408,47 @@ export class SandboxFS {
 - 超时 → `⏱ 已超时终止`
 - 非零退出码 → 包含 `exit code N` 前缀
 
+### 6. 钉钉工具（`dingtalk-token.ts`）
+
+#### `dingtalk_token`
+
+获取钉钉开放平台 OAuth2 Access Token。
+
+**参数**：
+- `force_refresh` (boolean, optional): 是否强制刷新 token（忽略缓存），默认 `false`
+
+**行为**：
+- 从环境变量 `DINGTALK_APP_KEY` / `DINGTALK_APP_SECRET` 读取凭证（不暴露给 LLM/bash）
+- 内存 + 磁盘双层缓存，提前 60s 刷新
+- 调用钉钉 `/v1.0/oauth2/accessToken` 获取 token
+- summary 不暴露原始值（仅显示前后各 4 位的脱敏 token）
+- 完整 token 放在 `data.access_token` 字段返回给 LLM
+
+**错误**：
+- 凭证未配置 → `DINGTALK_APP_KEY 或 DINGTALK_APP_SECRET 未配置`
+- 请求超时 → `获取钉钉 access token 超时（15s）`
+- API 返回错误 → `钉钉 token 获取失败: {message}`
+
+### 7. @mention 工具（`group-mention-tool.ts`）
+
+#### `at_mention`
+
+群聊中 @ 点名其他 Agent。
+
+**参数**：
+- `agent_name` (string, required): 要点名的 Agent 名称
+- `message` (string, required): 发送给目标 Agent 的消息或问题
+
+**行为**：
+- 设置 `MentionSignal`（`triggered = true`）
+- 被点名者立即应答，当前轮剩余 Agent 被跳过
+- 最多 5 次重定向（`MAX_MENTION_REDIRECTS`）
+- 返回 `terminate: true` 终止当前批
+
+**错误**：
+- 缺少参数 → `Error: both agent_name and message are required`
+- 仅群聊模式下可用（通过 `createMentionTool` 动态注入）
+
 ## 工作区生命周期
 
 ### 创建
@@ -486,37 +525,16 @@ HTTP 工具在发起请求前：
 - 输出截断（30K 字符）
 - **环境变量脱敏**：子进程 env 由 `scrubEnv()` 构造——剔除精确名单（`ADMIN_KEY`）与通用规则命中项（名称含 `_API_KEY`/`_APIKEY`/`_TOKEN`/`_SECRET`/`PASSWORD`/`PASSWD`/`CREDENTIAL`，大写匹配），其余变量照常继承。新增密钥命名遵循通用规则即可自动生效；特例加入 `BLOCKED_ENV_VARS`
 
-## AI 循环防护机制
+## AI 循环防护机制（D21 更新）
 
-### 轮数限制（硬上限）
+多轮工具调用循环现由 Pi Agent Core（`@earendil-works/pi-agent-core`）的 `runAgentLoop` 内置管理。以下代码级防护已在 Pi 迁移中移除，改为系统提示词硬性规则：
 
-- `MAX_TOOL_ROUNDS = 5`：最多 5 轮工具调用循环
-- 到达上限后使用最近一次流式正文兜底，确保有终态回复
-
-### 漂移检测
-
-- 记录每轮工具调用的批次签名：`calls.map(c => `${c.name}:${c.arguments}`).join('|')`
-- 连续两轮完全相同 → 强制终止，注入 `BLOCKED: 你已连续调用完全相同的工具两次`
-
-### 输出截断终止
-
-- `finishReason === 'length'` 时，工具参数可能被截断
-- 跳过工具执行，回填错误消息，让模型用文本收尾
-
-### 批量终止
-
-- `ToolResult` 新增 `terminate?: boolean` 字段
-- 当本批所有工具都返回 `terminate: true` 时，提前收口，不再发起下一轮
-
-### write_file 软提醒
-
-- `writeFileCount` 计数器追踪写入次数
-- 第 2 次及以后：返回温和提示，但正常执行
-
-### 统一收口
-
-- 每一条路径都有 `done` 事件发送，绝不静默退出
-- 使用 `lastFullText` 兜底，轮数撞顶时用最近一次流式正文作为回复
+- **轮数限制**：Pi Agent Core 内置多轮管理
+- **漂移检测**：已移除，由提示词中的「不要反复调用相同工具」约束替代
+- **输出截断终止**：已移除，Pi 流式处理自行管理
+- **批量终止**：Pi Agent Core 内置并行执行策略
+- **write_file 软提醒**：已移除，由提示词中的「克制文件写入」约束替代
+- **统一收口**：Pi Agent Core 保证每条路径都有终态事件
 
 ## API 端点
 
@@ -615,38 +633,42 @@ HTTP 工具在发起请求前：
 9. ✅ `load_skill` 可以按需加载技能的完整内容
 10. ✅ `list_skill_files` 可以列出技能目录内的文件
 11. ✅ `bash` 可以在沙盒内执行 shell 命令
+12. ✅ `dingtalk_token` 可以获取钉钉 access token
+13. ✅ `at_mention` 可以在群聊中 @ 点名其他 Agent
 
 ### 安全验收
 
-12. ✅ 路径穿越攻击被拒绝（`../etc/passwd` → `Path traversal blocked`）
-13. ✅ 符号链接被拒绝（指向沙盒外 → `Symlinks not allowed`）
-14. ✅ 保留文件名被拒绝（`CON.txt` → `Reserved filename blocked`）
-15. ✅ SSRF 攻击被拦截（`http://192.168.1.1` → `SSRF blocked`）
-16. ✅ 工作区容量超限时报错（`Workspace quota exceeded`）
-17. ✅ bash 破坏性命令被拦截（`rm -rf /` → `Blocked`）
-18. ✅ bash 超时后强制终止
+14. ✅ 路径穿越攻击被拒绝（`../etc/passwd` → `Path traversal blocked`）
+15. ✅ 符号链接被拒绝（指向沙盒外 → `Symlinks not allowed`）
+16. ✅ 保留文件名被拒绝（`CON.txt` → `Reserved filename blocked`）
+17. ✅ SSRF 攻击被拦截（`http://192.168.1.1` → `SSRF blocked`）
+18. ✅ 工作区容量超限时报错（`Workspace quota exceeded`）
+19. ✅ bash 破坏性命令被拦截（`rm -rf /` → `Blocked`）
+20. ✅ bash 超时后强制终止
 
-### 循环防护验收
+### 循环防护验收（D21 更新）
 
-19. ✅ `write_file` 第一次调用正常执行
-20. ✅ `write_file` 第二次及以后返回温和提示但正常执行（软提醒）
-21. ✅ 漂移检测：连续相同工具批次被终止
-22. ✅ 最大轮数限制：5 轮后自动收口
-23. ✅ 输出截断：`finishReason === 'length'` 时跳过工具执行
-24. ✅ 批量终止：所有工具返回 `terminate: true` 时提前收口
-25. ✅ 统一收口：每条路径都有 `done` 事件
+> 以下验收项中的代码级防护已在 Pi Agent Core 迁移中移除，改为系统提示词硬性规则。Pi Agent Core 内置循环管理确保每条路径都有终态事件。
+
+21. ✅ `write_file` 第一次调用正常执行
+22. ✅ `write_file` 第二次及以后返回温和提示但正常执行（软提醒）
+23. ✅ 漂移检测：提示词中约束反复调用同一工具
+24. ✅ 最大轮数限制：Pi Agent Core 内置管理
+25. ✅ 输出截断：Pi 流式处理自行管理
+26. ✅ 批量终止：Pi Agent Core 内置并行执行策略
+27. ✅ 统一收口：Pi Agent Core 保证每条路径都有终态事件
 
 ### 生命周期验收
 
-26. ✅ 删除对话时工作区被清理
-27. ✅ 工作区不存在时删除对话不报错
-28. ✅ 新对话首次调用工具时工作区被创建
+28. ✅ 删除对话时工作区被清理
+29. ✅ 工作区不存在时删除对话不报错
+30. ✅ 新对话首次调用工具时工作区被创建
 
 ### 前端集成验收
 
-29. ✅ 工具调用在消息气泡中显示为 `🔧 {name} → {summary}`
-30. ✅ 产物文件显示为下载卡片，点击可下载
-31. ✅ 下载请求携带 JWT，未认证返回 401
+31. ✅ 工具调用在消息气泡中显示为 `🔧 {name} → {summary}`
+32. ✅ 产物文件显示为下载卡片，点击可下载
+33. ✅ 下载请求携带 JWT，未认证返回 401
 
 ## 外部依赖
 

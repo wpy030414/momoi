@@ -11,10 +11,10 @@
 | `src/server/config.ts` | 环境变量读取 + DB 配置读写（`getConfig` / `updateConfig`） |
 | `src/server/shared/constants.ts` | 默认值常量 |
 | `src/server/routes/admin.ts` | 管理员 API 端点（`GET/PUT /api/admin/config`） |
-| `src/server/routes/app.ts` | 公开端点（`GET /api/app-name`，对外暴露品牌信息） |
-| `src/client/components/settings/ModelTab.tsx` | 管理面板中的模型配置界面 |
+| `src/server/routes/app.ts` | 公开端点（`GET /api/app-name`，对外暴露品牌信息与 Agent 列表） |
+| `src/client/components/settings/AgentManager.tsx` | 管理面板中的 Agent 管理界面 |
+| `src/client/components/settings/GatewaySettings.tsx` | 管理面板中的网关配置界面 |
 | `src/client/components/settings/BrandingTab.tsx` | 品牌配置界面 |
-| `src/client/components/settings/PromptTab.tsx` | 提示词编辑界面 |
 
 ## 配置层级
 
@@ -47,8 +47,6 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 | `app_background` | string | — | `""`（空=无背景） | 聊天背景图，base64 data URL |
 | `api_endpoint` | string | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | API 地址 |
 | `api_key` | string | `OPENAI_API_KEY` | `""` | API 密钥 |
-| `model` | string | `OPENAI_MODEL` | `gpt-4o` | 模型名称 |
-| `system_prompt` | string | — | `""`（空） | 系统提示词 |
 | `support_attachments` | boolean | — | `false` | 全局附件开关 |
 | `show_github` | boolean | — | `true` | 是否在界面中显示 GitHub 链接 |
 
@@ -59,14 +57,24 @@ export const env = {
   ADMIN_KEY: process.env.ADMIN_KEY || '',
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || DEFAULT_API_ENDPOINT,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
-  OPENAI_MODEL: process.env.OPENAI_MODEL || DEFAULT_MODEL,
   PORT: parseInt(process.env.PORT || '3001', 10),
 }
 ```
 
 - `dotenv/config` 在 `server/index.ts` 和 `config.ts` 中分别加载
 - `env` 对象在启动时初始化，运行时不可变
-- 只包含无 DB 回退的配置（`ADMIN_KEY`、`PORT`）和 DB 回退的默认值（`api_endpoint`、`api_key`、`model`）
+- 只包含无 DB 回退的配置（`ADMIN_KEY`、`PORT`）和 DB 回退的默认值（`api_endpoint`、`api_key`）
+
+### 环境变量（完整列表）
+
+| 变量名 | 说明 |
+|---|---|
+| `ADMIN_KEY` | 管理员密钥 |
+| `OPENAI_BASE_URL` | API 地址 |
+| `OPENAI_API_KEY` | API 密钥 |
+| `PORT` | 服务端口（默认 3001） |
+| `DINGTALK_APP_KEY` | 钉钉应用 Key（`dingtalk_token` 工具使用） |
+| `DINGTALK_APP_SECRET` | 钉钉应用 Secret（`dingtalk_token` 工具使用） |
 
 ## 运行时 DB 层
 
@@ -80,8 +88,6 @@ export async function getConfig(): Promise<AppConfig> {
     app_background: await getSetting('app_background', ''),
     api_endpoint: await getSetting('api_endpoint', env.OPENAI_BASE_URL),
     api_key: await getSetting('api_key', env.OPENAI_API_KEY),
-    model: await getSetting('model', env.OPENAI_MODEL),
-    system_prompt: await getSetting('system_prompt', DEFAULT_SYSTEM_PROMPT),
     support_attachments: (await getSetting('support_attachments', 'false')) === 'true',
     show_github: (await getSetting('show_github', 'true')) === 'true',
   }
@@ -129,6 +135,28 @@ async function setSetting(key: string, value: string): Promise<void> {
 
 - 存在则 `UPDATE`，不存在则 `INSERT`（UPSERT 语义，但用两步实现）
 
+## Agent 管理
+
+Agent 是独立配置的 AI 角色，每个 Agent 拥有独立的模型和系统提示词。存储于 `agents` 表。
+
+### Agent CRUD
+
+| 函数 | 说明 |
+|---|---|
+| `listAgents()` | 列出所有 Agent（按 created_at 排序） |
+| `getAgent(id)` | 获取单个 Agent，不存在返回 null |
+| `createAgent(name, model, systemPrompt, avatar?, role?)` | 创建 Agent，中立 Agent 使用固定 ID |
+| `updateAgent(id, partial)` | 部分更新 Agent 字段 |
+| `deleteAgent(id)` | 删除 Agent（中立 Agent 不可删除） |
+| `migrateDefaultAgent()` | 首次启动迁移：从旧全局配置创建默认 Agent 和中立 Agent |
+
+### 迁移逻辑
+
+`migrateDefaultAgent()` 在 `index.ts` 启动时调用，若 `agents` 表为空则：
+1. 从 settings 表读取旧 `model` 和 `system_prompt`（兼容旧版本数据）
+2. 创建默认 Agent（名称 `Momoi`，使用旧配置或默认值）
+3. 创建中立 Agent（名称 `中立 Agent`，固定 ID `neutral-agent`，复用默认 Agent 的模型）
+
 ## 接口契约
 
 ### GET /api/admin/config（需管理员 JWT）
@@ -143,8 +171,6 @@ async function setSetting(key: string, value: string): Promise<void> {
   "app_background": "",
   "api_endpoint": "https://api.openai.com/v1",
   "api_key": "sk-....abcd",
-  "model": "gpt-4o",
-  "system_prompt": "You are a helpful assistant.",
   "support_attachments": false,
   "show_github": true
 }
@@ -158,7 +184,6 @@ async function setSetting(key: string, value: string): Promise<void> {
 ```json
 {
   "app_name": "我的助手",
-  "model": "qwen3.7-plus",
   "support_attachments": true
 }
 ```

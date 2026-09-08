@@ -96,7 +96,7 @@ interface Attachment {
 
 ## 前端行为
 
-- 附件按钮仅在 `support_attachments === true` 时渲染（`App.tsx` 从 `/api/plugins/app-name` 读取）
+- 附件按钮仅在 `support_attachments === true` 时渲染（`App.tsx` 从 `GET /api/app-name` 读取）
 - 支持一次选择多个文件，串行上传
 - 上传中的文件以卡片预览，发送前可逐个移除
 - 发送后附件元数据随消息持久化，历史消息中的附件渲染为可下载卡片

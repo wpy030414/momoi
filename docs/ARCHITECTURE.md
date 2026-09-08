@@ -6,7 +6,7 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                        浏览器（React SPA）                        │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌──────────────┐   │
-│  │ Sidebar  │  │ChatPanel │  │ Settings  │  │LoginScreen   │   │
+│  │ Sidebar  │  │ChatPanel │  │AdminScreen│  │LoginScreen   │   │
 │  │ 对话列表  │  │ 聊天界面  │  │ 管理面板   │  │ PIN 认证登录  │   │
 │  └──────────┘  └──────────┘  └───────────┘  └──────────────┘   │
 │        │            │              │                │           │
@@ -19,13 +19,12 @@
 │  ┌─────────────────────────┼─────────────────────────────────┐  │
 │  │                      路由层                                │  │
 │  │  ┌────────┐ ┌───────────┐ ┌───────┐ ┌────────┐ ┌──────┐ │  │
-│  │  │chat.ts │ │conversat. │ │admin  │ │upload  │ │user  │ │  │
-│  │  │SSE 聊天 │ │ 对话 CRUD │ │管理API │ │文件上传 │ │PIN   │ │  │
-│  │  │+health │ │           │ │       │ │        │ │      │ │  │
+│  │  │chat.ts │ │conversat. │ │group  │ │admin   │ │upload│ │  │
+│  │  │SSE 聊天 │ │ 对话 CRUD │ │群聊API │ │管理API  │ │文件  │ │  │
 │  │  └────────┘ └───────────┘ └───────┘ └────────┘ └──────┘ │  │
 │  │  ┌────────┐ ┌───────────┐ ┌────────┐                    │  │
-│  │  │workspace│ │  app.ts  │ │  health │                   │  │
-│  │  │工作区下载│ │ 应用名称  │ │ (chat内)│                   │  │
+│  │  │workspace│ │  app.ts  │ │user.ts │                    │  │
+│  │  │工作区下载│ │ 应用名称  │ │PIN认证 │                    │  │
 │  │  └────────┘ └───────────┘ └────────┘                    │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────────┐  │
@@ -34,27 +33,34 @@
 │  │  │ userAuth.ts      │  │ adminAuthMiddleware          │   │  │
 │  │  │ 用户 JWT 认证     │  │ 管理员 JWT 认证               │   │  │
 │  │  └──────────────────┘  └──────────────────────────────┘   │  │
+│  │  ┌──────────────────┐                                     │  │
+│  │  │ rateLimiter.ts   │  IP 速率限制（PIN 登录）             │  │
+│  │  └──────────────────┘                                     │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │                     业务逻辑层                              │  │
+│  │  ┌──────────────────┐  ┌───────────────────┐  ┌────────────────┐  │  │
+│  │  │ ai/pi-adapter.ts │  │ai/group-orchestr. │  │ai/neutral-agent│  │  │
+│  │  │ Pi Agent Core    │  │ 群聊编排           │  │ 中立 Agent 追问│  │  │
+│  │  │ 适配层           │  │ (串行多Agent对话)  │  │ (无限模式)     │  │  │
+│  │  └──────────────────┘  └───────────────────┘  └────────────────┘  │  │
 │  │  ┌──────────────────┐  ┌───────────────┐  ┌────────────────┐  │  │
-│  │  │ ai/pi-adapter.ts │  │   tools/      │  │  skills/       │  │  │
-│  │  │ Pi Agent Core    │  │  内置工具系统  │  │  loader.ts     │  │  │
-│  │  │ 适配层           │  │  (沙盒执行)   │  │  + registry    │  │  │
+│  │  │   tools/         │  │  skills/      │  │   config.ts    │  │  │
+│  │  │  12 个内置工具    │  │  loader.ts    │  │  配置管理       │  │  │
+│  │  │  (沙盒执行)      │  │  + registry   │  │  + Agent CRUD  │  │  │
 │  │  └──────────────────┘  └───────────────┘  └────────────────┘  │  │
-│  │  ┌─────────────┐  ┌───────────────┐  ┌────────────────┐  │  │
-│  │  │ai/provider  │  │  config.ts    │  │   auth.ts      │  │  │
-│  │  │ API 客户端   │  │  配置管理      │  │  PIN+JWT 认证  │  │  │
-│  │  └─────────────┘  └───────────────┘  └────────────────┘  │  │
-│  │  ┌─────────────┐                                         │  │
-│  │  │files/parser │  附件解析（图片→base64, xlsx→csv, pdf→text）│  │
-│  │  └─────────────┘                                         │  │
+│  │  ┌──────────────┐  ┌────────────────────────────────────┐  │  │
+│  │  │   auth.ts    │  │  files/parser.ts                   │  │  │
+│  │  │  PIN+JWT认证 │  │  附件解析（图片→base64, xlsx→csv,  │  │  │
+│  │  └──────────────┘  │  pdf→text, docx→text）             │  │  │
+│  │                    └────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │                     数据层                                  │  │
 │  │  ┌──────────────────────────────────────────────────────┐  │  │
 │  │  │  db.ts — SQLite (@libsql/client + Drizzle ORM)      │  │  │
-│  │  │  conversations | messages (含 attachments) | settings│  │  │
+│  │  │  conversations | messages | settings | agents       │  │  │
+│  │  │  group_conversation_agents                          │  │  │
 │  │  │  + data/workspaces/{conversationId}/ (工具沙盒)       │  │  │
 │  │  └──────────────────────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────────────────────┘  │
@@ -63,30 +69,41 @@
 
 ## 数据流
 
-### 聊天消息流（SSE）
+### 聊天消息流（SSE — 直接对话）
 
 ```
-用户输入（+ 可选附件 + 思考模式开关）→ POST /api/chat
+用户输入 → POST /api/chat
   → userAuthMiddleware 验证 JWT
-  → 保存用户消息到 DB（含附件元数据）
+  → 确定 Agent（agent_id 参数或默认 Agent）
+  → 保存用户消息到 DB
   → 加载历史消息（最近 20 条）
-  → 解析附件（图片→base64 多模态、xlsx→csv、pdf→text）
-  → 文档附件复制到对话工作区（docx/pptx/xlsx/pdf）
-  → runPiAgentLoop()（基于 @earendil-works/pi-agent-core 内核）
-    → buildSystemPrompt()（注入技能摘要 + 工具使用规范 + 防漂移/写文件节制/工具节制规则）
-    → createToolAdapter()（将 ToolModule 包装为 Pi AgentTool，TypeBox 参数校验）
-    → createStreamFn()（包装 provider.ts 为 Pi 兼容 StreamFn）
-    → runAgentLoop()（Pi 原生 Agent 循环，内置多轮工具调用 + 并行执行）
-      → 逐 token 流式输出（SSE event: token）
-      → 流式输出思考过程（SSE event: thinking，含分隔符分段）
-      → 工具调用：Pi 自动管理 tool_execution_start/end 事件
-      → 工具产物（artifacts）通过 SSE 下发下载链接
-      → 系统提示词硬性规则约束（防漂移、写文件节制、工具节制）
-      → 最终回复（统一收口）：
-          → 解析 suggestions 代码块
-          → 发送 done 事件（完整回复 + 建议 + artifacts）
-  → 保存助手消息到 DB（含 thinking、suggestions、artifacts 作为 attachments）
-  → 客户端收到 done → 更新 UI → 刷新对话列表
+  → 解析附件
+  → runPiAgentLoop()
+    → buildSystemPrompt()（注入 Agent 提示词 + 技能摘要 + 硬性规则）
+    → createToolAdapter()（12 个 ToolModule → Pi AgentTool）
+    → createStreamFn()（provider.ts → Pi StreamFn）
+    → runAgentLoop()（Pi 原生循环，并行工具执行）
+      → SSE 事件流：token / thinking / tool_call / tool_result
+      → suggestions 围栏扣留
+      → done 事件（完整回复 + 建议）
+  → 保存助手消息到 DB
+  → 无限模式：若开启，generateNeutralFollowUp() → follow_up 事件 → 重新加载历史 → 新一轮循环
+```
+
+### 群聊消息流（SSE）
+
+```
+用户输入 → POST /api/chat (conversation_type: 'group')
+  → 创建/获取群聊对话
+  → orchestrateGroupChat()
+    → 随机打乱 Agent 顺序
+    → 每个 Agent 依次：
+      → prepareGroupHistory()（前序回复以 user 角色 + 名字前缀注入）
+      → runPiAgentLoop()（该 Agent 独立回复）
+      → SSE: agent_start → token/thinking/tool_call → agent_done
+      → @mention 拦截：被点名 Agent 立即应答
+    → 无限模式（若开启）：generateNeutralFollowUp() → follow_up 事件
+    → SSE: group_done
 ```
 
 ### SSE 事件类型
@@ -94,13 +111,19 @@
 ```typescript
 type ServerMessage =
   | { type: 'conversation_id'; id: string }
-  | { type: 'token'; text: string }
-  | { type: 'thinking'; text: string }
-  | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_execution_start'; id?: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; id?: string; name: string; summary: string; artifacts?: ToolArtifact[] }
-  | { type: 'done'; reply: string; suggestions: string[] }
-  | { type: 'error'; message: string }
+  | { type: 'token'; text: string; agent_id?: string; agent_name?: string }
+  | { type: 'thinking'; text: string; round?: number; agent_id?: string; agent_name?: string }
+  | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown>; agent_id?: string; agent_name?: string }
+  | { type: 'tool_execution_start'; id?: string; name: string; input: Record<string, unknown>; agent_id?: string; agent_name?: string }
+  | { type: 'tool_result'; id?: string; name: string; summary: string; artifacts?: Array<{...}>; agent_id?: string; agent_name?: string }
+  | { type: 'agent_start'; agent_id: string; agent_name: string }
+  | { type: 'agent_done'; agent_id: string; agent_name: string; reply: string; suggestions: string[] }
+  | { type: 'group_start'; agent_ids: string[] }
+  | { type: 'group_done'; infinite?: boolean }
+  | { type: 'follow_up'; text: string }
+  | { type: 'infinite_mode_off' }
+  | { type: 'done'; reply: string; suggestions: string[]; agent_id?: string; agent_name?: string; infinite?: boolean }
+  | { type: 'error'; message: string; agent_id?: string; agent_name?: string }
 ```
 
 ### 配置数据流
@@ -116,10 +139,13 @@ getConfig() → 运行时配置（优先使用 DB 值）
   ↓
 AppConfig 字段：
   app_name, app_favicon, app_background    — 品牌
-  api_endpoint, api_key, model             — LLM 连接
-  system_prompt                            — 系统提示词
+  api_endpoint, api_key                    — LLM 连接
   support_attachments                      — 附件开关
   show_github                              — 显示 GitHub 链接
+
+Agent 级配置（存储在 agents 表）：
+  model, system_prompt                     — 每个 Agent 独立配置
+  → 通过 getAgent(id) 查询
 ```
 
 ### 用户认证流
@@ -139,53 +165,40 @@ AppConfig 字段：
 
 ```
 routes/chat.ts
-  ├── health (GET /api/chat/health)
   ├── ai/pi-adapter.ts（Pi Agent Core 适配层）
   │     ├── @earendil-works/pi-agent-core（runAgentLoop）
   │     ├── @earendil-works/pi-ai（createAssistantMessageEventStream）
   │     ├── @sinclair/typebox（工具参数 schema）
-  │     ├── ai/provider.ts（API 客户端——被 createStreamFn 包装）
-  │     ├── ai/tools.ts（工具注册表 → 委托到 tools/registry.ts）
-  │     ├── tools/registry.ts（内置工具聚合）
-  │     │     ├── tools/file-tools.ts（read_file / write_file）
-  │     │     ├── tools/http-tool.ts（http_request）
-  │     │     ├── tools/document-tools.ts（read_document / write_document）
-  │     │     ├── tools/skill-tools.ts（load_skill / list_skills）
-  │     │     ├── tools/bash-tool.ts（受限 bash 执行）
-  │     │     └── tools/types.ts（ToolContext, ToolResult, ToolModule, ToolArtifact）
-  │     ├── tools/workspace.ts（沙盒文件系统）
+  │     ├── ai/provider.ts（API 客户端）
+  │     ├── ai/tools.ts → tools/registry.ts（12 个内置工具）
   │     ├── skills/registry.ts（技能注册表）
-  │     └── config.ts（获取配置）
+  │     └── config.ts（获取 Agent 配置）
+  ├── ai/group-orchestrator.ts（群聊编排）
+  │     ├── ai/pi-adapter.ts
+  │     ├── tools/group-mention-tool.ts（@mention）
+  │     └── config.ts（getAgent）
+  ├── ai/neutral-agent.ts（中立追问）
   ├── files/parser.ts（附件解析）
-  ├── db.ts（数据库）
-  └── schema.ts（Drizzle 表定义）
+  ├── db.ts + schema.ts
+  └── middleware/userAuth.ts + rateLimiter.ts
+
+routes/group.ts
+  ├── db.ts + schema.ts
+  └── middleware/userAuth.ts
 
 routes/conversations.ts
-  ├── db.ts
-  ├── schema.ts
+  ├── db.ts + schema.ts
   └── middleware/userAuth.ts
-  （删除对话时同步清理 data/workspaces/{id}/）
 
 routes/admin.ts
   ├── auth.ts（JWT 认证）
-  ├── config.ts（配置管理）
+  ├── config.ts（配置 + Agent CRUD）
   └── skills/loader.ts（技能注册表）
 
-routes/app.ts（GET /api/app-name → 应用名称/品牌信息）
-  └── config.ts
-
-routes/workspace.ts
-  ├── tools/workspace.ts（沙盒文件系统）
-  ├── db.ts（对话所有权验证）
-  └── middleware/userAuth.ts
-
-routes/upload.ts
-  └── middleware/userAuth.ts
-
-routes/user.ts
-  ├── auth.ts（PIN 哈希 + JWT 签发）
-  ├── db.ts
-  └── schema.ts
+routes/app.ts → config.ts
+routes/workspace.ts → tools/workspace.ts + db.ts + middleware/userAuth.ts
+routes/upload.ts → middleware/userAuth.ts
+routes/user.ts → auth.ts + db.ts + schema.ts + rateLimiter.ts
 ```
 
 ## 数据库 Schema
@@ -195,8 +208,11 @@ conversations
 ├── id TEXT PRIMARY KEY          -- UUID
 ├── user_id TEXT                 -- 用户名（JWT sub）
 ├── title TEXT                   -- 对话标题（默认取消息前 40 字符）
+├── agent_id TEXT                -- 直接对话：关联的 Agent ID
+├── type TEXT                    -- 'direct' | 'group'
 ├── created_at INTEGER           -- Unix epoch (秒)
-└── updated_at INTEGER           -- Unix epoch (秒)
+├── updated_at INTEGER           -- Unix epoch (秒)
+└── deleted_at INTEGER           -- 软删除时间戳
 
 messages
 ├── id INTEGER PRIMARY KEY       -- 自增
@@ -204,48 +220,60 @@ messages
 ├── role TEXT                    -- user | assistant | system | tool
 ├── content TEXT                 -- 消息内容
 ├── thinking TEXT                -- AI 思考过程（可选）
-├── tool_calls TEXT              -- JSON 序列化的工具调用数组（tool_call_id 关联工具结果）
+├── tool_calls TEXT              -- JSON 序列化的工具调用数组
 ├── tool_call_id TEXT            -- 工具响应关联的调用 ID（可选）
 ├── suggestions TEXT             -- JSON 序列化的建议数组（可选）
 ├── attachments TEXT             -- JSON 序列化的附件/产物数组（可选）
+├── agent_id TEXT                -- 群聊中发言者的 Agent ID（可选）
 └── created_at INTEGER           -- Unix epoch (秒)
 
 settings
 ├── key TEXT PRIMARY KEY         -- 配置键（含 pin:{username}、app_name、show_github 等）
 └── value TEXT                   -- 配置值
+
+agents
+├── id TEXT PRIMARY KEY          -- UUID（neutral 角色固定为 'neutral-agent'）
+├── name TEXT                    -- Agent 名称
+├── model TEXT                   -- 该 Agent 使用的模型
+├── system_prompt TEXT           -- 该 Agent 的系统提示词
+├── avatar TEXT                  -- 头像（base64 data URL）
+├── role TEXT                    -- 'default' | 'neutral'
+└── created_at INTEGER           -- Unix epoch (秒)
+
+group_conversation_agents
+├── conversation_id TEXT FK      -- 群聊对话 ID
+├── agent_id TEXT FK             -- 参与的 Agent ID
+├── sort_order INTEGER           -- 排序权重
+└── PRIMARY KEY (conversation_id, agent_id)
 ```
 
 ## 前端组件树
 
 ```
 App
-├── LoginScreen                  -- PIN 认证登录（用户名 → PIN 验证/设置）
+├── LoginScreen
 ├── Sidebar
-│     ├── 新建对话按钮
-│     ├── 对话列表（重命名、导出、删除）
+│     ├── 新建对话 / 新建群聊按钮
+│     ├── 对话列表（直接对话 + 群聊，含 Agent 数量和类型标识）
 │     └── 用户信息/菜单按钮
 ├── ChatPanel
 │     ├── MessageList
-│     │     └── MessageBubble[]  -- 每条消息
-│     │           ├── ThinkingBlock   -- 可折叠的思考过程
-│     │           ├── ToolCallsPanel  -- 工具调用列表（含产物下载卡片）
-│     │           ├── AttachmentCard[] -- 文件附件卡片
-│     │           ├── MessageContent  -- Markdown + Mermaid 渲染
-│     │           └── SuggestionChips -- 后续建议按钮
-│     ├── InputBar               -- 文本输入 + 附件上传 + 思考模式开关 + 发送
-├── SettingsDialog               -- 管理员面板（需密钥认证）
-│     ├── BrandingTab            -- 应用名称、Favicon、背景图、GitHub 链接
-│     ├── ModelTab               -- API 地址、密钥、模型
-│     ├── PromptTab              -- 系统提示词
-│     ├── SkillsTab              -- 技能管理
-│     └── StatsTab               -- 统计面板（用户/对话/消息 + 浏览）
-├── MenuDialog                   -- 用户菜单
-│     ├── 语言切换
-│     ├── 主题切换
-│     ├── 管理设置入口
-│     ├── 修改 PIN
-│     └── 登出
-└── ChangePinDialog              -- 修改 PIN（旧 PIN + 新 PIN + 确认）
+│     │     └── MessageBubble[]
+│     │           ├── AgentAvatar（群聊中显示发言者头像和名字）
+│     │           ├── ThinkingBlock
+│     │           ├── ToolCallsPanel
+│     │           ├── AttachmentCard[]
+│     │           ├── MessageContent（Markdown + Mermaid）
+│     │           └── SuggestionChips
+│     ├── InputBar（文本输入 + 附件 + 思考模式 + 无限模式开关 + 发送）
+├── AdminScreen（密钥认证）
+│     ├── AgentManager（Agent CRUD）
+│     ├── GatewaySettings（API 地址 + 密钥）
+│     ├── BrandingSettings（应用名称 + Favicon + 背景图）
+│     ├── SkillManager（技能管理）
+│     └── StatsPanel（统计 + 对话浏览）
+├── MenuDialog（语言/主题/管理员/修改 PIN/登出）
+└── ChangePinDialog
 ```
 
 ## 认证模型
@@ -257,13 +285,16 @@ App
   验证成功 → signUserToken() → JWT (HS256, 30天, role:'user', sub:username)
   请求 → Authorization: Bearer <jwt>
   userAuthMiddleware → verifyUserToken() → c.set('userId', username)
-  回退：无 JWT 时接受 X-User 头（向后兼容）
+
+IP 速率限制：
+  同一 IP 连续 5 次 PIN 错误 → 封禁 5 分钟
+  状态仅存于内存（rateLimiter.ts），重启服务即清除
+  成功登录后自动清除该 IP 的失败记录
 
 管理员层：
   POST /api/admin/auth + ADMIN_KEY → JWT (HS256, 24h, role:'admin')
   后续请求 → Authorization: Bearer <jwt>
   adminAuthMiddleware → verifyAdminToken()
-  ⚠️ API Key 明文返回（脱敏未实现，见 specs/module-admin.md 已知缺陷）
 
 安全细节：
   - PBKDF2 10000 次迭代 + SHA-512
@@ -276,9 +307,9 @@ App
 
 ```
 开发模式：
-  Vite Dev Server (:5173)  ──proxy──→  Hono (:3001)
+  Vite Dev Server (:5173)  ──proxy──→  Hono (:PORT, 默认 3001)
 
 生产模式：
-  Hono (:3001)  ── 直接托管 ──→  dist/client/ 静态文件
+  Hono (:PORT, 默认 3001)  ── 直接托管 ──→  dist/client/ 静态文件
               └── API 路由 ──→  /api/*
 ```

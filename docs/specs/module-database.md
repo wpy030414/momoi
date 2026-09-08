@@ -2,14 +2,14 @@
 
 ## 概述
 
-数据层使用 SQLite 单文件数据库，通过 `@libsql/client` 连接、Drizzle ORM 操作。所有对话历史、配置、PIN 哈希等都存储在 `data/momoi.db` 中。迁移策略采用轻量级 PRAGMA 预检 + `CREATE IF NOT EXISTS`，避免引入外部迁移工具。
+数据层使用 SQLite 单文件数据库，通过 `@libsql/client` 连接、Drizzle ORM 操作。所有对话历史、配置、PIN 哈希、Agent 信息等都存储在 `data/momoi.db` 中。迁移策略采用 `executeMultiple` + `CREATE TABLE IF NOT EXISTS`，避免引入外部迁移工具。
 
 ## 涉及文件
 
 | 文件 | 职责 |
 |---|---|
 | `src/server/db.ts` | 数据库客户端初始化 + 迁移逻辑 |
-| `src/server/schema.ts` | Drizzle ORM 表定义（conversations / messages / settings） |
+| `src/server/schema.ts` | Drizzle ORM 表定义（conversations / messages / settings / agents / group_conversation_agents） |
 | `src/server/routes/*.ts` | 各路由通过 `db` 查询数据 |
 
 ## 数据库位置与初始化
@@ -34,8 +34,11 @@ const client = createClient({ url: `file:${dbPath}` })
 | `id` | TEXT | PRIMARY KEY | UUID v4 |
 | `user_id` | TEXT | NOT NULL, DEFAULT '' | 用户名（JWT sub） |
 | `title` | TEXT | NOT NULL, DEFAULT '新对话' | 对话标题（默认取消息前 40 字符） |
+| `agent_id` | TEXT | NOT NULL, DEFAULT '' | 关联的 Agent ID |
+| `type` | TEXT | NOT NULL, DEFAULT 'direct' | 对话类型：`direct` 或 `group` |
 | `created_at` | INTEGER | NOT NULL | Unix epoch 秒 |
 | `updated_at` | INTEGER | NOT NULL | Unix epoch 秒 |
+| `deleted_at` | INTEGER | nullable | 软删除时间戳（Unix epoch 秒），null 表示未删除 |
 
 **索引**：`idx_conversations_user` ON `(user_id, updated_at)` — 按用户排序查询
 
@@ -52,6 +55,7 @@ const client = createClient({ url: `file:${dbPath}` })
 | `tool_call_id` | TEXT | — | 工具响应关联的调用 ID |
 | `suggestions` | TEXT | — | JSON 序列化的建议数组 |
 | `attachments` | TEXT | — | JSON 序列化的附件/产物数组 |
+| `agent_id` | TEXT | nullable | 发送消息的 Agent ID（群聊中区分发言人） |
 | `created_at` | INTEGER | NOT NULL | Unix epoch 秒 |
 
 **索引**：`idx_messages_conv` ON `(conversation_id, created_at)` — 按对话排序查询
@@ -65,7 +69,31 @@ const client = createClient({ url: `file:${dbPath}` })
 | `key` | TEXT | PRIMARY KEY | 配置键，如 `app_name`、`pin:{username}` |
 | `value` | TEXT | NOT NULL, DEFAULT '' | 配置值 |
 
-**用途**：存储运行时配置（`app_name`、`api_endpoint`、`api_key`、`model`、`system_prompt`、`support_attachments`、`show_github`）和用户 PIN 哈希（`pin:{username}`）。
+**用途**：存储运行时配置（`app_name`、`api_endpoint`、`api_key`、`support_attachments`、`show_github`）和用户 PIN 哈希（`pin:{username}`）。
+
+### agents — Agent 定义
+
+| 列名 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | Agent 唯一 ID（中立 Agent 固定为 `neutral-agent`） |
+| `name` | TEXT | NOT NULL, DEFAULT '' | Agent 名称 |
+| `model` | TEXT | NOT NULL, DEFAULT '' | 使用的模型 |
+| `system_prompt` | TEXT | NOT NULL, DEFAULT '' | 系统提示词 |
+| `avatar` | TEXT | NOT NULL, DEFAULT '' | 头像（base64 data URL） |
+| `role` | TEXT | NOT NULL, DEFAULT 'default' | 角色：`default` 或 `neutral` |
+| `created_at` | INTEGER | NOT NULL | Unix epoch 秒 |
+
+### group_conversation_agents — 群聊 Agent 关联
+
+| 列名 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `conversation_id` | TEXT | NOT NULL, FK → conversations(id) ON DELETE CASCADE | 群聊对话 ID |
+| `agent_id` | TEXT | NOT NULL, FK → agents(id) ON DELETE CASCADE | Agent ID |
+| `sort_order` | INTEGER | NOT NULL, DEFAULT 0 | 排序序号 |
+
+**主键**：`(conversation_id, agent_id)` 复合主键
+
+**索引**：`idx_group_conv_agents_conv` ON `(conversation_id)` — 按对话查询群组成员
 
 ## Drizzle Schema 定义
 
@@ -74,8 +102,11 @@ export const conversations = sqliteTable('conversations', {
   id: text('id').primaryKey(),
   user_id: text('user_id').notNull().default(''),
   title: text('title').notNull().default('新对话'),
+  agent_id: text('agent_id').notNull().default(''),
+  type: text('type').notNull().default('direct'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
+  deleted_at: integer('deleted_at'),
 })
 
 export const messages = sqliteTable('messages', {
@@ -89,6 +120,7 @@ export const messages = sqliteTable('messages', {
   tool_call_id: text('tool_call_id'),
   suggestions: text('suggestions'),
   attachments: text('attachments'),
+  agent_id: text('agent_id'),
   created_at: integer('created_at').notNull(),
 })
 
@@ -96,20 +128,40 @@ export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull().default(''),
 })
+
+export const agents = sqliteTable('agents', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().default(''),
+  model: text('model').notNull().default(''),
+  system_prompt: text('system_prompt').notNull().default(''),
+  avatar: text('avatar').notNull().default(''),
+  role: text('role').notNull().default('default'),
+  created_at: integer('created_at').notNull(),
+})
+
+export const groupConversationAgents = sqliteTable('group_conversation_agents', {
+  conversation_id: text('conversation_id').notNull()
+    .references(() => conversations.id, { onDelete: 'cascade' }),
+  agent_id: text('agent_id').notNull()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  sort_order: integer('sort_order').notNull().default(0),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.conversation_id, table.agent_id] }),
+}))
 ```
 
 ## 迁移策略
 
-**设计原则**：零外部迁移工具，`CREATE TABLE IF NOT EXISTS` 一步到位，不兼容旧库。
+**设计原则**：零外部迁移工具，`executeMultiple` + `CREATE TABLE IF NOT EXISTS` 一步到位。
 
 ### 迁移流程（`db.ts:migrate()`）
 
 ```
-1. CREATE TABLE IF NOT EXISTS（含全部当前列）
-   → conversations（id, user_id, title, agent_id, type, created_at, updated_at）
+1. executeMultiple 执行全部 DDL（5 张表 + 3 个索引）
+   → conversations（id, user_id, title, agent_id, type, created_at, updated_at, deleted_at）
    → messages（id, conversation_id, role, content, thinking, tool_calls, tool_call_id, suggestions, attachments, agent_id, created_at）
    → settings（key, value）
-   → agents（id, name, model, system_prompt, avatar, created_at）
+   → agents（id, name, model, system_prompt, avatar, role, created_at）
    → group_conversation_agents（conversation_id, agent_id, sort_order）
 
 2. CREATE INDEX IF NOT EXISTS
@@ -141,6 +193,15 @@ db.select().from(conversations).where(eq(conversations.id, id)).get()
 - 不匹配 `user_id` → 一律返回 `404 Not found`（不区分「不存在」和「无权访问」）
 - 该原则适用于 `GET /:id`、`PATCH /:id`、`DELETE /:id`、`DELETE /:id/messages/:messageId`
 
+### 软删除
+
+`conversations` 表使用 `deleted_at` 字段实现软删除。查询时需附加 `deleted_at IS NULL` 条件：
+
+```typescript
+db.select().from(conversations)
+  .where(and(eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
+```
+
 ### 消息回退
 
 ```typescript
@@ -168,16 +229,14 @@ const msg = {
 
 ## 工作区清理
 
-删除对话时同步清理对应的工作区目录：
+删除对话时不再清理工作区目录（软删除保留数据）：
 
 ```typescript
-// routes/conversations.ts
-await db.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId))).run()
-
-const wsPath = path.resolve('data', 'workspaces', id)
-if (fs.existsSync(wsPath)) {
-  fs.rmSync(wsPath, { recursive: true, force: true })
-}
+// routes/conversations.ts — soft delete
+await db.update(conversations)
+  .set({ deleted_at: now, updated_at: now })
+  .where(and(eq(conversations.id, id), eq(conversations.user_id, userId)))
+  .run()
 ```
 
 ## 外部依赖
@@ -188,10 +247,10 @@ if (fs.existsSync(wsPath)) {
 
 ## 验收标准
 
-1. 首次启动自动创建 `data/` 目录和 `.db` 文件 ✅
-2. 重复启动不报错（`IF NOT EXISTS` 保护）✅
-3. 删除对话级联删除消息 ✅
-4. 删除对话同步清理工作区 ✅
-5. 用户 A 无法访问用户 B 的数据（404 而非 403）✅
-6. 消息回退后序消息正确删除 ✅
-7. JSON 列读写一致（序列化/反序列化无数据丢失）✅
+1. 首次启动自动创建 `data/` 目录和 `.db` 文件
+2. 重复启动不报错（`IF NOT EXISTS` 保护）
+3. 删除对话软删除标记 `deleted_at`，不物理删除数据
+4. 用户 A 无法访问用户 B 的数据（404 而非 403）
+5. 消息回退后序消息正确删除
+6. JSON 列读写一致（序列化/反序列化无数据丢失）
+7. Agent 和群聊关联表正确建表

@@ -19,6 +19,10 @@
 - **白标品牌** — 自定义应用名称、Favicon、聊天背景图
 - **持久化存储** — SQLite 单文件数据库，对话历史自动保存
 - **国际化** — 中文/英文双语支持
+- **Agent 多智能体** — 每个 Agent 独立模型、提示词、头像，支持创建/编辑/删除
+- **群聊对话** — 多 Agent 串行回复，@mention 点名对话，Agent 身份感知
+- **无限演算模式** — 中立 Agent 自动追问，支持个体聊天和群聊，实现持续对话
+- **IP 速率限制** — PIN 连续 5 次错误封禁 5 分钟
 
 ## 快速开始
 
@@ -30,12 +34,12 @@ pnpm install
 cp .env.example .env
 # 编辑 .env 填入 API Key 和管理员密钥
 
-# 开发模式（Vite 5173 + Hono 3001 同时启动）
+# 开发模式（Vite 5173 + Hono 11408 同时启动）
 pnpm dev
 ```
 
 - 前端：http://localhost:5173
-- 后端 API：http://localhost:3001
+- 后端 API：http://localhost:11408
 
 ## 环境变量
 
@@ -47,7 +51,9 @@ pnpm dev
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容 API 地址 |
 | `OPENAI_API_KEY` | | API 密钥 |
 | `OPENAI_MODEL` | `gpt-4o` | 模型名称 |
-| `PORT` | `3001` | 服务端端口 |
+| `PORT` | `11408` | 服务端端口 |
+| `DINGTALK_APP_KEY` | | 钉钉应用 AppKey（可选） |
+| `DINGTALK_APP_SECRET` | | 钉钉应用 AppSecret（可选） |
 
 ## 配置项
 
@@ -55,15 +61,11 @@ pnpm dev
 
 | 配置项 | 类型 | 说明 |
 |---|---|---|
-| `model` | string | AI 模型名称 |
-| `api_endpoint` | string | API 地址 |
-| `api_key` | string | API 密钥 |
-| `system_prompt` | string | 系统提示词 |
-| `support_attachments` | boolean | 是否启用文件附件上传 |
-| `show_github` | boolean | 是否在界面中显示 GitHub 链接 |
 | `app_name` | string | 应用名称（白标） |
 | `app_favicon` | string | Favicon base64 data URL（白标） |
 | `app_background` | string | 聊天背景图 base64 data URL（白标） |
+| `support_attachments` | boolean | 是否启用文件附件上传 |
+| `show_github` | boolean | 是否在界面中显示 GitHub 链接 |
 
 ## 登录与认证
 
@@ -75,11 +77,11 @@ pnpm dev
 
 ## 管理面板
 
-点击侧边栏 ⚙️ 图标，输入 `ADMIN_KEY` 后可访问：
+点击侧边栏 图标，输入 `ADMIN_KEY` 后可访问（Agent/Gateway/品牌/技能/统计）：
 
+- **Agent** — 创建/编辑/删除 Agent，每个 Agent 独立配置模型、API 地址、密钥和系统提示词
+- **Gateway** — 全局 API 地址和密钥配置
 - **品牌** — 修改应用名称、Favicon、聊天背景图
-- **模型** — 修改 API 地址、密钥、模型名称
-- **提示词** — 编辑系统提示词
 - **技能** — 上传/卸载技能（.zip 文件）
 - **统计** — 查看用户数、对话数、消息数，浏览所有对话详情
 
@@ -99,18 +101,20 @@ AI 在对话中可自动调用以下内置工具（沙盒隔离，每对话独�
 | `write_document` | 生成文档文件（DOCX/PPTX/XLSX，产物可下载） |
 | `load_skill` | 按需加载技能完整内容 |
 | `list_skill_files` | 列出技能目录中的文件 |
+| `dingtalk_token` | 获取钉钉 OAuth2 Access Token（双层缓存，提前刷新） |
+| `at_mention` | 群聊中 @ 点名其他 Agent（触发即时应答） |
 
 所有工具在 `data/workspaces/{conversationId}/` 沙盒内执行，防止访问宿主文件系统。详见 `docs/specs/module-tool-system.md`。
 
 ## AI 循环
 
-采用 Pi 风格的循环设计，核心特点：
+采用 Pi Agent Core（@earendil-works/pi-agent-core）作为 Agent 循环内核，核心特点：
 
-- **Pi 式并行批执行** — 同一轮中无依赖的工具通过 `Promise.all` 并发执行，结果按模型请求顺序返回
-- **多轮工具调用** — 最多连续 5 轮（`MAX_TOOL_ROUNDS`），每轮 AI 可发起新的工具调用
-- **漂移检测** — 若模型连续两轮调用完全相同的工具批（相同名称 + 参数），视为模型漂移，强制终止工具阶段
-- **批量终止** — 若某轮中所有工具均返回 `terminate: true`，则提前退出循环，不再发起下一轮
-- **finishReason = 'length' 保护** — 输出 token 上限被截断时，工具调用被跳过并以错误消息回填，强制模型直接用文本回答
+- **并行工具执行** — 同一轮中无依赖的工具并发执行
+- **多轮工具调用** — 模型自行决定何时停止，系统提示词约束防无限循环
+- **TypeBox 参数校验** — 工具参数严格类型校验
+- **流式事件映射** — Pi AgentEvent → SSE ServerMessage 完整映射
+- **系统提示词硬性规则** — 防漂移、写文件节制、工具节制由提示词约束而非代码补丁
 
 ## SSE 事件
 
@@ -125,6 +129,12 @@ AI 在对话中可自动调用以下内置工具（沙盒隔离，每对话独�
 | `tool_result` | 工具执行结果（含摘要和产物下载链接） |
 | `done` | 本轮回复完成（含最终回复文本和后续建议） |
 | `error` | 错误信息 |
+| `agent_start` | 群聊中某个 Agent 开始回复 |
+| `agent_done` | 群聊中某个 Agent 回复完成 |
+| `group_start` | 群聊开始 |
+| `group_done` | 群聊结束 |
+| `follow_up` | 无限模式追问 |
+| `infinite_mode_off` | 无限模式关闭 |
 
 ## 技能开发
 
@@ -172,13 +182,13 @@ pnpm start
 
 ## 技术栈
 
-- **前端**：React 18 + shadcn/ui（Radix 原语 + Tailwind CSS）+ Vite 8（Rolldown）
+- **前端**：React 19 + shadcn/ui（Radix 原语 + Tailwind CSS）+ Vite 8（Rolldown）
 - **后端**：Hono 4 + @libsql/client + Drizzle ORM
 - **实时通信**：SSE（Server-Sent Events）
-- **AI**：OpenAI 兼容的 Chat Completions API（流式 + function calling + 多模态 + 思考模式）
-- **认证**：PBKDF2 PIN 哈希 + JWT（jose）
+- **AI**：Pi Agent Core（@earendil-works/pi-agent-core）+ OpenAI 兼容 API
+- **认证**：PBKDF2 PIN 哈希 + JWT（jose）+ IP 速率限制
 - **数据库**：SQLite（单文件，零配置）
-- **文件解析**：xlsx（Excel→CSV）、pdf-parse（PDF→文本）
+- **文件解析**：xlsx（Excel→CSV）、pdf-parse（PDF→文本）、mammoth（DOCX）、word-extractor（DOC）
 
 ## 项目结构
 
@@ -191,35 +201,19 @@ momoi/
 │   │   │   ├── auth/    # 登录界面（用户名 + PIN）
 │   │   │   ├── chat/    # 聊天界面（消息、输入、附件、思考块）
 │   │   │   ├── sidebar/ # 侧边栏（对话列表、导出、用户信息）
-│   │   │   ├── settings/# 管理面板（6 个标签页）+ 用户菜单
+│   │   │   ├── admin/   # 管理面板（Agent/Gateway/品牌/技能/统计）
 │   │   │   └── ui/      # shadcn/ui 基础组件
-│   │   ├── hooks/       # React Hooks（useChat、useAdmin、useTheme）
+│   │   ├── hooks/       # React Hooks（useChat、useGroupChat、useAdmin、useTheme）
 │   │   ├── lib/         # API 客户端、工具函数
 │   │   ├── i18n/        # 国际化配置（zh-CN、en）
 │   │   └── styles/      # 全局 CSS（主题变量、滚动条、Mermaid）
 │   └── server/          # Hono 后端（入口：index.ts）
-│       ├── ai/          # AI 提供商客户端 + function calling 循环
-│       ├── tools/       # 内置工具
-│       │   ├── types.ts         # 工具模块类型定义
-│       │   ├── workspace.ts     # 沙盒文件系统
-│       │   ├── registry.ts      # 工具注册表
-│       │   ├── file-tools.ts    # 文件读写工具
-│       │   ├── http-tool.ts     # HTTP 请求工具
-│       │   ├── document-tools.ts# 文档处理工具
-│       │   ├── skill-tools.ts   # 技能加载 & 文件列表工具
-│       │   ├── bash-tool.ts     # 受限 Shell 命令工具
-│       │   └── index.ts         # 工具集合导出
+│       ├── ai/          # Pi Agent Core 适配层 + 群聊编排 + 中立 Agent
+│       ├── tools/       # 内置工具（12 个）
 │       ├── skills/      # 技能加载和注册
 │       ├── files/       # 文件附件解析（图片、Excel、PDF、文本）
 │       ├── middleware/   # 用户 JWT 认证中间件
-│       └── routes/      # API 路由
-│           ├── chat.ts           # 对话流式接口
-│           ├── conversations.ts  # 对话 CRUD
-│           ├── admin.ts          # 管理面板
-│           ├── upload.ts         # 文件上传
-│           ├── user.ts           # 用户认证
-│           ├── workspace.ts      # 工作区文件管理
-│           └── app.ts            # 应用名称等元信息
+│       └── routes/      # API 路由（chat/group/conversations/admin/upload/user/workspace/app）
 ├── skills/              # 已安装的技能目录
 ├── data/                # SQLite 数据库 + 对话工作区（workspaces/）
 ├── uploads/             # 用户上传的文件附件

@@ -472,3 +472,160 @@
 **影响**：
 - `chat.ts`：`send` 重写为串行 promise 链；回调末尾 `await writeChain`
 - 消除了 SSE 事件乱序与尾部丢失的一类竞态（此前 `writeSSE` 并发 fire-and-forget 也可能乱序）
+
+---
+
+## D24：Agent 多智能体系统 — 独立 Agent 替代全局配置
+
+**日期**：2026-09-07
+
+**背景**：原先 `model` 和 `system_prompt` 是全局配置，所有对话共享同一个模型和提示词。随着群聊功能需求出现，需要支持多个不同角色、不同模型的 Agent 同时存在。
+
+**决策**：引入 Agent 概念——每个 Agent 独立拥有 name/model/system_prompt/avatar/role，存储于 `agents` 表。全局配置 `model` 和 `system_prompt` 字段移除。
+
+**原因**：
+- 群聊需要多个不同人格的 Agent 同时参与，全局配置无法满足
+- 用户可能希望不同对话使用不同模型（如日常对话用便宜模型、代码生成用强模型）
+- Agent 级别的配置更灵活，对齐 chat.com 等主流产品的多 Agent 设计
+
+**实现细节**：
+- `agents` 表：`id`、`name`、`model`、`system_prompt`、`avatar`、`role`（`'default'` | `'neutral'`）、`created_at`
+- `config.ts` 新增 Agent CRUD：`listAgents()`、`getAgent(id)`、`createAgent()`、`updateAgent()`、`deleteAgent()`
+- `migrateDefaultAgent()`：首次启动时从旧 settings 表读取 `model`/`system_prompt`，创建默认 Agent（Momoi）和中立 Agent
+- 中立 Agent 固定 ID 为 `neutral-agent`，不可删除、不可改名/换头像，仅可修改 model 和 system_prompt
+- `conversations` 表新增 `agent_id` 列，`messages` 表新增 `agent_id` 列
+- 管理面板新增 `AgentManager` 标签页（增删改 Agent），`GatewaySettings` 标签页（全局 API 地址/密钥）
+
+**影响**：
+- `AppConfig` 移除 `model` 和 `system_prompt` 字段
+- `pi-adapter.ts` 的 `buildSystemPrompt()` 从 `getAgent()` 读取提示词而非 `getConfig()`
+- 旧数据兼容：`migrateDefaultAgent()` 自动迁移
+
+---
+
+## D25：群聊串行编排 — 多 Agent 依次回复
+
+**日期**：2026-09-07
+
+**背景**：需要支持多个 Agent 在同一对话中交流，用户发一条消息，多个 Agent 各自回复。
+
+**决策**：Agent 串行依次回复（非并行），前序 Agent 的回复以 `role: 'user'` + `[Agent名字]: 内容` 前缀注入后续 Agent 的上下文。
+
+**原因**：
+- 串行编排简单可控，无需处理并发竞态
+- 以 user 角色注入前序回复（而非 assistant），防止模型把自己当作前一个 Agent 的延续（D22 已验证）
+- 随机打乱 Agent 顺序增加对话趣味性
+- 每条消息 tagging `agent_id` 支持历史回溯
+
+**实现细节**：
+- `group-orchestrator.ts`：`orchestrateGroupChat()` 入口函数
+- `prepareGroupHistory()`：将历史中其他 Agent 的 assistant 消息重写为 `[名字]: 内容` 的 user 角色消息
+- 每个 Agent 独立调用 `runPiAgentLoop()`，SSE 事件带 `agent_id`/`agent_name`
+- `group_conversation_agents` 表存储群聊内的 Agent 关联
+- `conversations.type` 区分 `'direct'`（单 Agent）和 `'group'`（群聊）
+
+**影响**：
+- 新增 `routes/group.ts`、`ai/group-orchestrator.ts`、`hooks/useGroupChat.ts`
+- SSE 新增 `agent_start`、`agent_done`、`group_start`、`group_done` 事件
+- 前端 `MessageBubble` 显示 Agent 头像和名字（群聊模式）
+
+---
+
+## D26：无限演算模式 — 中立 Agent 自动追问
+
+**日期**：2026-09-07
+
+**背景**：Agent 回复完毕后对话即结束，缺乏持续互动。用户希望对话能自动延续——无论个体聊天还是群聊。
+
+**决策**：引入"无限演算模式"——个体聊天或群聊中均可开启，中立 Agent 在每轮对话结束时自动生成追问，以用户口吻触发下一轮对话。
+
+**原因**：
+- 创造"Agent 自主对话"的沉浸式体验
+- 中立 Agent 固定角色：不参与群聊回复，只负责生成追问
+- 追问以用户口吻（问题、反问、动作描述）生成，自然融入对话流
+- 可随时开关，避免无限消耗 token
+
+**实现细节**：
+- `neutral-agent.ts`：`generateNeutralFollowUp()` 调用中立 Agent 模型生成追问
+- 追问以 `follow_up` SSE 事件下发，内容为纯文本
+- 开关状态以 `infiniteState` Map 管理（内存中，按 conversationId 索引）
+- `POST /api/chat/infinite-mode` 端点切换开关
+- 关闭时发送 `infinite_mode_off` 事件
+
+**影响**：
+- 新增 `ai/neutral-agent.ts`、`NEUTRAL_AGENT_NAME`/`NEUTRAL_AGENT_ID` 常量
+- 前端 `InputBar` 新增无限模式开关按钮
+- SSE 新增 `follow_up`、`infinite_mode_off` 事件
+
+---
+
+## D27：钉钉 Token 工具 — 服务端 OAuth2 令牌管理
+
+**日期**：2026-09-08
+
+**背景**：技能（如宜搭）需要调用钉钉 OpenAPI，每次请求都需有效的 Access Token。若让 AI 通过 bash 工具管理 token，需暴露 AppKey/AppSecret 给模型，存在安全风险。
+
+**决策**：新增 `dingtalk_token` 内置工具，在服务端管理 OAuth2 令牌生命周期，AppKey/AppSecret 从环境变量读取，不暴露给 AI。
+
+**原因**：
+- AppKey/AppSecret 是敏感凭证，不应出现在 AI 上下文或命令输出中
+- 双层缓存（内存 + 磁盘）降低 API 调用频率
+- 提前 60s 刷新避免 token 过期窗口
+- 工具返回 token 到 AI 上下文中，但 summary 不暴露原始值
+
+**实现细节**：
+- `tools/dingtalk-token.ts`：`dingtalk_token` 工具
+- 环境变量：`DINGTALK_APP_KEY`、`DINGTALK_APP_SECRET`
+- 缓存：内存 `memoryCache` + 磁盘 `data/dingtalk-token.json`
+- 刷新策略：提前 60s 刷新，过期自动重新获取
+- 超时：15s 请求超时
+
+**影响**：新增 `tools/dingtalk-token.ts`；`registry.ts` 新增引用
+
+---
+
+## D28：IP 速率限制 — 内存级 PIN 暴力破解防护
+
+**日期**：2026-09-08
+
+**背景**：4 位 PIN 只有 10000 种组合，无任何防护时攻击者可通过暴力枚举破解。需要轻量级速率限制，不引入 Redis 等外部依赖。
+
+**决策**：内存级 IP 速率限制器——同一 IP 连续 5 次 PIN 错误即封禁 5 分钟。状态仅存于内存，重启即清除。
+
+**原因**：
+- 4 位 PIN 熵值低，必须有限速防护
+- 内存级方案零外部依赖，对齐"轻量自托管"定位
+- 5 次/5 分钟参数对正常用户误触容忍度高，对暴力破解有效阻断
+- 定时清理过期条目，防止长时间运行内存泄漏
+
+**实现细节**：
+- `src/server/rateLimiter.ts`：`checkIpBlocked()`、`recordPinFailure()`、`clearPinFailures()`、`getClientIp()`
+- 封禁期内的失败不再累加，防止攻击者探测封禁阈值
+- 验证成功后调用 `clearPinFailures()` 清除记录
+- `x-forwarded-for` 头优先，兜底 `socket.remoteAddress`
+- 每分钟定时清理已过期封禁条目
+
+**影响**：新增 `src/server/rateLimiter.ts`；`routes/user.ts` 集成限速检查
+
+---
+
+## D29：@mention 工具 — Agent 间点名调用
+
+**日期**：2026-09-08
+
+**背景**：群聊中 Agent 按随机顺序依次回复，但某些场景需要特定 Agent 优先应答（如被点名回答问题）。
+
+**决策**：新增 `at_mention` 内置工具，Agent 可调用它点名其他 Agent，被点名者立即应答，本轮其他 Agent 被跳过。
+
+**原因**：
+- 模拟真实群聊中的 @ 点名行为
+- 被点名 Agent 应优先于随机顺序，让对话更自然
+- 工具参数仅需 agent_name 和 message，简单直接
+
+**实现细节**：
+- `tools/group-mention-tool.ts`：`createMentionTool(mentionSignal)` 工厂函数
+- 返回 `MentionSignal { triggered, agentName, message }` 信号
+- `group-orchestrator.ts` 检测 `mentionSignal.triggered`，插入被点名 Agent 到队列头部
+- 最多 5 次 @mention 重定向（`MAX_MENTION_REDIRECTS`），防止死循环
+
+**影响**：新增 `tools/group-mention-tool.ts`；`registry.ts` 动态创建（`createMentionTool` 非静态模块）

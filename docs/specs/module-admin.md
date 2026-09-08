@@ -11,7 +11,7 @@
 | `src/server/auth.ts` | JWT 签名/验证 + 密钥校验 + 认证中间件 |
 | `src/server/config.ts` | 环境变量读取 + DB 配置读写 |
 | `src/server/routes/admin.ts` | 管理员 REST API（含统计、技能上传/卸载） |
-| `src/client/components/settings/SettingsDialog.tsx` | 管理面板（5 标签页：Branding/Model/Prompt/Skills/Stats） |
+| `src/client/components/settings/SettingsDialog.tsx` | 管理面板（5 标签页：Agent/Gateway/Branding/Skills/Stats） |
 
 ## 认证流程
 
@@ -52,8 +52,6 @@
   "app_background": "",
   "api_endpoint": "https://api.openai.com/v1",
   "api_key": "sk-....abcd",
-  "model": "gpt-4o",
-  "system_prompt": "You are a helpful assistant.",
   "support_attachments": false,
   "show_github": true
 }
@@ -69,8 +67,6 @@
 ```json
 {
   "app_name": "我的助手",
-  "model": "qwen3.7-plus",
-  "system_prompt": "你是一个友好的助手",
   "app_background": "data:image/png;base64,...",
   "support_attachments": true
 }
@@ -79,6 +75,46 @@
 **响应**：更新后的完整配置对象。
 
 **行为**：只更新请求中提供的字段（`undefined` 值跳过）；`support_attachments` 布尔值以 `'true'/'false'` 字符串入库。
+
+### Agent CRUD 端点（需 JWT）
+
+#### GET /api/admin/agents
+
+列出所有 Agent。
+
+**响应**：`{ "agents": [{ "id", "name", "model", "system_prompt", "avatar", "role", "created_at" }] }`
+
+#### POST /api/admin/agents
+
+创建 Agent。
+
+**请求**：`{ "name": "Agent名称", "model": "模型", "system_prompt": "提示词", "avatar?": "base64" }`
+
+**响应**：`{ "agent": { ... } }`（状态码 201）
+
+**错误**：`name` 为空 → 400
+
+#### PUT /api/admin/agents/:id
+
+更新 Agent。
+
+**请求**：`{ "name?": "...", "model?": "...", "system_prompt?": "...", "avatar?": "..." }`
+
+**中立 Agent 规则**：中立 Agent（`id === 'neutral-agent'`）只能修改 `model` 和 `system_prompt`，`name` 和 `avatar` 会被静默剥离。
+
+**响应**：`{ "agent": { ... } }`
+
+**错误**：Agent 不存在 → 404
+
+#### DELETE /api/admin/agents/:id
+
+删除 Agent。
+
+**中立 Agent 规则**：中立 Agent 不可删除 → 403 `{ "error": "Neutral agent cannot be deleted" }`
+
+**响应**：`{ "success": true }`
+
+**错误**：Agent 不存在 → 404
 
 ### GET /api/admin/stats（需 JWT）
 
@@ -121,8 +157,6 @@
 | `app_background` | — | `""`（空=无背景） | 聊天背景图，Base64 data URL |
 | `api_endpoint` | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | API 地址 |
 | `api_key` | `OPENAI_API_KEY` | `""` | API 密钥 |
-| `model` | `OPENAI_MODEL` | `gpt-4o` | 模型名称 |
-| `system_prompt` | — | `""`（空） | 系统提示词 |
 | `support_attachments` | — | `false` | 全局附件开关 |
 | `show_github` | — | `true` | 是否显示 GitHub 链接 |
 
@@ -151,9 +185,9 @@
 
 5 个标签页：
 
-1. **Branding** — 应用名称、Favicon（上传转 base64）、聊天背景图
-2. **Model** — API 地址、密钥、模型名称（密钥输入框为 `type=password` 遮挡显示 + 明文切换按钮）
-3. **Prompt** — 系统提示词编辑
+1. **Agent** — Agent 列表 / 创建 / 编辑 / 删除（中立 Agent 不可删除，名称/头像不可修改）
+2. **Gateway** — API 地址、密钥（密钥输入框为 `type=password` 遮挡显示 + 明文切换按钮）
+3. **Branding** — 应用名称、Favicon（上传转 base64）、聊天背景图
 4. **Skills** — 技能列表 / 上传 / 卸载
 5. **Stats** — 用户/对话/消息统计 + 对话表格（可展开查看消息）
 

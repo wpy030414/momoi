@@ -30,6 +30,9 @@
     {
       "id": "uuid",
       "title": "对话标题",
+      "agent_id": "agent-uuid",
+      "type": "direct",
+      "agent_count": 0,
       "created_at": 1700000000,
       "updated_at": 1700000100
     }
@@ -37,7 +40,7 @@
 }
 ```
 
-> 响应中不含 `user_id`（由 `Conversation` 类型约定），但 DB 行本身有该列。
+> 响应中不含 `user_id`（由 `Conversation` 类型约定），但 DB 行本身有该列。群聊对话的 `type` 为 `group`，`agent_count` 为群组成员数。
 
 ### GET /api/conversations/:id
 
@@ -46,7 +49,7 @@
 **响应**：
 ```json
 {
-  "conversation": { "id": "...", "title": "...", "user_id": "...", "created_at": ..., "updated_at": ... },
+  "conversation": { "id": "...", "title": "...", "user_id": "...", "agent_id": "", "type": "direct", "created_at": ..., "updated_at": ..., "deleted_at": null },
   "messages": [
     {
       "id": 1,
@@ -57,13 +60,15 @@
       "tool_call_id": null,
       "suggestions": null,
       "attachments": null,
+      "agent_id": null,
       "created_at": 1700000000
     }
-  ]
+  ],
+  "agents": null
 }
 ```
 
-**反序列化**：`tool_calls`、`suggestions`、`attachments` 三列从 JSON 字符串解析为对象/数组，为 null 时返回 null。
+**反序列化**：`tool_calls`、`suggestions`、`attachments` 三列从 JSON 字符串解析为对象/数组，为 null 时返回 null。群聊对话额外返回 `agents` 字段（群组成员列表）。
 
 **权限**：查询条件为 `id` **且** `user_id`，不属于当前用户或不存在均返回 404（不区分，避免探测资源存在性）。
 
@@ -73,15 +78,15 @@
 
 **请求**：
 ```json
-{ "title": "可选标题" }
+{ "title": "可选标题", "agent_id": "可选-Agent ID", "type": "direct | group", "agent_ids": ["可选-群聊Agent ID列表"] }
 ```
 
 **响应**（状态码 **201**）：
 ```json
-{ "conversation": { "id": "生成的UUID", "title": "...", "user_id": "...", "created_at": ..., "updated_at": ... } }
+{ "conversation": { "id": "生成的UUID", "title": "...", "user_id": "...", "agent_id": "", "type": "direct", "created_at": ..., "updated_at": ..., "deleted_at": null } }
 ```
 
-**默认标题**：未提供或为空时使用 `New Chat`。
+**默认标题**：未提供或为空时，直接对话使用 `New Chat`，群聊使用 `群组对话`。
 
 ### PATCH /api/conversations/:id
 
@@ -123,8 +128,11 @@ CREATE TABLE conversations (
   id TEXT PRIMARY KEY,                    -- UUID
   user_id TEXT NOT NULL DEFAULT '',       -- 用户名
   title TEXT NOT NULL DEFAULT '新对话',    -- 对话标题
+  agent_id TEXT NOT NULL DEFAULT '',      -- 关联的 Agent ID
+  type TEXT NOT NULL DEFAULT 'direct',    -- 对话类型：'direct' 或 'group'
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  deleted_at INTEGER                     -- 软删除时间戳，null 表示未删除
 );
 CREATE INDEX idx_conversations_user ON conversations(user_id, updated_at);
 
@@ -138,6 +146,7 @@ CREATE TABLE messages (
   tool_call_id TEXT,
   suggestions TEXT,
   attachments TEXT,
+  agent_id TEXT,                         -- 发送消息的 Agent ID（群聊中区分发言人）
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX idx_messages_conv ON messages(conversation_id, created_at);
@@ -146,14 +155,15 @@ CREATE INDEX idx_messages_conv ON messages(conversation_id, created_at);
 ## 行为约束
 
 1. **用户隔离**：所有查询都带 `user_id` 过滤条件
-2. **级联删除**：`messages` 表通过 `ON DELETE CASCADE` 外键自动删除关联消息。已实测验证（`PRAGMA foreign_keys` 返回 1，删除对话后孤儿消息为 0）；libsql 默认开启外键，但如替换底层驱动须重新确认
+2. **软删除**：`DELETE` 操作设置 `deleted_at` 时间戳，不物理删除记录。查询时附加 `deleted_at IS NULL` 条件
 3. **更新时间**：每次发送消息时更新 `updated_at`（在 `chat.ts` 中处理）
-4. **默认标题**：Schema 默认为 `新对话`；但 `chat.ts` 与 `conversations.ts` 的创建路径实际写入消息前 40 字符或 `New Chat`
+4. **默认标题**：Schema 默认为 `新对话`；但 `chat.ts` 与 `conversations.ts` 的创建路径实际写入消息前 40 字符或 `New Chat`（群聊为 `群组对话`）
 5. **排序**：列表按 `updated_at` 降序，消息按 `created_at` 升序
+6. **群聊创建**：`POST /api/conversations` 支持 `type: 'group'` 和 `agent_ids` 参数，创建对话后写入 `group_conversation_agents` 关联表
 
 ## 验收标准
 
 1. 用户 A 无法通过任何端点读取或修改用户 B 的对话
-2. 删除对话后其消息一并消失
+2. 删除对话后其消息仍保留在库中（软删除），查询时被过滤
 3. 回退后再次 `GET` 该对话，被删消息及其后续均不存在，时间戳早于回退点的消息保持原顺序
-4. 迁移对已存在的旧库能补齐 `suggestions` / `attachments` 列（见 `db.ts` 的 `PRAGMA table_info` 预检）
+4. 迁移对已存在的旧库能补齐新列（`agent_id`、`type`、`deleted_at`、`agent_id` on messages）

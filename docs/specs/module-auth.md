@@ -12,6 +12,7 @@
 | `src/server/middleware/userAuth.ts` | 独立的用户 JWT 认证中间件（严格模式，不接受 `X-User` 回退） |
 | `src/server/routes/user.ts` | 用户 PIN 相关端点（状态查询/验证/设置/修改） |
 | `src/server/config.ts` | `env.ADMIN_KEY` 读取 |
+| `src/server/rateLimiter.ts` | IP 速率限制器（PIN 暴力破解防护） |
 | `src/client/components/auth/LoginScreen.tsx` | 三步登录 UI |
 | `src/client/components/settings/ChangePinDialog.tsx` | 修改 PIN 表单 |
 
@@ -50,6 +51,23 @@
 - **签名密钥**：`ADMIN_KEY` 的 UTF-8 编码字节
 - **回退密钥**：`ADMIN_KEY` 为空时使用 `"fallback-secret"`（不推荐，仅防启动崩溃）
 - 验证时除签名外还须匹配 `role` 字段；用户 token 额外要求 `sub` 为字符串
+
+## IP 速率限制
+
+内存级 IP 速率限制器，仅用于 PIN 登录防护。
+
+**规则**：同一 IP 连续 5 次 PIN 错误 → 封禁 5 分钟。状态存于内存，重启服务即清除。
+
+**API**：
+- `checkIpBlocked(ip)` → 返回 null（放行）或封禁原因字符串（含剩余秒数）
+- `recordPinFailure(ip)` → 记录一次失败，达到阈值后封禁
+- `clearPinFailures(ip)` → 验证成功后清除记录
+- `getClientIp(c)` → 从请求提取 IP（优先 `x-forwarded-for`，兜底 `socket.remoteAddress`）
+
+**行为**：
+- 封禁期内失败不再累加
+- 定时清理过期条目（每分钟）
+- 封禁到期后自动清除
 
 ## 中间件实现
 
@@ -101,6 +119,7 @@
 | PIN 非 4 位数字 | 400 `PIN must be 4 digits` |
 | 该用户未设置 PIN | 404 `PIN not set` |
 | PIN 不匹配 | 401 `Invalid PIN` |
+| 连续 5 次 PIN 错误 | 429 Too many failed attempts |
 
 ### POST /api/user/set-pin
 

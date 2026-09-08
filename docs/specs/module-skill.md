@@ -11,7 +11,7 @@
 | 文件 | 职责 |
 |---|---|
 | `src/server/skills/loader.ts` | 加载技能文件 + 解析前置元数据（支持折叠/字面块标量）+ 注册表 |
-| `src/server/ai/loop.ts` | `buildSystemPrompt()` 中注入技能摘要 |
+| `src/server/ai/pi-adapter.ts` | `buildSystemPrompt()` 中注入技能摘要 |
 | `src/server/tools/skill-tools.ts` | `load_skill` / `list_skill_files` 工具实现 |
 | `src/server/routes/admin.ts` | 管理员上传/卸载技能 |
 
@@ -84,19 +84,20 @@ description: |
 
 ### 注入系统提示词（摘要模式）
 
-在 `buildSystemPrompt()` 中，**仅注入名称和描述**：
+在 `pi-adapter.ts:buildSystemPrompt()` 中，**仅注入名称和描述**：
 
 ```
-{config.system_prompt}
+{agent.system_prompt}
 
 ## Available Skills
-以下是已安装的技能摘要。技能库可能不完整：如果用户的请求没有与某个技能描述明显匹配，请直接如实告知用户当前技能库中是否有可用技能，不要强行加载技能试探。
+以下是已安装的技能摘要。技能库可能不完整：如果用户的请求没有与某个技能描述明显匹配，请直接如实告知用户当前技能库中是否有可用技能，不要强行加载技能试探。如需查看某个技能的完整内容，请调用 load_skill 工具。
 
 - **{skill.manifest.name}**: {skill.manifest.description}
-- **{skill2.manifest.name}**: {skill2.manifest.description}
 
-## 输出格式（最高优先级，不得省略）
-...（硬编码的 suggestions 格式指令 + 工具使用规范）
+{思考模式指令 / 无限模式指令 / 群组对话规则}
+
+## 建议
+...（非无限模式下的硬编码 suggestions 格式指令）
 ```
 
 - 技能按注册表顺序列出

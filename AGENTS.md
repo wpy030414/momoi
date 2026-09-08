@@ -2,7 +2,7 @@
 
 ## 项目：Momoi
 
-自托管的 Web AI 智能体平台。用户通过 PIN 认证登录后与 AI 对话；模型按需调用插件/技能；支持文件附件多模态交互；管理员通过密钥控制一切。
+自托管的 Web AI 智能体平台。用户通过 PIN 认证登录后与 AI 对话；模型按需调用技能；支持文件附件多模态交互；管理员通过密钥控制一切。
 
 ## 文档结构
 
@@ -38,11 +38,10 @@
 
 单进程全栈 TypeScript 应用：
 
-- **前端**：React 18 + shadcn/ui（Radix 原语 + Tailwind CSS 3.4），Vite 8（Rolldown 打包）构建为静态文件，由 Hono 在生产模式下托管
+- **前端**：React 19 + shadcn/ui（Radix 原语 + Tailwind CSS 3.4），Vite 8（Rolldown 打包）构建为静态文件，由 Hono 在生产模式下托管
 - **后端**：Hono 4（Node.js），SSE 用于实时聊天流，REST API 用于 CRUD
 - **数据库**：SQLite（@libsql/client + Drizzle ORM）—— 单文件 `data/momoi.db`，无需外部数据库
 - **AI**：OpenAI 兼容的 Chat Completions API，支持流式输出、function calling、多模态附件、思考模式
-- **插件**：JSON 清单 + TS/JS 模块，从 `plugins/` 目录动态加载执行
 - **技能**：SKILL.md 文件（YAML 前置元数据 + Markdown 内容），注入系统提示词
 - **认证**：用户 4 位 PIN（PBKDF2 哈希 + JWT 30 天）；管理员密钥（JWT 24 小时）
 
@@ -53,15 +52,14 @@
 | `src/shared/` | 客户端与服务端共享的 TypeScript 类型和常量 |
 | `src/client/` | React 前端（入口：`main.tsx`） |
 | `src/server/` | Hono 后端（入口：`index.ts`） |
-| `src/server/ai/` | AI 提供商客户端（`provider.ts`）+ 聊天循环（`loop.ts`）+ 工具注册（`tools.ts`） |
-| `src/server/plugins/` | 插件加载（`loader.ts`）、执行（`executor.ts`）、注册（`registry.ts`） |
+| `src/server/ai/` | Pi Agent Core 适配层（`pi-adapter.ts`）+ 群聊编排（`group-orchestrator.ts`）+ 中立 Agent（`neutral-agent.ts`） |
+| `src/server/tools/` | 内置工具系统（12 个工具：文件/网络/文档/技能/bash/钉钉/群聊） |
 | `src/server/skills/` | 技能加载和注册（`loader.ts` → `registry.ts`） |
 | `src/server/files/` | 文件附件解析（`parser.ts`：图片→base64、xlsx→csv、pdf→text） |
-| `src/server/middleware/` | 用户 JWT 认证中间件（`userAuth.ts`） |
-| `src/server/routes/` | API 路由：`chat.ts`、`conversations.ts`、`admin.ts`、`plugins.ts`、`upload.ts`、`user.ts` |
-| `plugins/` | 已安装的插件目录 |
+| `src/server/middleware/` | 用户 JWT 认证中间件（`userAuth.ts`）+ IP 速率限制（`rateLimiter.ts`） |
+| `src/server/routes/` | API 路由：`chat.ts`、`group.ts`、`conversations.ts`、`admin.ts`、`upload.ts`、`user.ts`、`workspace.ts`、`app.ts` |
 | `skills/` | 已安装的技能目录 |
-| `data/` | SQLite 数据库文件（`momoi.db`） |
+| `data/` | SQLite 数据库文件（`momoi.db`）+ 对话工作区（`workspaces/`） |
 | `uploads/` | 用户上传的文件附件存储目录 |
 
 ## 开发
@@ -82,15 +80,6 @@ pnpm start        # 运行生产构建（node dist/index.js）
 - 服务端路由在 `src/server/routes/`
 - 共享类型在 `src/shared/types.ts` —— 唯一的事实来源
 
-## 插件契约
-
-插件是 `plugins/` 下的一个目录，包含：
-
-- **`plugin.json`** — 清单文件，包含 `name`、`version`、`description`、`tools[]`
-- **`index.ts` / `index.js` / `index.mjs`** — 导出 `execute(toolName: string, input: Record<string, unknown>): Promise<unknown>`
-
-工具名在注册时自动加上插件前缀：`{pluginName}_{toolName}`。模块首次导入后会被缓存。
-
 ## 技能契约
 
 技能是 `skills/` 下的一个目录，包含：
@@ -103,8 +92,8 @@ pnpm start        # 运行生产构建（node dist/index.js）
 
 - 用户名 + 4 位数字 PIN，PBKDF2 安全哈希后存储（实现细节见 `docs/specs/module-auth.md`）
 - 验证成功后签发 JWT（30 天有效期）
-- 请求通过 `Authorization: Bearer <jwt>` 认证；`userAuthMiddleware` 提取 `userId`
-- ⚠️ 所有用户路由**只认 JWT**，不接受 `X-User` 回退（`/api/user/*` 在 handler 内直接读取 `X-User`，仅用于登录前识别身份；`auth.ts` 中带 `X-User` 回退的 `userAuthMiddleware` 为无引用的死代码，勿导入——详见 `docs/specs/module-auth.md`）
+- 请求通过 `Authorization: Bearer <jwt>` 认证；`userAuthMiddleware`（`middleware/userAuth.ts`）提取 `userId`
+- PIN 连续 5 次错误 → 封禁 IP 5 分钟（`rateLimiter.ts`）
 
 ### 管理员认证
 
@@ -116,19 +105,21 @@ pnpm start        # 运行生产构建（node dist/index.js）
 ## 数据库
 
 - 文件位置：`data/momoi.db`
-- 表：`conversations`、`messages`（含 `attachments` 列）、`settings`
-- 迁移策略：`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE` 添加新列
+- 表：`conversations`（含 `agent_id`、`type`、`deleted_at`）、`messages`（含 `agent_id`、`attachments` 列）、`settings`、`agents`、`group_conversation_agents`
+- 迁移策略：`CREATE TABLE IF NOT EXISTS`，使用 `executeMultiple` 一步到位
 - 时间戳使用 Unix epoch（秒）
 
 ## 关键常量（`src/shared/constants.ts`）
 
 | 常量 | 值 | 说明 |
 |---|---|---|
-| `MAX_TOOL_ROUNDS` | 5 | 单次对话最大工具调用轮次 |
 | `MAX_HISTORY_MESSAGES` | 20 | 发送给 AI 的最大历史消息数 |
 | `SUGGESTIONS_FENCE` | `` ```suggestions `` | Suggestions 代码块标记 |
 | `ADMIN_TOKEN_EXPIRY_HOURS` | 24 | 管理员 JWT 有效期（小时） |
-| `DEFAULT_SYSTEM_PROMPT` | `''`（空） | 默认系统提示词（空，由代码追加格式指令） |
+| `DEFAULT_SYSTEM_PROMPT` | `''`（空） | 默认系统提示词 |
 | `DEFAULT_APP_NAME` | `Momoi` | 默认应用名称 |
 | `DEFAULT_MODEL` | `gpt-4o` | 默认模型 |
 | `DEFAULT_API_ENDPOINT` | `https://api.openai.com/v1` | 默认 API 端点 |
+| `DEFAULT_AGENT_NAME` | `Momoi` | 默认 Agent 名称 |
+| `NEUTRAL_AGENT_NAME` | `中立 Agent` | 中立 Agent 名称 |
+| `NEUTRAL_AGENT_ID` | `neutral-agent` | 中立 Agent 固定 ID |
