@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useLayoutEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
@@ -51,7 +51,13 @@ export function ChatPanel({
   infiniteMode = false, onInfiniteModeChange,
 }: ChatPanelProps) {
   const { t } = useTranslation()
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const prevFirstIdRef = useRef<number | undefined>(undefined)
+  // Track whether the user is scrolled near the bottom — updated by onScroll.
+  // Stored in a ref so useLayoutEffect can read it before the browser paints
+  // (by that point scrollHeight has grown but scrollTop hasn't, so computing
+  // "atBottom" inside the effect is always wrong).
+  const atBottomRef = useRef(true)
   const [revertedText, setRevertedText] = useState<string>('')
   const [thinkingMode, setThinkingMode] = useState<boolean>(true)
 
@@ -67,9 +73,33 @@ export function ChatPanel({
     return t('chat.greetingEvening')
   }, [t])
 
-  // Auto-scroll to bottom when messages change
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  // Track scroll position — fires before the next layout effect,
+  // so atBottomRef is always accurate when we decide whether to pin.
+  // Threshold: 10% of visible height (not absolute px), so it scales
+  // with window size and long chats.
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current
+    if (!el) return
+    const threshold = el.clientHeight * 0.1
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold
+  }, [])
+
+  // Pin to bottom instantly. Two cases:
+  // 1. Conversation switch → always scroll to bottom.
+  // 2. Messages changed (streaming / user sent) → only scroll if the
+  //    user was already at the bottom (within 10% of visible height).
+  //    Once the user scrolls up, we stop dragging them.
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+
+    const firstId = messages[0]?.id
+    const isSwitch = messages.length > 0 && firstId !== prevFirstIdRef.current
+    prevFirstIdRef.current = firstId
+
+    if (isSwitch || atBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
   }, [messages])
 
   const handleRevert = async (index: number) => {
@@ -107,7 +137,7 @@ export function ChatPanel({
       )}
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 relative z-10">
+      <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 py-4 relative z-10">
         {!hasMessages ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-full max-w-3xl">
@@ -159,13 +189,11 @@ export function ChatPanel({
             agents={isGroup ? (groupAgents || []) : undefined}
           />
         )}
-        <div ref={bottomRef} />
       </div>
 
       {/* Input area */}
       {hasMessages && (
         <div className="relative z-10">
-          {loading ? <div className="max-w-3xl mx-auto w-full px-4 pb-4"><div className="h-10" /></div> : null}
           <InputBar
             onSend={handleSend}
             disabled={loading}

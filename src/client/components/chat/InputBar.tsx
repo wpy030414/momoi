@@ -188,7 +188,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
             <button
               onClick={handleSend}
               disabled={isInputDisabled || uploading || !hasContent}
-              className="px-4 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all inline-flex items-center justify-center min-w-[64px]"
+              className="px-4 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all inline-flex items-center justify-center min-w-[64px] h-9"
             >
               {disabled ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
