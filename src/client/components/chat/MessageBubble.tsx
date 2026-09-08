@@ -74,12 +74,12 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
             <div className="mb-2 space-y-1">
               {message.toolCalls.map((tc, idx) => (
                 <div key={tc.id || idx}>
-                  <div className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2">
-                    <span className="font-medium">🔧 {tc.name}</span>
+                  <div className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0">
+                    <span className="font-medium truncate">{tc.name}</span>
                     {tc.status === 'running' && (
-                      <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block" />
+                      <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block flex-shrink-0" />
                     )}
-                    {tc.result && <span className="text-muted-foreground ml-1 truncate">→ {tc.result}</span>}
+                    {tc.result && <span className="text-muted-foreground ml-1 truncate">{tc.result}</span>}
                   </div>
                   {tc.artifacts && tc.artifacts.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-1">

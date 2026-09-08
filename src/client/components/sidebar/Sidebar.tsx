@@ -155,6 +155,11 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
               ) : (
                 <span className="flex-1 text-sm truncate">{conv.title}</span>
               )}
+              {(conv as any).type === 'group' && (conv as any).agent_count > 0 && (
+                <span className="text-xs text-muted-foreground/60 flex-shrink-0">
+                  ({(conv as any).agent_count + 1})
+                </span>
+              )}
               {renamingId !== conv.id && (
                 <Button
                   variant="ghost"

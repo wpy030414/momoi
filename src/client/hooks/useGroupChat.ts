@@ -87,6 +87,8 @@ export function useGroupChat() {
       }
       // Use the selectConversation to load the new conversation
       chat.selectConversation(conv.id)
+      // Refresh sidebar to show the new conversation immediately
+      chat.refreshConversations()
       return conv
     } catch (err) {
       console.error('Failed to create group conversation:', err)

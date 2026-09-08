@@ -16,6 +16,7 @@ export interface Conversation {
   title: string
   agent_id: string
   type: 'direct' | 'group'
+  agent_count?: number  // 群组内 Agent 数量（不含中立 Agent，不含用户）
   created_at: number
   updated_at: number
 }

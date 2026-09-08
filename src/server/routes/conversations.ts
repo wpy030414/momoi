@@ -20,7 +20,17 @@ conversationsRoute.get('/', async (c) => {
   const userId = getUserId(c)
   if (!userId) return c.json({ error: 'Unauthorized' }, 401)
 
-  const list = await db.select().from(conversations).where(and(eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).orderBy(desc(conversations.updated_at)).all()
+  const list = await db.select({
+    id: conversations.id,
+    user_id: conversations.user_id,
+    title: conversations.title,
+    agent_id: conversations.agent_id,
+    type: conversations.type,
+    created_at: conversations.created_at,
+    updated_at: conversations.updated_at,
+    deleted_at: conversations.deleted_at,
+    agent_count: sql<number>`COALESCE((SELECT COUNT(*) FROM group_conversation_agents WHERE group_conversation_agents.conversation_id = ${conversations.id}), 0)`,
+  }).from(conversations).where(and(eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).orderBy(desc(conversations.updated_at)).all()
   return c.json({ conversations: list })
 })
 
