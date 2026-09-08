@@ -28,7 +28,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       const status = await api.getUserStatus(username.trim())
       setHasPin(status.has_pin)
     } catch (err) {
-      setError(t('login.error'))
+      setError(err instanceof Error ? err.message : t('login.error'))
     } finally {
       setLoading(false)
     }
@@ -47,7 +47,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       const result = await api.verifyPin(username.trim(), pin)
       onLogin(username.trim(), result.token)
     } catch (err) {
-      setError(t('login.pinError'))
+      setError(err instanceof Error ? err.message : t('login.pinError'))
     } finally {
       setLoading(false)
     }
@@ -70,7 +70,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       const result = await api.setPin(username.trim(), newPin)
       onLogin(username.trim(), result.token)
     } catch (err) {
-      setError(t('login.error'))
+      setError(err instanceof Error ? err.message : t('login.error'))
     } finally {
       setLoading(false)
     }

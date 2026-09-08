@@ -3,6 +3,7 @@ import { db } from '../db.js'
 import { settings } from '../schema.js'
 import { eq } from 'drizzle-orm'
 import { hashPin, verifyPin, signUserToken } from '../auth.js'
+import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../rateLimiter.js'
 
 export const userRoute = new Hono()
 
@@ -27,6 +28,12 @@ userRoute.post('/verify', async (c) => {
   const username = getUsername(c)
   if (!username) return c.json({ error: 'Username required' }, 400)
 
+  const ip = getClientIp(c)
+  const blocked = checkIpBlocked(ip)
+  if (blocked) {
+    return c.json({ error: blocked }, 429)
+  }
+
   const { pin } = await c.req.json<{ pin: string }>()
   if (!pin || !/^\d{4}$/.test(pin)) {
     return c.json({ error: 'PIN must be 4 digits' }, 400)
@@ -36,9 +43,11 @@ userRoute.post('/verify', async (c) => {
   if (!row) return c.json({ error: 'PIN not set' }, 404)
 
   if (!verifyPin(pin, row.value)) {
+    recordPinFailure(ip)
     return c.json({ error: 'Invalid PIN' }, 401)
   }
 
+  clearPinFailures(ip)
   const result = await signUserToken(username)
   return c.json(result)
 })
@@ -70,6 +79,12 @@ userRoute.post('/change-pin', async (c) => {
   const username = getUsername(c)
   if (!username) return c.json({ error: 'Username required' }, 400)
 
+  const ip = getClientIp(c)
+  const blocked = checkIpBlocked(ip)
+  if (blocked) {
+    return c.json({ error: blocked }, 429)
+  }
+
   const { old_pin, new_pin } = await c.req.json<{ old_pin: string; new_pin: string }>()
   if (!old_pin || !/^\d{4}$/.test(old_pin) || !new_pin || !/^\d{4}$/.test(new_pin)) {
     return c.json({ error: 'PIN must be 4 digits' }, 400)
@@ -79,9 +94,11 @@ userRoute.post('/change-pin', async (c) => {
   if (!row) return c.json({ error: 'PIN not set' }, 404)
 
   if (!verifyPin(old_pin, row.value)) {
+    recordPinFailure(ip)
     return c.json({ error: 'Invalid current PIN' }, 401)
   }
 
+  clearPinFailures(ip)
   const hashed = hashPin(new_pin)
   await db.update(settings).set({ value: hashed }).where(eq(settings.key, pinKey(username))).run()
 
