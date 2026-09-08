@@ -27,7 +27,7 @@ interface ChatMessage {
 interface ChatPanelProps {
   messages: ChatMessage[]
   loading: boolean
-  onSend: (text: string, thinkingMode?: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null) => void | Promise<void>
+  onSend: (text: string, thinkingMode?: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean) => void | Promise<void>
   onCancel: () => void
   onRevert: (index: number) => Promise<string | null>
   backgroundImage?: string
@@ -38,7 +38,7 @@ interface ChatPanelProps {
   /** Group chat mode */
   isGroup?: boolean
   groupAgents?: AgentBrief[]
-  onSendGroup?: (text: string, thinkingMode: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => void
+  onSendGroup?: (text: string, thinkingMode: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>, infiniteMode?: boolean) => void
   /** Infinite mode */
   infiniteMode?: boolean
   onInfiniteModeChange?: (enabled: boolean) => void

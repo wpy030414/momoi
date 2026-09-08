@@ -454,8 +454,8 @@ export function useChat() {
           const isGroupChat = prev.some((m) => m.agent_id)
           return [
             ...prev,
-            { role: 'user', content: msg.text },
-            ...(isGroupChat ? [] : [{ role: 'assistant', content: '', streaming: true, thinkingSegments: [] }]),
+            { role: 'user' as const, content: msg.text },
+            ...(isGroupChat ? [] : [{ role: 'assistant' as const, content: '', streaming: true, thinkingSegments: [] }]),
           ]
         })
         break

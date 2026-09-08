@@ -112,7 +112,7 @@ async function readPdf(buffer: Buffer): Promise<string> {
 // ---- Write helpers ----
 
 async function writeDocx(content: any): Promise<Buffer> {
-  const children: docx.Paragraph[] = []
+  const children: (docx.Paragraph | docx.Table)[] = []
 
   if (content.title) {
     children.push(new docx.Paragraph({
@@ -144,7 +144,9 @@ async function writeDocx(content: any): Promise<Buffer> {
       if (section.table && section.table.headers && section.table.rows) {
         const headerRow = new docx.TableRow({
           children: section.table.headers.map((h: string) => new docx.TableCell({
-            children: [new docx.Paragraph({ text: String(h), bold: true })],
+            children: [new docx.Paragraph({
+              children: [new docx.TextRun({ text: String(h), bold: true })],
+            })],
           })),
           tableHeader: true,
         })
@@ -225,7 +227,7 @@ async function writePptx(content: any): Promise<Buffer> {
   }
 
   const output = await pptx.write({ outputType: 'nodebuffer' })
-  return Buffer.from(output)
+  return Buffer.from(output as unknown as ArrayBuffer)
 }
 
 async function writeXlsx(content: any): Promise<Buffer> {
