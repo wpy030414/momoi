@@ -65,7 +65,7 @@ const ZERO_USAGE: Usage = {
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
-function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isGroup: boolean = false, infiniteMode: boolean = false, agentName?: string, groupAgentNames?: string[]): string {
+function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isGroup: boolean = false, infiniteMode: boolean = false, agentName?: string, groupAgentNames?: string[], mentionedBy?: string | null): string {
   let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT
 
   // Append skill descriptions only
@@ -121,28 +121,28 @@ function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isG
     const names = groupAgentNames && groupAgentNames.length > 0 ? groupAgentNames : []
     const count = names.length
     const identityLine = agentName
-      ? `当前群组有${count}个Agent：${names.join('、')}，你是其中的 ${agentName}`
+      ? `当前群组有 1 个用户和 ${count} 个 Agent：${names.join('、')}，你是其中的 Agent：${agentName}。`
       : ''
 
     prompt += `
 ## 群组对话规则
-你正在参与一个群组对话，其他 Agent 也可能回复用户。请遵守：
-${identityLine ? `${identityLine}\n` : ''}- 对话历史中所有以 \`[Agent名字]: \` 开头的消息，都是【其他 Agent】或你之前的发言记录，不是用户说的。
+你正在参与一个群组对话，${identityLine ? `${identityLine}` : ''}其他 Agent 也可能回复用户。请遵守：
+- 对话历史中所有以 \`[Agent名字]: \` 开头的消息，都是【其他 Agent】或你之前的发言记录，不是用户说的。
 - 不要复述、引用或延续其他 Agent 已经说过的内容，也不要假装那些话是你说的。
 - 根据用户的最新消息，用你自己的人设独立、自然地回答。即使其他 Agent 已经回答过同样的问题，你也只需给出你自己视角的观点，不要重复对方的措辞。
-- 如果你需要某个特定 Agent 的专业知识来更好地回答用户问题，请使用 at_mention 工具 @他们。
-- 被 @ 的 Agent 会立即回复，其他 Agent 本轮会被跳过。
-- 只在你确实需要对方回答用户问题或提供互补知识时才使用 at_mention，不要为了社交而 @。
+- 群聊中鼓励你自然地 @ 其他 Agent 进行互动——点名、邀请讨论、调侃、吐槽都可以，就像真实群聊一样。可以一次 @ 多个人。
+- 当你决定 @ 某人时，请在你的回复文本中**自然地写出 @对方名字**（如 "@巧克力 @香子兰 你们也来说说看！"），同时调用 at_mention 工具传递点名信号。
+- 被 @ 的 Agent 会在本轮内优先回复，但其他 Agent 仍然会照常发言，不会被打断。
 - 不要 @ 你自己。
-- 每次对话最多使用一次 at_mention。
-`
+- 适度使用 @ 功能，让它成为你群聊互动的自然习惯，而不是只在需要专业知识时才呼叫。
+${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应对方的点名，但不必为此改变你的回复优先级或内容。\n` : ''}`
   }
 
   return prompt
 }
 
 // ---- JSON Schema 属性 → TypeBox schema ----
-function jsonSchemaToTypeBox(properties: Record<string, { type: string; description?: string }>, required: string[] = []): TSchema {
+function jsonSchemaToTypeBox(properties: Record<string, { type: string; description?: string; items?: { type: string } }>, required: string[] = []): TSchema {
   const obj: Record<string, TSchema> = {}
   for (const [key, prop] of Object.entries(properties)) {
     const desc = prop.description
@@ -150,7 +150,11 @@ function jsonSchemaToTypeBox(properties: Record<string, { type: string; descript
       case 'string': obj[key] = desc ? Type.String({ description: desc }) : Type.String(); break
       case 'number': obj[key] = desc ? Type.Number({ description: desc }) : Type.Number(); break
       case 'boolean': obj[key] = desc ? Type.Boolean({ description: desc }) : Type.Boolean(); break
-      // array 和 object 归为 unknown，实际很少见
+      case 'array': {
+        const itemType = prop.items?.type === 'string' ? Type.String() : Type.Any()
+        obj[key] = desc ? Type.Array(itemType, { description: desc }) : Type.Array(itemType)
+        break
+      }
       default: obj[key] = desc ? Type.Any({ description: desc }) : Type.Any(); break
     }
   }
@@ -725,6 +729,7 @@ export async function runPiAgentLoop(
   infiniteMode = false,
   agentName?: string,
   groupAgentNames?: string[],
+  mentionedBy?: string | null,
 ): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[] }> {
   const config = await getConfig()
 
@@ -752,7 +757,7 @@ export async function runPiAgentLoop(
   const convId = conversationId || 'default'
 
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt(agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames)
+  const systemPrompt = buildSystemPrompt(agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy)
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {

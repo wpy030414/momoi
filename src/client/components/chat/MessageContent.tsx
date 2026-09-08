@@ -11,6 +11,9 @@ interface MessageContentProps {
 
 const STREAM_THROTTLE_MS = 120
 
+/** Regex to match @AgentName mentions (word chars + CJK chars after @) */
+const MENTION_RE = /(@[\w一-鿿぀-ゟ゠-ヿ]+)/g
+
 /** Custom markdown components — shadcn-style table rendering */
 const markdownComponents: Components = {
   hr: ({ ...props }) => (
@@ -42,6 +45,28 @@ const markdownComponents: Components = {
       {children}
     </td>
   ),
+}
+
+/**
+ * Split content by @mention patterns and render mentions as highlighted tags.
+ * Non-mention parts are rendered as regular Markdown.
+ */
+function renderContentWithMentions(content: string, streaming?: boolean): React.ReactNode[] {
+  const parts = content.split(MENTION_RE)
+  return parts.map((part, idx) => {
+    if (part.startsWith('@')) {
+      return (
+        <span
+          key={idx}
+          className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded-md bg-primary/10 text-primary font-medium text-sm border border-primary/20 align-baseline"
+        >
+          {part}
+        </span>
+      )
+    }
+    if (!part) return null
+    return <Markdown key={idx} remarkPlugins={[remarkGfm]} components={markdownComponents}>{part}</Markdown>
+  })
 }
 
 export function MessageContent({ content, streaming }: MessageContentProps) {
@@ -84,7 +109,8 @@ export function MessageContent({ content, streaming }: MessageContentProps) {
           const chart = part.replace(/```mermaid\n?/, '').replace(/\n?```$/, '')
           return <MermaidBlock key={idx} chart={chart} />
         }
-        return <Markdown key={idx} remarkPlugins={[remarkGfm]} components={markdownComponents}>{part}</Markdown>
+        // Render with @mention highlighting
+        return <span key={idx}>{renderContentWithMentions(part, streaming)}</span>
       })}
     </div>
   )

@@ -77,6 +77,9 @@ importers:
       jose:
         specifier: ^6.2.12
         version: 6.2.12
+      libsql:
+        specifier: ^0.4.7
+        version: 0.4.7
       lucide-react:
         specifier: ^0.475.0
         version: 0.475.0(react@19.2.8)
