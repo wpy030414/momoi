@@ -12,12 +12,12 @@ export const THINKING_TRUNCATED_MARK = '\n…（思考被输出长度截断）�
 // Default system prompt is empty — the hard-coded suggestions-format instruction
 // in server/ai/loop.ts:buildSystemPrompt guarantees suggestions are always produced.
 export const DEFAULT_SYSTEM_PROMPT = ''
-export const DEFAULT_APP_NAME = 'Open Agent'
+export const DEFAULT_APP_NAME = 'Momoi'
 export const DEFAULT_API_ENDPOINT = 'https://api.openai.com/v1'
 export const DEFAULT_MODEL = 'gpt-4o'
 
 // Agent 默认值
-export const DEFAULT_AGENT_NAME = 'Open Agent'
+export const DEFAULT_AGENT_NAME = 'Momoi'
 export const DEFAULT_AGENT_MODEL = 'gpt-4o'
 export const DEFAULT_AGENT_SYSTEM_PROMPT = ''
 

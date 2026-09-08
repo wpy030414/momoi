@@ -7,64 +7,17 @@ import fs from 'fs'
 const dataDir = path.resolve('data')
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
 
-const dbPath = path.join(dataDir, 'open-agent.db')
+const dbPath = path.join(dataDir, 'momoi.db')
 const client = createClient({ url: `file:${dbPath}` })
 
-// --- Migrations ---
-// Lightweight: CREATE IF NOT EXISTS won't add columns to existing DBs,
-// so new columns are ALTERed in when missing.
 async function migrate() {
-  // --- Pre-flight: add columns that older DBs may be missing ---
-  // These ALTERs must run BEFORE executeMultiple, because CREATE INDEX
-  // on a missing column would fail inside the batch.
-  const convRes = await client.execute('PRAGMA table_info(conversations)')
-  if (convRes.rows.length > 0) {
-    // Table exists — patch any new columns
-    const hasUserId = convRes.rows.some((r) => r.name === 'user_id')
-    if (!hasUserId) {
-      await client.execute("ALTER TABLE conversations ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
-    }
-    const hasAgentId = convRes.rows.some((r) => r.name === 'agent_id')
-    if (!hasAgentId) {
-      await client.execute("ALTER TABLE conversations ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''")
-    }
-    const hasType = convRes.rows.some((r) => r.name === 'type')
-    if (!hasType) {
-      await client.execute("ALTER TABLE conversations ADD COLUMN type TEXT NOT NULL DEFAULT 'direct'")
-    }
-  }
-
-  const msgRes = await client.execute('PRAGMA table_info(messages)')
-  if (msgRes.rows.length > 0) {
-    const hasSuggestions = msgRes.rows.some((r) => r.name === 'suggestions')
-    if (!hasSuggestions) {
-      await client.execute('ALTER TABLE messages ADD COLUMN suggestions TEXT')
-    }
-    const hasAttachments = msgRes.rows.some((r) => r.name === 'attachments')
-    if (!hasAttachments) {
-      await client.execute('ALTER TABLE messages ADD COLUMN attachments TEXT')
-    }
-    const hasMsgAgentId = msgRes.rows.some((r) => r.name === 'agent_id')
-    if (!hasMsgAgentId) {
-      await client.execute('ALTER TABLE messages ADD COLUMN agent_id TEXT')
-    }
-  }
-
-  const agentRes = await client.execute('PRAGMA table_info(agents)')
-  if (agentRes.rows.length > 0) {
-    const hasAvatar = agentRes.rows.some((r) => r.name === 'avatar')
-    if (!hasAvatar) {
-      await client.execute("ALTER TABLE agents ADD COLUMN avatar TEXT NOT NULL DEFAULT ''")
-    }
-  }
-
-  // --- Main DDL (safe: IF NOT EXISTS on everything) ---
   await client.executeMultiple(`
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL DEFAULT '新对话',
       agent_id TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'direct',
       created_at INTEGER NOT NULL DEFAULT (unixepoch()),
       updated_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
@@ -79,6 +32,7 @@ async function migrate() {
       tool_call_id TEXT,
       suggestions TEXT,
       attachments TEXT,
+      agent_id TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 

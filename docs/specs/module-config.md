@@ -42,7 +42,7 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 
 | 字段名 | 类型 | 环境变量 | 代码默认值 | 说明 |
 |---|---|---|---|---|
-| `app_name` | string | — | `Open Agent` | 应用名称（白标） |
+| `app_name` | string | — | `Momoi` | 应用名称（白标） |
 | `app_favicon` | string | — | `""`（空=默认） | Favicon，base64 data URL |
 | `app_background` | string | — | `""`（空=无背景） | 聊天背景图，base64 data URL |
 | `api_endpoint` | string | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | API 地址 |
@@ -138,7 +138,7 @@ async function setSetting(key: string, value: string): Promise<void> {
 **响应**：
 ```json
 {
-  "app_name": "Open Agent",
+  "app_name": "Momoi",
   "app_favicon": "",
   "app_background": "",
   "api_endpoint": "https://api.openai.com/v1",
@@ -172,7 +172,7 @@ async function setSetting(key: string, value: string): Promise<void> {
 **响应**：
 ```json
 {
-  "app_name": "Open Agent",
+  "app_name": "Momoi",
   "app_favicon": "",
   "app_background": "",
   "support_attachments": false,

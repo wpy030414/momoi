@@ -1,5 +1,5 @@
 // ============================================================
-// Open Agent — Thinking 分段编解码
+// Momoi — Thinking 分段编解码
 // 多轮思考链在 DB 以「含分隔符的纯文本」存储；
 // 前端按 THINKING_SEGMENT 分隔符解析成结构化分段渲染。
 // 服务端 loop.ts 与客户端 useChat / ThinkingBlock 共用这里。

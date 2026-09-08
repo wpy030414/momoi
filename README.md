@@ -1,4 +1,4 @@
-# Open Agent
+# Momoi
 
 轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过内置工具执行文件读写、Shell 命令、网络请求、文档处理等任务，通过技能注入系统提示词，支持文件附件多模态交互，一切由管理员密钥统一管理。
 
@@ -183,7 +183,7 @@ pnpm start
 ## 项目结构
 
 ```
-open-agent/
+momoi/
 ├── src/
 │   ├── shared/          # 客户端与服务端共享的类型和常量
 │   ├── client/          # React 前端（入口：main.tsx）

@@ -1,5 +1,5 @@
 // ============================================================
-// Pi Adapter — Bridges pi-agent-core to Open Agent
+// Pi Adapter — Bridges pi-agent-core to Momoi
 // ============================================================
 //
 // 职责：

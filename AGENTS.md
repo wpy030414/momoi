@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## 项目：Open Agent
+## 项目：Momoi
 
 自托管的 Web AI 智能体平台。用户通过 PIN 认证登录后与 AI 对话；模型按需调用插件/技能；支持文件附件多模态交互；管理员通过密钥控制一切。
 
@@ -40,7 +40,7 @@
 
 - **前端**：React 18 + shadcn/ui（Radix 原语 + Tailwind CSS 3.4），Vite 8（Rolldown 打包）构建为静态文件，由 Hono 在生产模式下托管
 - **后端**：Hono 4（Node.js），SSE 用于实时聊天流，REST API 用于 CRUD
-- **数据库**：SQLite（@libsql/client + Drizzle ORM）—— 单文件 `data/open-agent.db`，无需外部数据库
+- **数据库**：SQLite（@libsql/client + Drizzle ORM）—— 单文件 `data/momoi.db`，无需外部数据库
 - **AI**：OpenAI 兼容的 Chat Completions API，支持流式输出、function calling、多模态附件、思考模式
 - **插件**：JSON 清单 + TS/JS 模块，从 `plugins/` 目录动态加载执行
 - **技能**：SKILL.md 文件（YAML 前置元数据 + Markdown 内容），注入系统提示词
@@ -61,7 +61,7 @@
 | `src/server/routes/` | API 路由：`chat.ts`、`conversations.ts`、`admin.ts`、`plugins.ts`、`upload.ts`、`user.ts` |
 | `plugins/` | 已安装的插件目录 |
 | `skills/` | 已安装的技能目录 |
-| `data/` | SQLite 数据库文件（`open-agent.db`） |
+| `data/` | SQLite 数据库文件（`momoi.db`） |
 | `uploads/` | 用户上传的文件附件存储目录 |
 
 ## 开发
@@ -115,7 +115,7 @@ pnpm start        # 运行生产构建（node dist/index.js）
 
 ## 数据库
 
-- 文件位置：`data/open-agent.db`
+- 文件位置：`data/momoi.db`
 - 表：`conversations`、`messages`（含 `attachments` 列）、`settings`
 - 迁移策略：`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE` 添加新列
 - 时间戳使用 Unix epoch（秒）
@@ -129,6 +129,6 @@ pnpm start        # 运行生产构建（node dist/index.js）
 | `SUGGESTIONS_FENCE` | `` ```suggestions `` | Suggestions 代码块标记 |
 | `ADMIN_TOKEN_EXPIRY_HOURS` | 24 | 管理员 JWT 有效期（小时） |
 | `DEFAULT_SYSTEM_PROMPT` | `''`（空） | 默认系统提示词（空，由代码追加格式指令） |
-| `DEFAULT_APP_NAME` | `Open Agent` | 默认应用名称 |
+| `DEFAULT_APP_NAME` | `Momoi` | 默认应用名称 |
 | `DEFAULT_MODEL` | `gpt-4o` | 默认模型 |
 | `DEFAULT_API_ENDPOINT` | `https://api.openai.com/v1` | 默认 API 端点 |

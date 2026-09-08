@@ -68,7 +68,7 @@ export function BrandingSettings({ token }: BrandingSettingsProps) {
           value={config.app_name || ''}
           onChange={(e) => setConfig({ ...config, app_name: e.target.value })}
           className="mt-1"
-          placeholder="Open Agent"
+          placeholder="Momoi"
         />
       </div>
       <div>

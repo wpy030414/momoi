@@ -92,7 +92,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
         <h1 className="text-lg font-semibold">{appName}</h1>
         {showGithub && (
           <a
-            href="https://github.com/wpy030414/open-agent"
+            href="https://github.com/wpy030414/momoi"
             target="_blank"
             rel="noopener noreferrer"
             className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"

@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Open Agent"
+    "name": "Momoi"
   },
   "common": {
     "loading": "Loading...",
@@ -138,7 +138,7 @@
     "authFailed": "Auth failed"
   },
   "server": {
-    "bannerTitle": "Open Agent Server",
+    "bannerTitle": "Momoi Server",
     "bannerPort": "Port: ",
     "bannerAdminKey": "Admin key: "
   },

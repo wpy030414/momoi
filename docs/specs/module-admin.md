@@ -47,7 +47,7 @@
 **响应**：
 ```json
 {
-  "app_name": "Open Agent",
+  "app_name": "Momoi",
   "app_favicon": "",
   "app_background": "",
   "api_endpoint": "https://api.openai.com/v1",
@@ -116,7 +116,7 @@
 
 | 字段 | 环境变量 | 默认值 | 说明 |
 |---|---|---|---|
-| `app_name` | — | `Open Agent` | 应用名称 |
+| `app_name` | — | `Momoi` | 应用名称 |
 | `app_favicon` | — | `""`（空=默认） | Base64 data URL |
 | `app_background` | — | `""`（空=无背景） | 聊天背景图，Base64 data URL |
 | `api_endpoint` | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | API 地址 |

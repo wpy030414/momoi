@@ -2,7 +2,7 @@
 
 ## 概述
 
-数据层使用 SQLite 单文件数据库，通过 `@libsql/client` 连接、Drizzle ORM 操作。所有对话历史、配置、PIN 哈希等都存储在 `data/open-agent.db` 中。迁移策略采用轻量级 PRAGMA 预检 + `CREATE IF NOT EXISTS`，避免引入外部迁移工具。
+数据层使用 SQLite 单文件数据库，通过 `@libsql/client` 连接、Drizzle ORM 操作。所有对话历史、配置、PIN 哈希等都存储在 `data/momoi.db` 中。迁移策略采用轻量级 PRAGMA 预检 + `CREATE IF NOT EXISTS`，避免引入外部迁移工具。
 
 ## 涉及文件
 
@@ -14,14 +14,14 @@
 
 ## 数据库位置与初始化
 
-- **路径**：`data/open-agent.db`（相对于项目根目录）
+- **路径**：`data/momoi.db`（相对于项目根目录）
 - **创建时机**：`db.ts` 导入时自动创建 `data/` 目录和数据库文件
 - **连接方式**：`file:` 协议本地文件，无需网络
 
 ```typescript
 const dataDir = path.resolve('data')
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
-const dbPath = path.join(dataDir, 'open-agent.db')
+const dbPath = path.join(dataDir, 'momoi.db')
 const client = createClient({ url: `file:${dbPath}` })
 ```
 
@@ -100,43 +100,25 @@ export const settings = sqliteTable('settings', {
 
 ## 迁移策略
 
-**设计原则**：零外部迁移工具，启动时自动迁移，兼容旧库。
+**设计原则**：零外部迁移工具，`CREATE TABLE IF NOT EXISTS` 一步到位，不兼容旧库。
 
 ### 迁移流程（`db.ts:migrate()`）
 
 ```
-1. PRAGMA table_info(conversations)
-   → 检查是否有 user_id 列
-   → 缺少则 ALTER TABLE ADD COLUMN
+1. CREATE TABLE IF NOT EXISTS（含全部当前列）
+   → conversations（id, user_id, title, agent_id, type, created_at, updated_at）
+   → messages（id, conversation_id, role, content, thinking, tool_calls, tool_call_id, suggestions, attachments, agent_id, created_at）
+   → settings（key, value）
+   → agents（id, name, model, system_prompt, avatar, created_at）
+   → group_conversation_agents（conversation_id, agent_id, sort_order）
 
-2. PRAGMA table_info(messages)
-   → 检查是否有 suggestions 列
-   → 缺少则 ALTER TABLE ADD COLUMN
-   → 检查是否有 attachments 列
-   → 缺少则 ALTER TABLE ADD COLUMN
-
-3. 执行主 DDL（全部带 IF NOT EXISTS）
-   → CREATE TABLE conversations（含 user_id）
-   → CREATE TABLE messages（含 suggestions 和 attachments）
-   → CREATE TABLE settings
-   → CREATE INDEX idx_messages_conv
-   → CREATE INDEX idx_conversations_user
+2. CREATE INDEX IF NOT EXISTS
+   → idx_messages_conv
+   → idx_conversations_user
+   → idx_group_conv_agents_conv
 ```
 
-### 迁移历史
-
-| 变更 | 迁移方式 | 说明 |
-|---|---|---|
-| 初始建表 | 首次启动 CREATE TABLE | — |
-| 新增 `user_id` 列 | PRAGMA 预检 + ALTER TABLE | 纯用户名 → PIN 认证迁移 |
-| 新增 `suggestions` 列 | PRAGMA 预检 + ALTER TABLE | 后续建议存储 |
-| 新增 `attachments` 列 | PRAGMA 预检 + ALTER TABLE | 文件附件/工具产物存储 |
-
-### 迁移注意事项
-
-- **PRAGMA 预检必须在主 DDL 之前执行**：因为 CREATE INDEX 引用了后续阶段才可能添加的列（如 `idx_conversations_user` 依赖 `user_id`）
-- **`IF NOT EXISTS` 保护**：主 DDL 中所有 CREATE TABLE / CREATE INDEX 都带 `IF NOT EXISTS`，重复启动安全
-- **外键检查**：`@libsql/client` 默认启用外键；如替换底层驱动（如 better-sqlite3）须确认 `PRAGMA foreign_keys = ON`
+**不提供旧库兼容**：无 PRAGMA 预检、无 ALTER TABLE 回填。旧库缺列直接运行时出错，删库重建即可。
 
 ## 查询模式
 
@@ -208,9 +190,8 @@ if (fs.existsSync(wsPath)) {
 
 1. 首次启动自动创建 `data/` 目录和 `.db` 文件 ✅
 2. 重复启动不报错（`IF NOT EXISTS` 保护）✅
-3. 旧库升级时自动补齐新列（PRAGMA 预检）✅
-4. 删除对话级联删除消息 ✅
-5. 删除对话同步清理工作区 ✅
-6. 用户 A 无法访问用户 B 的数据（404 而非 403）✅
-7. 消息回退后序消息正确删除 ✅
-8. JSON 列读写一致（序列化/反序列化无数据丢失）✅
+3. 删除对话级联删除消息 ✅
+4. 删除对话同步清理工作区 ✅
+5. 用户 A 无法访问用户 B 的数据（404 而非 403）✅
+6. 消息回退后序消息正确删除 ✅
+7. JSON 列读写一致（序列化/反序列化无数据丢失）✅

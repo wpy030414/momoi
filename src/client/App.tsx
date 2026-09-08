@@ -22,7 +22,7 @@ export function App() {
   const [adminViewOpen, setAdminViewOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [changePinOpen, setChangePinOpen] = useState(false)
-  const [appName, setAppName] = useState('Open Agent')
+  const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
   const [supportAttachments, setSupportAttachments] = useState(false)
   const [showGithub, setShowGithub] = useState(true)

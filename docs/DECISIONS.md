@@ -1,4 +1,4 @@
-# DECISIONS — Open Agent 设计决策记录
+# DECISIONS — Momoi 设计决策记录
 
 ## D1：SSE 替代 WebSocket
 
@@ -31,7 +31,7 @@
 
 **原因**：
 - 零配置，无需安装/维护外部数据库服务
-- 单文件 `data/open-agent.db`，易于备份和迁移
+- 单文件 `data/momoi.db`，易于备份和迁移
 - 对于单用户/小团队场景完全足够
 - @libsql/client 提供原生 SQLite 支持，无需编译 native 模块
 
