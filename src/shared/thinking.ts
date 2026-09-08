@@ -17,11 +17,6 @@ export function thinkingSegmentHeader(round: number): string {
   return THINKING_SEGMENT_OPEN + (round + 1) + THINKING_SEGMENT_CLOSE
 }
 
-/** 把分段数组编码成含分隔符的纯文本（供 DB 持久化，与 server loop 同格式）。 */
-export function encodeThinkingSegments(segments: ThinkingSegment[]): string {
-  return segments.map((s) => thinkingSegmentHeader(s.round) + s.text).join('')
-}
-
 /**
  * 把含分隔符的纯文本按轮切分成结构化分段。
  * 兼容两种输入：

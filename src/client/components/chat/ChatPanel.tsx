@@ -58,7 +58,6 @@ export function ChatPanel({
   const hasMessages = messages.length > 0
   const hasAgents = agents && agents.length > 0
   const selectedAgentAvatar = selectedAgentId ? agents?.find((a) => a.id === selectedAgentId)?.avatar : null
-  const selectedAgentName = selectedAgentId ? agents?.find((a) => a.id === selectedAgentId)?.name : null
 
   // Time-of-day greeting
   const timeGreeting = useMemo(() => {

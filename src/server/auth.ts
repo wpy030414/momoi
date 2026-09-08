@@ -31,7 +31,7 @@ export async function signAdminToken(): Promise<{ token: string; expires_at: num
   return { token, expires_at }
 }
 
-export async function verifyAdminToken(token: string): Promise<boolean> {
+async function verifyAdminToken(token: string): Promise<boolean> {
   try {
     const { payload } = await jwtVerify(token, secret)
     return payload.role === 'admin'
@@ -77,23 +77,3 @@ export async function verifyUserToken(token: string): Promise<{ username: string
   }
 }
 
-export async function userAuthMiddleware(c: Context, next: Next) {
-  // Try JWT Authorization header first
-  const auth = c.req.header('Authorization')
-  if (auth?.startsWith('Bearer ')) {
-    const result = await verifyUserToken(auth.slice(7))
-    if (result) {
-      c.set('userId', result.username)
-      await next()
-      return
-    }
-  }
-  // Fallback: X-User header (backwards compat for user route calls that pass username directly)
-  const xUser = c.req.header('x-user')
-  if (xUser) {
-    c.set('userId', xUser)
-    await next()
-    return
-  }
-  return c.json({ error: 'Unauthorized' }, 401)
-}

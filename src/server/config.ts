@@ -11,7 +11,6 @@ import {
   DEFAULT_AGENT_MODEL,
   DEFAULT_AGENT_SYSTEM_PROMPT,
   DEFAULT_MODEL,
-  DEFAULT_SYSTEM_PROMPT,
 } from '../shared/constants.js'
 
 // .env values (read at startup, not hot-reloadable)

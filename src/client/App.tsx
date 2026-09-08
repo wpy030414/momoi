@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useChat } from './hooks/useChat'
 import { useGroupChat } from './hooks/useGroupChat'
 import { useAdmin } from './hooks/useAdmin'
 import { useTheme } from './hooks/useTheme'

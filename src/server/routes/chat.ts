@@ -25,10 +25,6 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
 // Apply user auth to all routes
 chatRoute.use('*', userAuthMiddleware)
 
-chatRoute.get('/health', (c) => {
-  return c.json({ status: 'ok', time: new Date().toISOString() })
-})
-
 /**
  * POST /api/chat/infinite-mode — Toggle infinite mode on/off for a conversation
  */

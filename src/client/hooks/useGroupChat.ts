@@ -148,11 +148,9 @@ export function useGroupChat() {
     ...chat,
     groupAgents,
     isGroupMode,
-    allAgents,
     createGroupConversation,
     addAgentToGroup,
     removeAgentFromGroup,
     sendGroupMessage,
-    refreshGroupAgents,
   }
 }

@@ -10,10 +10,9 @@ import { useToast } from '../../ui/toast'
 
 interface AgentManagerProps {
   token: string
-  onAgentsChange?: () => void
 }
 
-export function AgentManager({ token, onAgentsChange }: AgentManagerProps) {
+export function AgentManager({ token }: AgentManagerProps) {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [agents, setAgents] = useState<Agent[]>([])
@@ -62,7 +61,6 @@ export function AgentManager({ token, onAgentsChange }: AgentManagerProps) {
         })
       }
       await fetchAgents()
-      onAgentsChange?.()
       resetForm()
       toast({ title: t('settings.toastAgentSaved'), variant: 'success' })
     } catch (err) {
@@ -80,7 +78,6 @@ export function AgentManager({ token, onAgentsChange }: AgentManagerProps) {
         avatar: agent.avatar,
       })
       await fetchAgents()
-      onAgentsChange?.()
       toast({ title: t('settings.toastAgentCopied'), variant: 'success' })
     } catch (err) {
       console.error('Failed to copy agent:', err)
@@ -96,7 +93,6 @@ export function AgentManager({ token, onAgentsChange }: AgentManagerProps) {
     try {
       await api.deleteAgent(token, deleteTarget.id)
       await fetchAgents()
-      onAgentsChange?.()
       toast({ title: t('settings.toastAgentDeleted'), variant: 'success' })
     } catch (err) {
       console.error('Failed to delete agent:', err)

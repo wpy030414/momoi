@@ -113,13 +113,6 @@ export type ServerMessage =
 
 // ---- Admin Auth ----
 
-export interface AdminAuthResponse {
-  token: string
-  expires_at: number
-}
-
-// ---- Admin Statistics ----
-
 export interface AdminStats {
   total_users: number
   total_conversations: number
@@ -136,7 +129,3 @@ export interface AdminConversationRow {
 }
 
 // ---- API Responses ----
-
-export interface SkillListResponse {
-  skills: InstalledSkill[]
-}

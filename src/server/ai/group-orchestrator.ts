@@ -64,11 +64,6 @@ function prepareGroupHistory(history: ChatMessage[], agentNameById: Map<string, 
   })
 }
 
-function findAgentIdByName(name: string, agentIds: string[]): string | null {
-  // Simple case-insensitive match — we'll need to resolve via getAgent for exact match
-  return null // Will be resolved by the orchestrator via getAgent
-}
-
 export async function orchestrateGroupChat(options: GroupOrchestratorOptions): Promise<void> {
   const { userMessage, history, send, signal, thinkingMode, conversationId, userId, agentIds, saveMessage } = options
 

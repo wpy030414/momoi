@@ -33,10 +33,8 @@ export function useChat() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
-  const [reconnecting, setReconnecting] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const infiniteModeRef = useRef(false)
-  const infiniteDoneRef = useRef(false)  // set to true when infinite_mode_off received
 
   // Load conversations on mount
   useEffect(() => {
@@ -143,7 +141,6 @@ export function useChat() {
       const isRetry = attempt > 0
 
       if (isRetry) {
-        setReconnecting(true)
         updateLastMessage({ content: '', streaming: true })
         const delay = Math.min(RETRY_BASE_MS * Math.pow(2, attempt - 1), 10_000)
         await new Promise((r) => setTimeout(r, delay))
@@ -270,7 +267,6 @@ export function useChat() {
       attempt++
     }
 
-    setReconnecting(false)
     setLoading(false)
     abortRef.current = null
     refreshConversations()
