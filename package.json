@@ -12,8 +12,8 @@
     "build:server": "tsup src/server/index.ts --format esm --dts --clean --outDir dist",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "lint": "oxlint src/server/lib/zip.ts src/server/routes/admin.ts",
-    "format:check": "oxfmt --check src/server/lib/zip.ts src/server/routes/admin.ts"
+    "lint": "oxlint src/server/agents-import src/server/lib src/server/routes/admin.ts src/server/config.ts src/server/db.ts src/server/schema.ts src/server/skills/loader.ts src/shared/types.ts src/client/lib/api.ts src/client/components/admin/tabs/AgentManager.tsx",
+    "format:check": "oxfmt --check src/server/agents-import src/server/lib src/server/routes/admin.ts vitest.config.ts .oxfmtrc.json"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.85.1",
