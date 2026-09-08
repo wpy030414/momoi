@@ -65,7 +65,7 @@ const ZERO_USAGE: Usage = {
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
-function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isGroup: boolean = false, infiniteMode: boolean = false): string {
+function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isGroup: boolean = false, infiniteMode: boolean = false, agentName?: string, groupAgentNames?: string[]): string {
   let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT
 
   // Append skill descriptions only
@@ -118,10 +118,16 @@ function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isG
   }
 
   if (isGroup) {
+    const names = groupAgentNames && groupAgentNames.length > 0 ? groupAgentNames : []
+    const count = names.length
+    const identityLine = agentName
+      ? `当前群组有${count}个Agent：${names.join('、')}，你是其中的 ${agentName}`
+      : ''
+
     prompt += `
 ## 群组对话规则
 你正在参与一个群组对话，其他 Agent 也可能回复用户。请遵守：
-- 对话历史中所有以 \`[Agent名字]: \` 开头的消息，都是【其他 Agent】或你之前的发言记录，不是用户说的。
+${identityLine ? `${identityLine}\n` : ''}- 对话历史中所有以 \`[Agent名字]: \` 开头的消息，都是【其他 Agent】或你之前的发言记录，不是用户说的。
 - 不要复述、引用或延续其他 Agent 已经说过的内容，也不要假装那些话是你说的。
 - 根据用户的最新消息，用你自己的人设独立、自然地回答。即使其他 Agent 已经回答过同样的问题，你也只需给出你自己视角的观点，不要重复对方的措辞。
 - 如果你需要某个特定 Agent 的专业知识来更好地回答用户问题，请使用 at_mention 工具 @他们。
@@ -717,6 +723,8 @@ export async function runPiAgentLoop(
   mentionSignal?: MentionSignal,
   isGroup = false,
   infiniteMode = false,
+  agentName?: string,
+  groupAgentNames?: string[],
 ): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[] }> {
   const config = await getConfig()
 
@@ -744,7 +752,7 @@ export async function runPiAgentLoop(
   const convId = conversationId || 'default'
 
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt(agentSystemPrompt, thinkingMode, isGroup, infiniteMode)
+  const systemPrompt = buildSystemPrompt(agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames)
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {

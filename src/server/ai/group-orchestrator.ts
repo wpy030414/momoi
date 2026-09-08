@@ -128,6 +128,9 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         agentId,
         mentionSignal,
         true, // isGroup
+        false, // infiniteMode
+        agent.name,
+        Array.from(agentNameById.values()),
       )
 
       repliedAgents.add(agentId)
