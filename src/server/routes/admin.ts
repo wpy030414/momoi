@@ -1,11 +1,23 @@
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { sql } from 'drizzle-orm'
 import { adminAuthMiddleware, signAdminToken, verifyAdminKey } from '../auth.js'
-import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent } from '../config.js'
+import { getConfig, updateConfig, listAgents, getAgent, createAgent, updateAgent, deleteAgent } from '../config.js'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
 import { skillRegistry } from '../skills/loader.js'
+import { cleanMacOSArtifacts, hasZipSlip, resolveZipRoot, sanitizeSkillName } from '../lib/zip.js'
+import { parseAgentPackage, computeConflicts, planCommit, resolveDefaultModel } from '../agents-import/parser.js'
+import {
+  ImportStageLimitError,
+  deleteStagedImport,
+  getStagedImport,
+  hashSkillDir,
+  installSkillTree,
+  stageImport,
+} from '../agents-import/store.js'
+import type { AgentImportCommitRequest } from '../../shared/types.js'
 import fs from 'fs'
 import path from 'path'
 import AdmZip from 'adm-zip'
@@ -28,11 +40,24 @@ adminRoute.post('/auth', async (c) => {
 adminRoute.use('/config', adminAuthMiddleware)
 adminRoute.use('/agents', adminAuthMiddleware)
 adminRoute.use('/agents/*', adminAuthMiddleware)
+// Import endpoints: mount both the exact and wildcard forms explicitly
+// ('/agents/*' covers them, but exact+wildcard keeps the protection obvious).
+adminRoute.use('/agents/import', adminAuthMiddleware)
+adminRoute.use('/agents/import/*', adminAuthMiddleware)
 adminRoute.use('/skills/*', adminAuthMiddleware)
 // '/stats' alone does NOT match sub-paths (e.g. /stats/conversations) in Hono —
 // mount both the exact and wildcard forms so every stats endpoint is protected.
 adminRoute.use('/stats', adminAuthMiddleware)
 adminRoute.use('/stats/*', adminAuthMiddleware)
+
+// Reject over-limit uploads before parseBody reads the whole body into memory
+// (Content-Length is checked first; chunked bodies are counted while streaming).
+const uploadBodyLimit = bodyLimit({
+  maxSize: MAX_UPLOAD_SIZE + 1024 * 1024,
+  onError: (c) => c.json({ error: 'File too large (max 50MB)' }, 400),
+})
+adminRoute.use('/agents/import', uploadBodyLimit)
+adminRoute.use('/skills/upload', uploadBodyLimit)
 
 // Get current config
 adminRoute.get('/config', async (c) => {
@@ -67,6 +92,9 @@ adminRoute.put('/agents/:id', async (c) => {
   const id = c.req.param('id')
   const body = await c.req.json<{ name?: string; model?: string; system_prompt?: string; avatar?: string }>()
 
+  // origin 仅由导入路径写入，用户 CRUD 不接受该字段
+  delete (body as { origin?: unknown }).origin
+
   // Neutral agent: only model and system_prompt can be changed
   if (id === NEUTRAL_AGENT_ID) {
     delete body.name
@@ -93,6 +121,183 @@ adminRoute.delete('/agents/:id', async (c) => {
     return c.json({ error: 'Agent not found' }, 404)
   }
   return c.json({ success: true })
+})
+
+// ---- Agent package import (AIP) ----
+
+/** 已装技能摘要：名称 + 文件树哈希，用于技能内容一致性判定 */
+function installedSkillHashes() {
+  return skillRegistry.getAll().map((skill) => ({ name: skill.manifest.name, contentHash: hashSkillDir(skill.path) }))
+}
+
+// Upload an AIP package → parse/validate → conflict preview (nothing is persisted yet)
+adminRoute.post('/agents/import', async (c) => {
+  const body = await c.req.parseBody()
+  const raw = body['file']
+  const file = Array.isArray(raw) ? raw[0] : raw
+
+  if (!file || typeof file === 'string') {
+    return c.json({ error: 'No file provided' }, 400)
+  }
+  if (file.size > MAX_UPLOAD_SIZE) {
+    return c.json({ error: 'File too large (max 50MB)' }, 400)
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer())
+  const parsed = parseAgentPackage(buffer)
+  if (!parsed.ok) {
+    return c.json({ error: parsed.error }, 400)
+  }
+
+  const report = computeConflicts(parsed.data, await listAgents(), installedSkillHashes())
+  let importId: string
+  try {
+    importId = stageImport(parsed.data)
+  } catch (err) {
+    if (err instanceof ImportStageLimitError) {
+      return c.json({ error: err.message }, 413)
+    }
+    throw err
+  }
+
+  return c.json({
+    import_id: importId,
+    package: {
+      name: parsed.data.package.name,
+      version: parsed.data.package.version,
+      host: parsed.data.package.host,
+    },
+    candidates: report.personas.map((entry) => ({
+      id: entry.candidate.id,
+      name: entry.candidate.name,
+      primary: { file: entry.candidate.primaryFile, bytes: entry.candidate.primaryBytes },
+      has_avatar: Boolean(entry.candidate.avatar),
+      level_count: entry.candidate.levelCount,
+      conflict: entry.conflict
+        ? {
+            agent_id: entry.conflict.agentId,
+            agent_name: entry.conflict.agentName,
+            same_origin: entry.conflict.sameOrigin,
+          }
+        : undefined,
+    })),
+    skills: report.skills.map((entry) => ({
+      name: entry.candidate.name,
+      description: entry.candidate.description,
+      conflict: {
+        installed: entry.conflict.installed,
+        content_identical: entry.conflict.contentIdentical,
+      },
+    })),
+    warnings: parsed.data.warnings,
+    errors: parsed.data.errors,
+  })
+})
+
+// Commit a staged import: apply persona decisions, install skills, then drop the staging entry
+adminRoute.post('/agents/import/:import_id/commit', async (c) => {
+  const importId = c.req.param('import_id')
+  const staged = getStagedImport(importId)
+  if (staged.state === 'missing') return c.json({ error: 'Import not found' }, 404)
+  if (staged.state === 'expired') return c.json({ error: 'Import expired' }, 410)
+
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return c.json({ error: 'Invalid request body' }, 400)
+  }
+  const decisions = body as { personas?: unknown; skills?: unknown }
+  if (!Array.isArray(decisions.personas) || !Array.isArray(decisions.skills)) {
+    return c.json({ error: 'Invalid request body: "personas" and "skills" must be arrays' }, 400)
+  }
+
+  const existingAgents = await listAgents()
+  const report = computeConflicts(staged.data, existingAgents, installedSkillHashes())
+  const plan = planCommit(staged.data, body as AgentImportCommitRequest, report, resolveDefaultModel(existingAgents))
+  if (plan.requestError) {
+    return c.json({ error: plan.requestError }, 400)
+  }
+
+  const imported: Array<{ id: string; name: string }> = []
+  const overwritten: Array<{ id: string; name: string }> = []
+  const skipped: string[] = []
+  const skillResult = { installed: [] as string[], overwritten: [] as string[], skipped: [] as string[] }
+  const errors = [...plan.errors]
+
+  for (const item of plan.personas) {
+    try {
+      if (item.kind === 'skip') {
+        skipped.push(item.candidate.id)
+        continue
+      }
+      if (item.kind === 'create') {
+        const agent = await createAgent(
+          item.name,
+          item.model,
+          item.candidate.systemPrompt,
+          item.candidate.avatar ?? '',
+          'default',
+          item.origin,
+        )
+        imported.push({ id: agent.id, name: agent.name })
+        continue
+      }
+
+      const targetId = item.targetAgentId
+      const target = targetId ? await getAgent(targetId) : null
+      if (!targetId || !target) {
+        errors.push(`Persona "${item.candidate.id}": target agent not found`)
+        continue
+      }
+      if (target.id === NEUTRAL_AGENT_ID || target.role === 'neutral') {
+        errors.push(`Persona "${item.candidate.id}": the neutral agent cannot be overwritten`)
+        continue
+      }
+      const updated = await updateAgent(targetId, {
+        name: item.name,
+        model: item.model,
+        system_prompt: item.candidate.systemPrompt,
+        avatar: item.candidate.avatar ?? '',
+        origin: item.origin,
+      })
+      if (!updated) {
+        errors.push(`Persona "${item.candidate.id}": target agent not found`)
+        continue
+      }
+      overwritten.push({ id: updated.id, name: updated.name })
+    } catch (err) {
+      errors.push(`Persona "${item.candidate.id}": ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  const skillsRoot = path.resolve('skills')
+  let skillsChanged = false
+  for (const item of plan.skills) {
+    try {
+      if (item.kind === 'skip') {
+        skillResult.skipped.push(item.candidate.name)
+        continue
+      }
+      const result = installSkillTree(skillsRoot, item.candidate.name, item.candidate.files, item.kind === 'overwrite')
+      if (!result.ok) {
+        errors.push(`Skill "${item.candidate.name}": ${result.error}`)
+        continue
+      }
+      skillsChanged = true
+      if (result.outcome === 'overwritten') skillResult.overwritten.push(item.candidate.name)
+      else skillResult.installed.push(item.candidate.name)
+    } catch (err) {
+      errors.push(`Skill "${item.candidate.name}": ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  if (skillsChanged) skillRegistry.refresh()
+
+  deleteStagedImport(importId)
+  return c.json({ imported, overwritten, skipped, skills: skillResult, errors })
 })
 
 // Statistics: overall counts
@@ -195,10 +400,8 @@ adminRoute.post('/skills/upload', async (c) => {
     const zip = new AdmZip(buffer)
 
     // Zip slip protection
-    for (const entry of zip.getEntries()) {
-      if (entry.entryName.includes('..')) {
-        return c.json({ error: 'Invalid zip: path traversal detected' }, 400)
-      }
+    if (hasZipSlip(zip)) {
+      return c.json({ error: 'Invalid zip: path traversal detected' }, 400)
     }
 
     // Detect wrapper directory
@@ -220,29 +423,37 @@ adminRoute.post('/skills/upload', async (c) => {
       return c.json({ error: 'No valid SKILL.md found in archive' }, 400)
     }
 
-    // Parse frontmatter to get skill name
+    // Parse frontmatter to get skill name (CRLF tolerant, consistent with the import parser)
     const raw = fs.readFileSync(skillPath, 'utf-8')
-    const match = raw.match(/^---\n([\s\S]*?)\n---\n/)
+    const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/)
     if (!match) {
+      fs.rmSync(tmpDir, { recursive: true })
       return c.json({ error: 'Invalid SKILL.md: missing frontmatter' }, 400)
     }
 
     const yamlStr = match[1]
     let skillName = ''
-    for (const line of yamlStr.split('\n')) {
+    for (const line of yamlStr.split(/\r?\n/)) {
       const m = line.match(/^name:\s*(.+)$/)
       if (m) {
-        skillName = m[1].replace(/^['"]|['"]$/g, '')
+        skillName = m[1].trim().replace(/^['"]|['"]$/g, '')
         break
       }
     }
 
     if (!skillName) {
+      fs.rmSync(tmpDir, { recursive: true })
       return c.json({ error: 'Invalid SKILL.md: name is required in frontmatter' }, 400)
     }
 
+    const sanitized = sanitizeSkillName(skillName)
+    if (!sanitized.ok) {
+      fs.rmSync(tmpDir, { recursive: true })
+      return c.json({ error: `Invalid SKILL.md: ${sanitized.error}` }, 400)
+    }
+
     // Move to final destination
-    const destDir = path.resolve('skills', skillName)
+    const destDir = path.resolve('skills', sanitized.name)
     if (fs.existsSync(destDir)) {
       fs.rmSync(destDir, { recursive: true })
     }
@@ -280,7 +491,12 @@ adminRoute.post('/skills/install', async (c) => {
 // Uninstall skill
 adminRoute.delete('/skills/:name', (c) => {
   const name = c.req.param('name')
-  const skillDir = path.resolve('skills', name)
+  // 路径参数同样必须净化：未净化时 URL 编码的 ../ 可穿越删除 skills/ 之外的目录
+  const sanitized = sanitizeSkillName(name)
+  if (!sanitized.ok) {
+    return c.json({ error: `Invalid skill name: ${sanitized.error}` }, 400)
+  }
+  const skillDir = path.resolve('skills', sanitized.name)
 
   if (fs.existsSync(skillDir)) {
     fs.rmSync(skillDir, { recursive: true })
@@ -289,45 +505,3 @@ adminRoute.delete('/skills/:name', (c) => {
   skillRegistry.refresh()
   return c.json({ success: true, skills: skillRegistry.getAll() })
 })
-
-// --- Helpers ---
-
-/** Determine if a zip has a single wrapper directory */
-function resolveZipRoot(zip: AdmZip): { wrapperDir: string | null } {
-  const entries = zip.getEntries().filter(
-    (e) => !e.entryName.startsWith('__MACOSX') && !e.entryName.endsWith('.DS_Store')
-  )
-  if (entries.length === 0) return { wrapperDir: null }
-
-  const topDirs = new Set<string>()
-  let hasRootFile = false
-
-  for (const entry of entries) {
-    const parts = entry.entryName.split('/')
-    if (parts.length <= 1) {
-      hasRootFile = true
-      break
-    }
-    topDirs.add(parts[0])
-  }
-
-  if (hasRootFile || topDirs.size !== 1) return { wrapperDir: null }
-  return { wrapperDir: [...topDirs][0] }
-}
-
-/** Remove __MACOSX directories and .DS_Store files */
-function cleanMacOSArtifacts(dir: string): void {
-  const macosDir = path.join(dir, '__MACOSX')
-  if (fs.existsSync(macosDir)) {
-    fs.rmSync(macosDir, { recursive: true })
-  }
-
-  function removeDSStore(d: string) {
-    const dsStore = path.join(d, '.DS_Store')
-    if (fs.existsSync(dsStore)) fs.unlinkSync(dsStore)
-    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
-      if (entry.isDirectory()) removeDSStore(path.join(d, entry.name))
-    }
-  }
-  removeDSStore(dir)
-}

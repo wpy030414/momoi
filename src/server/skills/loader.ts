@@ -11,7 +11,8 @@ interface Frontmatter {
 }
 
 function parseFrontmatter(content: string): { frontmatter: Frontmatter; body: string } {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
+  // CRLF 容忍：与 agents-import 解析器口径一致，Windows 换行的 SKILL.md 不再退化为 unknown
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
   if (!match) {
     return { frontmatter: { name: 'unknown', description: '' }, body: content }
   }
@@ -24,7 +25,7 @@ function parseFrontmatter(content: string): { frontmatter: Frontmatter; body: st
   let currentKey: string | null = null
   let multiline: 'fold' | 'literal' | null = null
 
-  for (const raw of yamlStr.split('\n')) {
+  for (const raw of yamlStr.split(/\r?\n/)) {
     const m = raw.match(/^([\w-]+):\s*(.*)$/)
     if (m) {
       // 新 key

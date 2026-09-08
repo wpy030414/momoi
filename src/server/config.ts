@@ -3,7 +3,7 @@ import { db } from './db.js'
 import { settings, agents } from './schema.js'
 import { eq } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
-import type { AppConfig, Agent } from '../shared/types.js'
+import type { AppConfig, Agent, AgentOrigin } from '../shared/types.js'
 import {
   DEFAULT_APP_NAME,
   DEFAULT_API_ENDPOINT,
@@ -64,6 +64,17 @@ export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConf
 
 // ---- Agent CRUD ----
 
+/** agents.origin 是 JSON 文本列，解析失败按无溯源处理 */
+function parseOrigin(raw: string | null): AgentOrigin | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? (parsed as AgentOrigin) : null
+  } catch {
+    return null
+  }
+}
+
 export async function listAgents(): Promise<Agent[]> {
   const rows = await db.select().from(agents).orderBy(agents.created_at).all()
   return rows.map((r) => ({
@@ -74,6 +85,7 @@ export async function listAgents(): Promise<Agent[]> {
     avatar: r.avatar,
     role: r.role as Agent['role'],
     created_at: r.created_at,
+    origin: parseOrigin(r.origin),
   }))
 }
 
@@ -88,25 +100,40 @@ export async function getAgent(id: string): Promise<Agent | null> {
     avatar: row.avatar,
     role: row.role as Agent['role'],
     created_at: row.created_at,
+    origin: parseOrigin(row.origin),
   }
 }
 
-export async function createAgent(name: string, model: string, systemPrompt: string, avatar = '', role: Agent['role'] = 'default'): Promise<Agent> {
+export async function createAgent(
+  name: string,
+  model: string,
+  systemPrompt: string,
+  avatar = '',
+  role: Agent['role'] = 'default',
+  origin: AgentOrigin | null = null,
+): Promise<Agent> {
   const id = role === 'neutral' ? NEUTRAL_AGENT_ID : randomUUID()
   const now = Math.floor(Date.now() / 1000)
-  await db.insert(agents).values({
-    id,
-    name,
-    model,
-    system_prompt: systemPrompt,
-    avatar,
-    role,
-    created_at: now,
-  }).run()
-  return { id, name, model, system_prompt: systemPrompt, avatar, role, created_at: now }
+  await db
+    .insert(agents)
+    .values({
+      id,
+      name,
+      model,
+      system_prompt: systemPrompt,
+      avatar,
+      role,
+      created_at: now,
+      origin: origin ? JSON.stringify(origin) : null,
+    })
+    .run()
+  return { id, name, model, system_prompt: systemPrompt, avatar, role, created_at: now, origin }
 }
 
-export async function updateAgent(id: string, partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar'>>): Promise<Agent | null> {
+export async function updateAgent(
+  id: string,
+  partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar' | 'origin'>>,
+): Promise<Agent | null> {
   const existing = await getAgent(id)
   if (!existing) return null
   const updates: Record<string, unknown> = {}
@@ -114,6 +141,7 @@ export async function updateAgent(id: string, partial: Partial<Pick<Agent, 'name
   if (partial.model !== undefined) updates.model = partial.model
   if (partial.system_prompt !== undefined) updates.system_prompt = partial.system_prompt
   if (partial.avatar !== undefined) updates.avatar = partial.avatar
+  if (partial.origin !== undefined) updates.origin = partial.origin ? JSON.stringify(partial.origin) : null
   if (Object.keys(updates).length > 0) {
     await db.update(agents).set(updates as any).where(eq(agents.id, id)).run()
   }
