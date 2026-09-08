@@ -13,12 +13,16 @@ export function SkillManager({ token }: SkillManagerProps) {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [skills, setSkills] = useState<any[]>([])
+  const [fetching, setFetching] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    api.listAdminSkills(token).then((r) => setSkills(r.skills)).catch(console.error)
+    api.listAdminSkills(token)
+      .then((r) => setSkills(r.skills))
+      .catch(console.error)
+      .finally(() => setFetching(false))
   }, [token])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -47,7 +51,9 @@ export function SkillManager({ token }: SkillManagerProps) {
         </Button>
       </div>
       {uploadError && <p className="text-sm text-destructive">{uploadError}</p>}
-      {skills.length === 0 ? (
+      {fetching ? (
+        <p className="text-muted-foreground">{t('common.loading')}</p>
+      ) : skills.length === 0 ? (
         <p className="text-muted-foreground">{t('settings.noSkills')}</p>
       ) : (
         skills.map((s) => (
