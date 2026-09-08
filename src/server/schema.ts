@@ -8,6 +8,7 @@ export const conversations = sqliteTable('conversations', {
   type: text('type').notNull().default('direct'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
+  deleted_at: integer('deleted_at'),
 })
 
 export const messages = sqliteTable('messages', {

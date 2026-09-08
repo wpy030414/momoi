@@ -1,10 +1,8 @@
 import { Hono } from 'hono'
 import { db } from '../db.js'
 import { conversations, messages, groupConversationAgents, agents } from '../schema.js'
-import { eq, and, desc, gte } from 'drizzle-orm'
+import { eq, and, desc, gte, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
-import path from 'path'
-import fs from 'fs'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 
 function getUserId(c: any): string {
@@ -21,7 +19,7 @@ conversationsRoute.get('/', async (c) => {
   const userId = getUserId(c)
   if (!userId) return c.json({ error: 'Unauthorized' }, 401)
 
-  const list = await db.select().from(conversations).where(eq(conversations.user_id, userId)).orderBy(desc(conversations.updated_at)).all()
+  const list = await db.select().from(conversations).where(and(eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).orderBy(desc(conversations.updated_at)).all()
   return c.json({ conversations: list })
 })
 
@@ -31,7 +29,7 @@ conversationsRoute.get('/:id', async (c) => {
   if (!userId) return c.json({ error: 'Unauthorized' }, 401)
 
   const id = c.req.param('id')
-  const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId))).get()
+  const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
 
   const msgs = await db.select().from(messages).where(eq(messages.conversation_id, id)).orderBy(messages.created_at).all()
@@ -96,19 +94,17 @@ conversationsRoute.post('/', async (c) => {
   return c.json({ conversation: conv }, 201)
 })
 
-// Delete a conversation
+// Delete a conversation (soft delete — mark deleted_at, preserve workspace)
 conversationsRoute.delete('/:id', async (c) => {
   const userId = getUserId(c)
   if (!userId) return c.json({ error: 'Unauthorized' }, 401)
 
   const id = c.req.param('id')
-  await db.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId))).run()
-
-  // Clean up conversation workspace
-  const wsPath = path.resolve('data', 'workspaces', id)
-  if (fs.existsSync(wsPath)) {
-    fs.rmSync(wsPath, { recursive: true, force: true })
-  }
+  const now = Math.floor(Date.now() / 1000)
+  await db.update(conversations)
+    .set({ deleted_at: now, updated_at: now })
+    .where(and(eq(conversations.id, id), eq(conversations.user_id, userId)))
+    .run()
 
   return c.json({ success: true })
 })
@@ -122,11 +118,11 @@ conversationsRoute.patch('/:id', async (c) => {
   const body = await c.req.json<{ title: string }>()
   const now = Math.floor(Date.now() / 1000)
 
-  await db.update(conversations).set({ title: body.title, updated_at: now }).where(and(eq(conversations.id, id), eq(conversations.user_id, userId))).run()
+  await db.update(conversations).set({ title: body.title, updated_at: now }).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).run()
 
   // Scope the read-back by user_id too — otherwise a caller who renames someone
   // else's conversation (the UPDATE above no-ops) still gets that conversation echoed.
-  const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId))).get()
+  const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
   return c.json({ conversation: conv })
 })
@@ -140,7 +136,7 @@ conversationsRoute.delete('/:id/messages/:messageId', async (c) => {
   const messageId = Number(c.req.param('messageId'))
 
   // Verify conversation ownership
-  const conv = await db.select().from(conversations).where(and(eq(conversations.id, convId), eq(conversations.user_id, userId))).get()
+  const conv = await db.select().from(conversations).where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
 
   // Verify message belongs to this conversation

@@ -6,7 +6,7 @@ import { Hono } from 'hono'
 import path from 'path'
 import { db } from '../db.js'
 import { conversations } from '../schema.js'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { SandboxFS } from '../tools/workspace.js'
 
@@ -51,7 +51,7 @@ workspaceRoute.get('/:conversationId/file/*', async (c) => {
 
   // Verify conversation ownership
   const conv = await db.select().from(conversations)
-    .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId)))
+    .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
     .get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
 

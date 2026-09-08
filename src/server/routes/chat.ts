@@ -4,7 +4,7 @@ import path from 'path'
 import fs from 'fs'
 import { db } from '../db.js'
 import { conversations, messages, groupConversationAgents } from '../schema.js'
-import { eq, count } from 'drizzle-orm'
+import { eq, and, count, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
 import { generateNeutralFollowUp } from '../ai/neutral-agent.js'
@@ -38,7 +38,7 @@ chatRoute.post('/infinite-mode', async (c) => {
   if (!conversation_id) return c.json({ error: 'conversation_id required' }, 400)
 
   // Verify conversation ownership
-  const conv = await db.select().from(conversations).where(eq(conversations.id, conversation_id)).get()
+  const conv = await db.select().from(conversations).where(and(eq(conversations.id, conversation_id), sql`${conversations.deleted_at} IS NULL`)).get()
   if (!conv || conv.user_id !== userId) {
     return c.json({ error: 'Conversation not found or access denied' }, 404)
   }
@@ -130,7 +130,7 @@ chatRoute.post('/', async (c) => {
         }
       } else {
         // Verify conversation belongs to user
-        const conv = await db.select().from(conversations).where(eq(conversations.id, convId)).get()
+        const conv = await db.select().from(conversations).where(and(eq(conversations.id, convId), sql`${conversations.deleted_at} IS NULL`)).get()
         if (!conv || conv.user_id !== userId) {
           send({ type: 'error', message: 'Conversation not found or access denied' })
           return

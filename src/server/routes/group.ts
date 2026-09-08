@@ -5,7 +5,7 @@
 import { Hono } from 'hono'
 import { db } from '../db.js'
 import { conversations, groupConversationAgents, agents } from '../schema.js'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 
 function getUserId(c: any): string {
@@ -27,7 +27,7 @@ groupRoute.get('/:id/agents', async (c) => {
   // Verify conversation ownership
   const conv = await db.select()
     .from(conversations)
-    .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId)))
+    .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
     .get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
 
@@ -66,7 +66,7 @@ groupRoute.post('/:id/agents', async (c) => {
   // Verify conversation ownership
   const conv = await db.select()
     .from(conversations)
-    .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId)))
+    .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
     .get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
 
@@ -97,7 +97,7 @@ groupRoute.delete('/:id/agents/:agentId', async (c) => {
   // Verify conversation ownership
   const conv = await db.select()
     .from(conversations)
-    .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId)))
+    .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
     .get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
 

@@ -19,7 +19,8 @@ async function migrate() {
       agent_id TEXT NOT NULL DEFAULT '',
       type TEXT NOT NULL DEFAULT 'direct',
       created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      deleted_at INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS messages (
