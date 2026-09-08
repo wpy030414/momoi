@@ -22,7 +22,7 @@
 本期不做（含依据）：
 
 - ❌ **写入中立 Agent**：中立 Agent 是宿主控制面（生成追问、后续决定发言顺序与事件管线），不属于人格命名空间；导入只读不写、撞名报错（协议 §2.5、§11.2）
-- ❌ 模型来源：包不携带模型，导入不读取模型（协议 §2.4）；`agents.model` 置空，运行时沿用既有回退
+- ❌ 模型来源：包不携带模型，导入不读取模型（协议 §2.4）；`agents.model` 取提交值，为空时填实例默认（首个非中立 Agent 的 `model`，无则 `DEFAULT_AGENT_MODEL`）——空 model 会触发运行时回退并连系统提示词一起替换（`pi-adapter.ts`），导入的 persona 正文将失效
 - ❌ 档位导入：`levels` 中除 `primary` 对应档外不导入，仅明示计数（协议 §7）
 - ❌ Agent 导出（agent → 包）：本期无导出入口
 - ❌ 普通技能安装路径复用：AIP 包不写入 `skills/` 之外的目录，不与递归技能扫描发生交互
@@ -59,7 +59,7 @@
 }
 ```
 
-同一 `(package.name, personaId)` 重复导入视为**同源更新**：即使显示名变化也按同源语义提示，不判定为新冲突。
+同一 `(package.name, personaId)` 重复导入视为**同源更新**：冲突比对先按 origin 匹配（见解析逻辑 6），即使显示名变化也按同源语义提示，不判定为新冲突。
 
 ### 待确认导入暂存
 
@@ -130,13 +130,14 @@
 ```
 
 - persona `action`：`create` / `overwrite` / `skip`；未列出默认 `skip`。
-  - `create`：插入新 agent（`role='default'`），`model` 取请求值（可为空字符串，空则运行时回退）。
-  - `overwrite`：仅当候选带 `conflict` 时允许；更新目标 agent 的 `name`/`model`/`system_prompt`/`avatar`/`origin`。无冲突传 `overwrite` → 400。
+  - `create`：插入新 agent（`role='default'`），`model` 取请求值；为空则填实例默认（首个非中立 Agent 的 `model`，无则 `DEFAULT_AGENT_MODEL`）。
+  - `overwrite`：仅当候选带 `conflict` 时允许；更新目标 agent 的 `name`/`model`/`system_prompt`/`avatar`/`origin`；空 `model` 同样填实例默认。无冲突传 `overwrite` → 400。
 - skill `action`：`install` / `skip`；未列出默认 `skip`。
   - 新技能：写入 `skills/{name}/`，随后 `skillRegistry.refresh()`。
   - 同名冲突且 `content_identical=false`：必须显式 `install` 才覆盖；覆盖前删除同名目录（与既有上传端点一致），并在响应中记录 `overwritten`。
   - 同名且内容一致：跳过并计入 `skipped`。
 - `import_id` 不存在或过期 → 404 / 410。
+- 请求体非对象、`personas` 或 `skills` 缺失/非数组 → 400（形状校验先于决议映射，避免非可迭代值抛 500）。
 - 提交成功即从暂存删除。单条失败：记入 `errors`，其余不回滚（逐条提交语义）。
 
 **成功 200**：
@@ -159,17 +160,17 @@
 4. **共存**：以扩展清单为准；校验 `agents/<id>.md` 正文与清单 `primary` 文件正文一致，不一致记 `warnings`。
 5. 技能发现：`skills/*/SKILL.md`（一层，沿用 Agent Plugins 发现规则），取 frontmatter `name`/`description`。
 6. 冲突比对：
-   - 人格按显示名匹配现库 `agents.name`（精确相等）；`origin` 的 `package.name`+`personaId` 相同则 `same_origin=true`。
+   - 人格先按 origin（`origin.package.name`+`personaId`）匹配现库，未命中再按显示名精确匹配 `agents.name`；命中同源者 `same_origin=true`（显示名变化不影响）。
    - 技能按 frontmatter `name` 匹配已装技能；内容一致按文件树哈希判定。
 7. 系统提示词正文 = `primary` 文件原文 `trim()`；头像文件转 dataURL 前限制 5MB。
 8. 中立 Agent（`NEUTRAL_AGENT_ID`、`role='neutral'`、名 `中立 Agent`）**不参与冲突比对**，也不得被任何 persona 覆盖；候选 id 或显示名与之相同时记入 `errors`。
-9. **名称与路径净化**：技能名与 persona id 只接受 `[a-z0-9-]+`（与 Agent Skills 规范一致）；含 `..`、`/`、`\`、绝对路径或控制字符的名称一律拒绝并记 `errors`。落盘前校验 `path.resolve` 结果仍位于 `skills/` 内。既有技能上传端点的 frontmatter `name` 未经净化（`admin.ts:245` 直接 `path.resolve('skills', name)`），本轮提取共享 helper 时一并补上，两条路径共用同一净化函数。
+9. **名称与路径净化**：技能名与 persona id 只接受 `[a-z0-9-]+`（与 Agent Skills 规范一致）；含 `..`、`/`、`\`、绝对路径或控制字符的名称一律拒绝并记 `errors`。技能目录内的文件路径拒绝控制字符、空段、`..` 与 `:`（含盘符与 NTFS 备用数据流）。落盘前校验 `path.resolve` 结果仍位于 `skills/` 内。既有技能上传端点的 frontmatter `name` 未经净化（`admin.ts:245` 直接 `path.resolve('skills', name)`），本轮提取共享 helper 时一并补上，两条路径共用同一净化函数；`DELETE /api/admin/skills/:name` 的路径参数同样未经净化（URL 编码的 `../` 可穿越删除 `skills/` 之外的目录），一并净化，非法名返回 400。
 
 ## UI 行为
 
 - `AgentManager` 工具栏新增「导入 Agent 包」按钮 → 隐藏 file input（`.zip`）。
 - 预览对话框分两块：
-  - **人格**：每候选一行（头像、显示名、模型输入框默认为空、扩展档计数）；冲突行置警告样式，提供「覆盖 / 跳过 / 新建」选择（同源更新默认「覆盖」，否则默认「跳过」）。
+  - **人格**：每候选一行（头像、显示名、模型输入框预填实例默认模型、扩展档计数）；冲突行置警告样式，提供「覆盖 / 跳过 / 新建」选择（同源更新默认「覆盖」，否则默认「跳过」）。
   - **技能**：每技能一行（名称、描述）；同名冲突显示「已安装（内容不同）」，默认「跳过」，需显式勾选才覆盖。
 - 提交 → toast 汇总（N 导入 / M 覆盖 / K 跳过）；刷新列表与技能表。
 - i18n：新增 `settings.agentImport*` 键组（zh-CN / en）。
@@ -189,7 +190,7 @@ fixtures：`src/server/agents-import/__tests__/fixtures/`（人格正文为占�
 7. 部分坏 persona（一个缺文件）→ 隔离：`errors` 含该条、其余候选保留
 8. 中立 Agent 撞名（id=`neutral-agent` 或名=`中立 Agent`）→ 记入 `errors`，不进入冲突列表
 9. 冲突比对：同名现库、同源更新判定
-10. commit 决议映射：create/overwrite/skip/缺省 skip/无冲突 overwrite → 400；技能 install/skip/内容一致跳过
+10. commit 决议映射：create/overwrite/skip/缺省 skip/无冲突 overwrite → 400；空 `model` 填实例默认；技能 install/skip/内容一致跳过
 11. 模型不参与解析：包内含 `model` 字段被忽略（协议 §2.4）
 
 ### E2E goal set（chrome-devtools 驱动）
@@ -213,4 +214,4 @@ fixtures：`src/server/agents-import/__tests__/fixtures/`（人格正文为占�
 4. `tsc --noEmit` 无错误；oxlint 通过；oxfmt 检查通过。
 5. 导入后删除 agent → 可从原包重新导入恢复；重复导入幂等。
 6. 协议侧 `aip validate` 对同一 fixture 通过（双端契约一致）。
-7. 恶意名称（含 `..`、`/`、`\`、绝对路径）的技能包被拒绝，且不产生 `skills/` 之外的写入；同一净化函数对既有技能上传端点生效（回归验证）。
+7. 恶意名称（含 `..`、`/`、`\`、`:`、绝对路径）的技能包被拒绝，且不产生 `skills/` 之外的写入；同一净化函数对既有技能上传端点生效（回归验证）。
