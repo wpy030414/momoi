@@ -19,6 +19,7 @@ const MAX_OUTPUT_CHARS = 30_000
  */
 const BLOCKED_ENV_VARS = [
   'ADMIN_KEY',
+  'DINGTALK_APP_KEY',
 ]
 
 /** 剔除敏感变量后构造子进程 env（精确名单 + 通用规则） */

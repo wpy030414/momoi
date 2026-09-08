@@ -7,6 +7,7 @@ import { httpTool } from './http-tool.js'
 import { documentTools } from './document-tools.js'
 import { skillTools } from './skill-tools.js'
 import { bashTool } from './bash-tool.js'
+import { dingtalkToken } from './dingtalk-token.js'
 import type { ToolModule } from './types.js'
 import type { ToolDefinition } from '../../shared/types.js'
 
@@ -16,6 +17,7 @@ const allTools: ToolModule[] = [
   ...documentTools,
   ...skillTools,
   bashTool,
+  dingtalkToken,
 ]
 
 /** Get all tool definitions for the LLM */
