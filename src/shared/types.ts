@@ -66,6 +66,16 @@ export interface Agent {
   created_at: number
 }
 
+// ---- MCP Server Config ----
+
+export interface McpServerConfig {
+  id: string
+  name: string
+  url: string
+  enabled: boolean
+  created_at: number
+}
+
 // ---- Tool Definition ----
 
 export interface ToolDefinition {

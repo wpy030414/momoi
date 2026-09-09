@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import { adminAuthMiddleware, signAdminToken, verifyAdminKey } from '../auth.js'
-import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent } from '../config.js'
+import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer } from '../config.js'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
@@ -29,6 +29,8 @@ adminRoute.use('/config', adminAuthMiddleware)
 adminRoute.use('/agents', adminAuthMiddleware)
 adminRoute.use('/agents/*', adminAuthMiddleware)
 adminRoute.use('/skills/*', adminAuthMiddleware)
+adminRoute.use('/mcp-servers', adminAuthMiddleware)
+adminRoute.use('/mcp-servers/*', adminAuthMiddleware)
 // '/stats' alone does NOT match sub-paths (e.g. /stats/conversations) in Hono —
 // mount both the exact and wildcard forms so every stats endpoint is protected.
 adminRoute.use('/stats', adminAuthMiddleware)
@@ -288,6 +290,37 @@ adminRoute.delete('/skills/:name', (c) => {
 
   skillRegistry.refresh()
   return c.json({ success: true, skills: skillRegistry.getAll() })
+})
+
+// ---- MCP Server CRUD ----
+
+adminRoute.get('/mcp-servers', async (c) => {
+  const servers = await listMcpServers()
+  return c.json({ servers })
+})
+
+adminRoute.post('/mcp-servers', async (c) => {
+  const body = await c.req.json<{ name: string; url: string }>()
+  if (!body.name?.trim() || !body.url?.trim()) {
+    return c.json({ error: 'Name and URL are required' }, 400)
+  }
+  const server = await createMcpServer(body.name.trim(), body.url.trim())
+  return c.json({ server })
+})
+
+adminRoute.put('/mcp-servers/:id', async (c) => {
+  const id = c.req.param('id')
+  const body = await c.req.json<{ name?: string; url?: string; enabled?: boolean }>()
+  const server = await updateMcpServer(id, body)
+  if (!server) return c.json({ error: 'MCP server not found' }, 404)
+  return c.json({ server })
+})
+
+adminRoute.delete('/mcp-servers/:id', async (c) => {
+  const id = c.req.param('id')
+  const ok = await deleteMcpServer(id)
+  if (!ok) return c.json({ error: 'MCP server not found' }, 404)
+  return c.json({ success: true })
 })
 
 // --- Helpers ---

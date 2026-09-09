@@ -90,6 +90,7 @@
     "tabAgent": "Agent",
     "tabGateway": "Gateway",
     "tabSkills": "Skills",
+    "tabMcp": "MCP",
     "tabStats": "Stats",
     "statsTotalUsers": "Total Users",
     "statsTotalConversations": "Total Conversations",
@@ -134,7 +135,17 @@
     "skillDeleteConfirm": "Uninstall this skill? This action cannot be undone and will delete the skill directory.",
     "noSkills": "No skills installed",
     "uploadSkill": "Upload Skill (.zip)",
-    "authFailed": "Auth failed"
+    "authFailed": "Auth failed",
+    "mcpAddServer": "Add MCP Server",
+    "mcpEditServer": "Edit MCP Server",
+    "mcpServerName": "Server Name",
+    "mcpServerUrl": "Server URL",
+    "mcpDeleteConfirm": "Delete this MCP server configuration?",
+    "mcpNoServers": "No MCP servers configured",
+    "mcpNameUrlRequired": "Name and URL are required",
+    "mcpDisabled": "Disabled",
+    "toastMcpSaved": "MCP server saved",
+    "toastMcpDeleted": "MCP server deleted"
   },
   "server": {
     "bannerTitle": "Momoi Server",

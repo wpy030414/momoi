@@ -89,6 +89,7 @@
     "tabAgent": "智能体",
     "tabGateway": "网关",
     "tabSkills": "技能",
+    "tabMcp": "MCP",
     "tabStats": "统计",
     "statsTotalUsers": "用户总数",
     "statsTotalConversations": "对话总数",
@@ -133,7 +134,17 @@
     "skillDeleteConfirm": "确定要卸载这个技能吗？此操作不可撤销，将删除技能目录。",
     "noSkills": "暂无已安装的技能",
     "uploadSkill": "上传技能 (.zip)",
-    "authFailed": "验证失败"
+    "authFailed": "验证失败",
+    "mcpAddServer": "添加 MCP 服务器",
+    "mcpEditServer": "编辑 MCP 服务器",
+    "mcpServerName": "服务器名称",
+    "mcpServerUrl": "服务器 URL",
+    "mcpDeleteConfirm": "确定要删除此 MCP 服务器配置吗？",
+    "mcpNoServers": "暂无 MCP 服务器配置",
+    "mcpNameUrlRequired": "名称和 URL 不能为空",
+    "mcpDisabled": "已禁用",
+    "toastMcpSaved": "MCP 服务器已保存",
+    "toastMcpDeleted": "MCP 服务器已删除"
   },
   "server": {
     "bannerTitle": "智能体服务",
