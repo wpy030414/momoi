@@ -13,7 +13,9 @@ import { BrandingSettings } from './components/admin/tabs/BrandingSettings'
 import { McpManager, type McpManagerHandle } from './components/admin/tabs/McpManager'
 import { SkillManager, type SkillManagerHandle } from './components/admin/tabs/SkillManager'
 import { StatsPanel } from './components/admin/tabs/StatsPanel'
+import { UserManager, type UserManagerHandle } from './components/admin/tabs/UserManager'
 import { Button } from './components/ui/button'
+import { Switch } from './components/ui/switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
 import { PanelLeft, X, Check, Plus, RotateCcw, Upload, Server } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
@@ -30,6 +32,7 @@ export function App() {
   const gatewayRef = useRef<GatewaySettingsHandle>(null)
   const mcpRef = useRef<McpManagerHandle>(null)
   const skillRef = useRef<SkillManagerHandle>(null)
+  const userRef = useRef<UserManagerHandle>(null)
   const [changePinOpen, setChangePinOpen] = useState(false)
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
@@ -38,6 +41,7 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
   // Admin status of the logged-in user (ADMIN usernames from server .env)
   const [isAdminUser, setIsAdminUser] = useState(false)
+  const [registrationOpen, setRegistrationOpen] = useState(true)
   const [agents, setAgents] = useState<Array<{ id: string; name: string; avatar: string }>>([])
   const [agentsLoading, setAgentsLoading] = useState(true)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
@@ -202,6 +206,7 @@ export function App() {
         setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
       }
     }).catch(() => {}).finally(() => setAgentsLoading(false))
+    api.getRegistration().then((r) => setRegistrationOpen(r.registration_open)).catch(() => {})
   }, [])
 
   // Re-fetch appName + agents when admin view closes (user may have changed them)
@@ -260,6 +265,15 @@ export function App() {
     // Clear hash if currently on settings
     if (window.location.hash === '#/settings') {
       history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }
+
+  const handleToggleRegistration = async (open: boolean) => {
+    setRegistrationOpen(open)
+    try {
+      await api.setRegistration(open)
+    } catch {
+      setRegistrationOpen(!open)
     }
   }
 
@@ -380,7 +394,18 @@ export function App() {
                     {t('settings.uploadSkill')}
                   </Button>
                 )}
-              </div>
+                {adminTab === 'users' && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {registrationOpen ? t('settings.registrationOpen') : t('settings.registrationClosed')}
+                    </span>
+                    <Switch
+                      checked={registrationOpen}
+                      onCheckedChange={handleToggleRegistration}
+                    />
+                  </div>
+                )}
+            </div>
             </div>
             <div className="flex-1 overflow-y-auto min-h-0 px-6">
               {adminTab === 'agent' && <AgentManager ref={agentRef} />}
@@ -388,6 +413,7 @@ export function App() {
               {adminTab === 'branding' && <BrandingSettings />}
               {adminTab === 'mcp' && <McpManager ref={mcpRef} />}
               {adminTab === 'skills' && <SkillManager ref={skillRef} />}
+              {adminTab === 'users' && <UserManager ref={userRef} />}
               {adminTab === 'stats' && <StatsPanel />}
             </div>
           </div>

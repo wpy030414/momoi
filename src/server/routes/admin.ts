@@ -1,13 +1,14 @@
 import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { adminAuthMiddleware } from '../auth.js'
-import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer } from '../config.js'
+import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isRegistrationOpen, setRegistrationOpen } from '../config.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '../../shared/constants.js'
 import fs from 'fs'
 import path from 'path'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { db } from '../db.js'
-import { conversations, messages } from '../schema.js'
+import { conversations, messages, settings, users } from '../schema.js'
 import { skillRegistry } from '../skills/loader.js'
 import AdmZip from 'adm-zip'
 
@@ -27,6 +28,9 @@ adminRoute.use('/mcp-servers/*', adminAuthMiddleware)
 // mount both the exact and wildcard forms so every stats endpoint is protected.
 adminRoute.use('/stats', adminAuthMiddleware)
 adminRoute.use('/stats/*', adminAuthMiddleware)
+adminRoute.use('/users', adminAuthMiddleware)
+adminRoute.use('/users/*', adminAuthMiddleware)
+adminRoute.use('/registration', adminAuthMiddleware)
 
 // Get current config
 adminRoute.get('/config', async (c) => {
@@ -118,8 +122,8 @@ adminRoute.delete('/agents/:id', async (c) => {
 // Statistics: overall counts
 adminRoute.get('/stats', async (c) => {
   const [userCount] = await db
-    .select({ value: sql<number>`count(distinct ${conversations.user_id})` })
-    .from(conversations)
+    .select({ value: sql<number>`count(*)` })
+    .from(users)
     .all()
 
   const [convCount] = await db
@@ -189,6 +193,90 @@ adminRoute.get('/stats/conversations/:id/messages', async (c) => {
       attachments: m.attachments ? JSON.parse(m.attachments) : null,
     })),
   })
+})
+
+// ---- User Management ----
+
+// List all users (paginated)
+adminRoute.get('/users', async (c) => {
+  const page = Math.max(1, parseInt(c.req.query('page') || '1', 10))
+  const pageSize = Math.min(100, Math.max(1, parseInt(c.req.query('page_size') || '10', 10)))
+  const offset = (page - 1) * pageSize
+
+  const [total] = await db.select({ count: sql<number>`count(*)` }).from(users).all()
+  const rows = await db
+    .select()
+    .from(users)
+    .orderBy(users.first_login_at)
+    .limit(pageSize)
+    .offset(offset)
+    .all()
+
+  return c.json({
+    users: rows.map((r) => ({
+      username: r.username,
+      first_login_at: r.first_login_at,
+      last_login_at: r.last_login_at,
+      banned: r.banned,
+    })),
+    total: total?.count ?? 0,
+    page,
+    page_size: pageSize,
+  })
+})
+
+// Ban / unban a user
+adminRoute.put('/users/:username/ban', async (c) => {
+  const username = c.req.param('username')
+  const adminUser = (c as any).get('userId') as string
+
+  if (username === adminUser) {
+    return c.json({ error: 'Cannot ban yourself' }, 403)
+  }
+
+  const { banned } = await c.req.json<{ banned: boolean }>()
+  const existing = await db.select().from(users).where(eq(users.username, username)).get()
+  if (!existing) {
+    return c.json({ error: 'User not found' }, 404)
+  }
+
+  await db.update(users).set({ banned }).where(eq(users.username, username)).run()
+  return c.json({ success: true, banned })
+})
+
+// Delete a user and all their data
+adminRoute.delete('/users/:username', async (c) => {
+  const username = c.req.param('username')
+  const adminUser = (c as any).get('userId') as string
+
+  if (username === adminUser) {
+    return c.json({ error: 'Cannot delete yourself' }, 403)
+  }
+
+  const userRow = await db.select().from(users).where(eq(users.username, username)).get()
+  if (!userRow) {
+    return c.json({ error: 'User not found' }, 404)
+  }
+
+  // Delete all conversations (cascades to messages, group_conversation_agents)
+  await db.delete(conversations).where(eq(conversations.user_id, username)).run()
+  // Delete user record
+  await db.delete(users).where(eq(users.username, username)).run()
+  await db.delete(users).where(eq(users.username, username)).run()
+
+  return c.json({ success: true })
+})
+
+// Registration toggle
+adminRoute.get('/registration', async (c) => {
+  const open = await isRegistrationOpen()
+  return c.json({ registration_open: open })
+})
+
+adminRoute.put('/registration', async (c) => {
+  const { open } = await c.req.json<{ open: boolean }>()
+  await setRegistrationOpen(open)
+  return c.json({ registration_open: open })
 })
 
 // List skills

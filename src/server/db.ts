@@ -70,6 +70,14 @@ async function migrate() {
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      username TEXT PRIMARY KEY,
+      pin_hash TEXT NOT NULL DEFAULT '',
+      first_login_at INTEGER NOT NULL,
+      last_login_at INTEGER NOT NULL,
+      banned INTEGER NOT NULL DEFAULT 0
+    );
   `)
 }
 

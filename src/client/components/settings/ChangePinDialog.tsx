@@ -5,6 +5,9 @@ import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { api } from '../../lib/api'
 
+const PIN_MIN = 4
+const PIN_MAX = 8
+
 interface ChangePinDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -20,14 +23,16 @@ export function ChangePinDialog({ open, onOpenChange, username }: ChangePinDialo
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
 
+  const pinValid = (p: string) => p.length >= PIN_MIN && p.length <= PIN_MAX
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!/^\d{4}$/.test(oldPin)) {
+    if (!pinValid(oldPin)) {
       setError(t('changePin.oldPinError'))
       return
     }
-    if (!/^\d{4}$/.test(newPin)) {
+    if (!pinValid(newPin)) {
       setError(t('changePin.newPinError'))
       return
     }
@@ -83,13 +88,13 @@ export function ChangePinDialog({ open, onOpenChange, username }: ChangePinDialo
               <label className="text-sm font-medium">{t('changePin.oldPin')}</label>
               <Input
                 type="password"
-                placeholder="••••"
+                placeholder={t('login.pinPlaceholder')}
                 value={oldPin}
                 onChange={(e) => {
-                  const val = e.target.value.replace(/\D/g, '').slice(0, 4)
+                  const val = e.target.value.replace(/\D/g, '')
                   setOldPin(val)
                 }}
-                maxLength={4}
+                maxLength={PIN_MAX}
                 disabled={loading}
               />
             </div>
@@ -98,13 +103,13 @@ export function ChangePinDialog({ open, onOpenChange, username }: ChangePinDialo
               <label className="text-sm font-medium">{t('changePin.newPin')}</label>
               <Input
                 type="password"
-                placeholder="••••"
+                placeholder={t('login.pinPlaceholder')}
                 value={newPin}
                 onChange={(e) => {
-                  const val = e.target.value.replace(/\D/g, '').slice(0, 4)
+                  const val = e.target.value.replace(/\D/g, '')
                   setNewPin(val)
                 }}
-                maxLength={4}
+                maxLength={PIN_MAX}
                 disabled={loading}
               />
             </div>
@@ -113,13 +118,13 @@ export function ChangePinDialog({ open, onOpenChange, username }: ChangePinDialo
               <label className="text-sm font-medium">{t('changePin.confirmPin')}</label>
               <Input
                 type="password"
-                placeholder="••••"
+                placeholder={t('login.pinPlaceholder')}
                 value={confirmPin}
                 onChange={(e) => {
-                  const val = e.target.value.replace(/\D/g, '').slice(0, 4)
+                  const val = e.target.value.replace(/\D/g, '')
                   setConfirmPin(val)
                 }}
-                maxLength={4}
+                maxLength={PIN_MAX}
                 disabled={loading}
               />
             </div>
@@ -130,7 +135,7 @@ export function ChangePinDialog({ open, onOpenChange, username }: ChangePinDialo
               <Button type="button" variant="outline" className="flex-1" onClick={handleClose} disabled={loading}>
                 {t('common.cancel')}
               </Button>
-              <Button type="submit" className="flex-1" disabled={loading || oldPin.length !== 4 || newPin.length !== 4 || confirmPin.length !== 4}>
+              <Button type="submit" className="flex-1" disabled={loading || !pinValid(oldPin) || !pinValid(newPin) || !pinValid(confirmPin)}>
                 {loading ? t('common.loading') : t('common.save')}
               </Button>
             </div>

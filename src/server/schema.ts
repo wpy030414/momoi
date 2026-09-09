@@ -55,3 +55,11 @@ export const mcpServers = sqliteTable('mcp_servers', {
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   created_at: integer('created_at').notNull(),
 })
+
+export const users = sqliteTable('users', {
+  username: text('username').primaryKey(),
+  pin_hash: text('pin_hash').notNull().default(''),
+  first_login_at: integer('first_login_at').notNull(),
+  last_login_at: integer('last_login_at').notNull(),
+  banned: integer('banned', { mode: 'boolean' }).notNull().default(false),
+})

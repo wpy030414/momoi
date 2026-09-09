@@ -59,7 +59,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   // User Auth
-  getUserStatus: (username: string) => request<{ has_pin: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
+  getUserStatus: (username: string) => request<{ has_pin: boolean; registration_open: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
     headers: { 'X-User': encodeURIComponent(username) }
   }),
   // Token arrives via Set-Cookie (HttpOnly); the body only carries the expiry
@@ -131,6 +131,20 @@ export const api = {
   createMcpServer: (data: { name: string; url: string }) => request<{ server: import('@/shared/types').McpServerConfig }>('/api/admin/mcp-servers', { method: 'POST', body: JSON.stringify(data) }),
   updateMcpServer: (id: string, data: { name?: string; url?: string; enabled?: boolean }) => request<{ server: import('@/shared/types').McpServerConfig }>(`/api/admin/mcp-servers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteMcpServer: (id: string) => request<{ success: boolean }>(`/api/admin/mcp-servers/${id}`, { method: 'DELETE' }),
+
+  // Admin - User Management
+  listAdminUsers: (page = 1, pageSize = 10) =>
+    request<{ users: import('@/shared/types').AdminUserRow[]; total: number; page: number; page_size: number }>(
+      `/api/admin/users?page=${page}&page_size=${pageSize}`
+    ),
+  setUserBan: (username: string, banned: boolean) =>
+    request<{ success: boolean; banned: boolean }>(`/api/admin/users/${encodeURIComponent(username)}/ban`, { method: 'PUT', body: JSON.stringify({ banned }) }),
+  deleteUser: (username: string) =>
+    request<{ success: boolean }>(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' }),
+  getRegistration: () =>
+    request<{ registration_open: boolean }>('/api/admin/registration'),
+  setRegistration: (open: boolean) =>
+    request<{ registration_open: boolean }>('/api/admin/registration', { method: 'PUT', body: JSON.stringify({ open }) }),
 
   // Upload (multipart/form-data — do NOT set Content-Type, let browser set boundary;
   // the HttpOnly cookie authenticates the request automatically)

@@ -48,6 +48,14 @@ async function setSetting(key: string, value: string): Promise<void> {
   }
 }
 
+export async function isRegistrationOpen(): Promise<boolean> {
+  return (await getSetting('registration_open', 'true')) === 'true'
+}
+
+export async function setRegistrationOpen(open: boolean): Promise<void> {
+  await setSetting('registration_open', open ? 'true' : 'false')
+}
+
 export async function getConfig(): Promise<AppConfig> {
   return {
     app_name: await getSetting('app_name', DEFAULT_APP_NAME),

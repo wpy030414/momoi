@@ -4,6 +4,9 @@ import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { api } from '../../lib/api'
 
+const PIN_MIN = 4
+const PIN_MAX = 8
+
 interface LoginScreenProps {
   onLogin: (username: string, expiresAt?: number) => void
 }
@@ -15,6 +18,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [newPin, setNewPin] = useState('')
   const [confirmPin, setConfirmPin] = useState('')
   const [hasPin, setHasPin] = useState<boolean | null>(null)
+  const [registrationOpen, setRegistrationOpen] = useState(true)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -27,6 +31,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     try {
       const status = await api.getUserStatus(username.trim())
       setHasPin(status.has_pin)
+      setRegistrationOpen(status.registration_open)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('login.error'))
     } finally {
@@ -36,7 +41,8 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!/^\d{4}$/.test(pin)) {
+    const len = pin.length
+    if (len < PIN_MIN || len > PIN_MAX) {
       setError(t('login.pinFormatError'))
       return
     }
@@ -55,7 +61,8 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
   const handleSetPinSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!/^\d{4}$/.test(newPin)) {
+    const nLen = newPin.length
+    if (nLen < PIN_MIN || nLen > PIN_MAX) {
       setError(t('login.pinFormatError'))
       return
     }
@@ -113,32 +120,58 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     )
   }
 
-  // Step 2: PIN verification (existing user)
-  if (hasPin) {
+  // Step 2a: No PIN — register when open, refuse when closed
+  if (!hasPin) {
+    if (!registrationOpen) {
+      return (
+        <div className="flex items-center justify-center h-screen bg-background">
+          <div className="w-full max-w-sm p-6 space-y-6">
+            <div className="text-center space-y-2">
+              <h1 className="text-2xl font-bold">{t('login.noAccessTitle')}</h1>
+              <p className="text-sm text-muted-foreground">{t('login.noAccessMessage')}</p>
+            </div>
+            <Button variant="outline" className="w-full" onClick={handleBack}>
+              {t('login.back')}
+            </Button>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="flex items-center justify-center h-screen bg-background">
         <div className="w-full max-w-sm p-6 space-y-6">
           <div className="text-center space-y-2">
-            <h1 className="text-2xl font-bold">{t('login.verifyTitle')}</h1>
-            <p className="text-sm text-muted-foreground">{t('login.verifySubtitle', { username })}</p>
+            <h1 className="text-2xl font-bold">{t('login.setTitle')}</h1>
+            <p className="text-sm text-muted-foreground">{t('login.setSubtitle', { username })}</p>
           </div>
-          <form onSubmit={handlePinSubmit} className="space-y-4">
+          <form onSubmit={handleSetPinSubmit} className="space-y-4">
             <Input
               autoFocus
               type="password"
-              placeholder={t('login.pinPlaceholder')}
-              value={pin}
+              placeholder={t('login.newPinPlaceholder')}
+              value={newPin}
               onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, '').slice(0, 4)
-                setPin(val)
+                const val = e.target.value.replace(/\D/g, '')
+                setNewPin(val)
               }}
-              onKeyDown={(e) => { if (e.key === 'Enter') handlePinSubmit(e) }}
               disabled={loading}
-              maxLength={4}
+              maxLength={PIN_MAX}
+            />
+            <Input
+              type="password"
+              placeholder={t('login.confirmPinPlaceholder')}
+              value={confirmPin}
+              onChange={(e) => {
+                const val = e.target.value.replace(/\D/g, '')
+                setConfirmPin(val)
+              }}
+              disabled={loading}
+              maxLength={PIN_MAX}
             />
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={pin.length !== 4 || loading}>
-              {loading ? t('common.loading') : t('login.verify')}
+            <Button type="submit" className="w-full" disabled={newPin.length < PIN_MIN || confirmPin.length < PIN_MIN || loading}>
+              {loading ? t('common.loading') : t('login.setPin')}
             </Button>
             <Button type="button" variant="outline" className="w-full" onClick={handleBack}>
               {t('login.back')}
@@ -149,41 +182,34 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     )
   }
 
-  // Step 2: Set new PIN (new user)
+  // Step 2b: PIN verification (existing user)
   return (
     <div className="flex items-center justify-center h-screen bg-background">
       <div className="w-full max-w-sm p-6 space-y-6">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">{t('login.setTitle')}</h1>
-          <p className="text-sm text-muted-foreground">{t('login.setSubtitle', { username })}</p>
+          <h1 className="text-2xl font-bold">{t('login.verifyTitle')}</h1>
+          <p className="text-sm text-muted-foreground">{t('login.verifySubtitle', { username })}</p>
         </div>
-        <form onSubmit={handleSetPinSubmit} className="space-y-4">
+        <form onSubmit={handlePinSubmit} className="space-y-4">
           <Input
             autoFocus
             type="password"
-            placeholder={t('login.newPinPlaceholder')}
-            value={newPin}
+            placeholder={t('login.pinPlaceholder')}
+            value={pin}
             onChange={(e) => {
-              const val = e.target.value.replace(/\D/g, '').slice(0, 4)
-              setNewPin(val)
+              const val = e.target.value.replace(/\D/g, '')
+              setPin(val)
             }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handlePinSubmit(e) }}
             disabled={loading}
-            maxLength={4}
-          />
-          <Input
-            type="password"
-            placeholder={t('login.confirmPinPlaceholder')}
-            value={confirmPin}
-            onChange={(e) => {
-              const val = e.target.value.replace(/\D/g, '').slice(0, 4)
-              setConfirmPin(val)
-            }}
-            disabled={loading}
-            maxLength={4}
+            maxLength={PIN_MAX}
           />
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" className="w-full" disabled={newPin.length !== 4 || confirmPin.length !== 4 || loading}>
-            {loading ? t('common.loading') : t('login.setPin')}
+          <Button type="submit" className="w-full" disabled={pin.length < PIN_MIN || loading}>
+            {loading ? t('common.loading') : t('login.verify')}
+          </Button>
+          <Button type="button" variant="outline" className="w-full" onClick={handleBack}>
+            {t('login.back')}
           </Button>
         </form>
       </div>

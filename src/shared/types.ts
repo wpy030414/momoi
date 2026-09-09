@@ -166,4 +166,11 @@ export interface AdminConversationRow {
   message_count: number
 }
 
+export interface AdminUserRow {
+  username: string
+  first_login_at: number | null
+  last_login_at: number | null
+  banned: boolean
+}
+
 // ---- API Responses ----
