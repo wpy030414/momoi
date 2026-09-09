@@ -17,7 +17,16 @@ import {
 
 // .env values (read at startup, not hot-reloadable)
 export const env = {
-  ADMIN_KEY: process.env.ADMIN_KEY || '',
+  // Admin usernames, comma-separated (supports both "," and "，"), e.g. ADMIN=xrl,咕咕,k3p0.
+  // Membership is fixed for the process lifetime — edit .env and restart to change.
+  // Empty or missing => no admins; the app still runs normally.
+  ADMIN: (process.env.ADMIN || '')
+    .split(/[,，]/)
+    .map((s) => s.trim())
+    .filter(Boolean),
+  // Optional JWT signing secret. When empty, a random secret is generated once
+  // and persisted in the settings table (stable across restarts).
+  JWT_SECRET: process.env.JWT_SECRET || '',
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || DEFAULT_API_ENDPOINT,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
   OPENAI_MODEL: process.env.OPENAI_MODEL || DEFAULT_MODEL,

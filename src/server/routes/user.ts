@@ -2,7 +2,8 @@ import { Hono } from 'hono'
 import { db } from '../db.js'
 import { settings } from '../schema.js'
 import { eq } from 'drizzle-orm'
-import { hashPin, verifyPin, signUserToken } from '../auth.js'
+import { hashPin, verifyPin, signUserToken, isAdmin } from '../auth.js'
+import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../rateLimiter.js'
 
 export const userRoute = new Hono()
@@ -15,6 +16,12 @@ function getUsername(c: any): string {
 function pinKey(username: string): string {
   return `pin:${username}`
 }
+
+// Current user info — used by the client to detect admin status
+userRoute.get('/me', userAuthMiddleware, (c) => {
+  const username = (c as any).get('userId') as string
+  return c.json({ username, is_admin: isAdmin(username) })
+})
 
 // Check whether the user has set a PIN
 userRoute.get('/status', async (c) => {

@@ -18,7 +18,7 @@ const MAX_OUTPUT_CHARS = 30_000
  * 新增密钥时优先走下方 *_API_KEY / *_TOKEN 等通用规则，特例才加进此名单。
  */
 const BLOCKED_ENV_VARS = [
-  'ADMIN_KEY',
+  'ADMIN', // 管理员用户名名单，避免向会话内泄露管理员身份
 ]
 
 /** 剔除敏感变量后构造子进程 env（精确名单 + 通用规则） */

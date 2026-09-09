@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
-import { adminAuthMiddleware, signAdminToken, verifyAdminKey } from '../auth.js'
+import { adminAuthMiddleware } from '../auth.js'
 import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer } from '../config.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '../../shared/constants.js'
 import fs from 'fs'
@@ -15,17 +15,8 @@ export const adminRoute = new Hono()
 
 const MAX_UPLOAD_SIZE = 50 * 1024 * 1024 // 50MB
 
-// Auth — verify admin key, return JWT
-adminRoute.post('/auth', async (c) => {
-  const body = await c.req.json<{ key: string }>()
-  if (!verifyAdminKey(body.key)) {
-    return c.json({ error: 'Invalid key' }, 401)
-  }
-  const result = await signAdminToken()
-  return c.json(result)
-})
-
-// Protected routes below
+// All admin endpoints authenticate with the ordinary user JWT; the middleware
+// additionally requires the username to be in the ADMIN env list (401/403).
 adminRoute.use('/config', adminAuthMiddleware)
 adminRoute.use('/agents', adminAuthMiddleware)
 adminRoute.use('/agents/*', adminAuthMiddleware)
