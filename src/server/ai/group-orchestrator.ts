@@ -4,7 +4,7 @@
 
 import { runPiAgentLoop } from './pi-adapter.js'
 import type { ChatMessage, ContentPart } from './provider.js'
-import type { ServerMessage } from '../../shared/types.js'
+import type { ServerMessage, Agent } from '../../shared/types.js'
 import type { ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
 import { getAgent } from '../config.js'
@@ -67,6 +67,26 @@ function prepareGroupHistory(history: ChatMessage[], agentNameById: Map<string, 
 export async function orchestrateGroupChat(options: GroupOrchestratorOptions): Promise<void> {
   const { userMessage, history, send, signal, thinkingMode, conversationId, userId, agentIds, saveMessage } = options
 
+  // Preload agents (parallel, avoids repeated getAgent calls in the loop).
+  // 必须早于 group_start：完整名册要供 @ 解析与本轮发言调度（中立 Agent 裁决）使用。
+  const agentNameById = new Map<string, string>()
+  const agentsById = new Map<string, Agent>()
+  await Promise.all(
+    agentIds.map(async (id) => {
+      const agent = await getAgent(id)
+      if (agent) {
+        agentNameById.set(id, agent.name)
+        agentsById.set(id, agent)
+      }
+    }),
+  )
+
+  // Parse user @mentions early — mentioned members are force-included by the
+  // orchestration decision below and still get front-of-queue priority.
+  const userMentionedIds = typeof userMessage === 'string'
+    ? parseUserMentions(userMessage, agentNameById)
+    : []
+
   // Shuffle agent order for natural conversation feel
   const shuffled = agentIds.length > 1
     ? [agentIds[0], ...shuffleArray(agentIds.slice(1))]
@@ -74,32 +94,18 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
 
   send({ type: 'group_start', agent_ids: shuffled })
 
-  // Preload agent name map (parallel, avoids repeated getAgent calls in the loop)
-  const agentNameById = new Map<string, string>()
-  await Promise.all(
-    agentIds.map(async (id) => {
-      const agent = await getAgent(id)
-      if (agent) agentNameById.set(id, agent.name)
-    }),
-  )
-
   const repliedAgents = new Set<string>()
   let remaining = [...shuffled]
   let mentionDepth = 0
   let mentionedBy: string | null = null
 
-  // Parse user message for @AgentName mentions — insert them to the front of the queue
-  if (typeof userMessage === 'string') {
-    const userMentions = parseUserMentions(userMessage, agentNameById)
-    if (userMentions.length > 0) {
-      // Insert mentioned agents at the front, preserving their order in the user message,
-      // and deduplicate (remove from later positions in remaining)
-      for (const mid of userMentions.reverse()) {
-        remaining = [mid, ...remaining.filter(id => id !== mid)]
-      }
-      // Set mentionedBy to "user" so the system prompt can acknowledge it
-      mentionedBy = '用户'
+  // Insert user-mentioned agents at the front, preserving their order in the message
+  if (userMentionedIds.length > 0) {
+    for (const mid of [...userMentionedIds].reverse()) {
+      remaining = [mid, ...remaining.filter(id => id !== mid)]
     }
+    // Set mentionedBy to "user" so the system prompt can acknowledge it
+    mentionedBy = '用户'
   }
 
   // Accumulate history so each agent sees previous agents' replies.
