@@ -49,8 +49,7 @@ async function migrate() {
       system_prompt TEXT NOT NULL DEFAULT '',
       avatar TEXT NOT NULL DEFAULT '',
       role TEXT NOT NULL DEFAULT 'default',
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      origin TEXT
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
     CREATE TABLE IF NOT EXISTS group_conversation_agents (
@@ -74,19 +73,6 @@ async function migrate() {
   `)
 }
 
-/**
- * 列迁移预检：先查 PRAGMA table_info，缺列才执行 ALTER TABLE。
- * 既有库的 agents 表没有 origin 列（CREATE TABLE IF NOT EXISTS 不会补列）。
- */
-async function ensureColumn(table: string, column: string, definition: string): Promise<void> {
-  const info = await client.execute(`PRAGMA table_info(${table})`)
-  const exists = info.rows.some((row) => String((row as Record<string, unknown>).name) === column)
-  if (!exists) {
-    await client.execute(`ALTER TABLE ${table} ADD COLUMN ${definition}`)
-  }
-}
-
 await migrate()
-await ensureColumn('agents', 'origin', 'origin TEXT')
 
 export const db = drizzle(client, { schema })
