@@ -17,7 +17,7 @@
 
 ```
 管理员登录（普通用户 PIN 流程）
-  → 获得用户 JWT（30 天，role:'user'）
+  → 获得用户 JWT（14 天，role:'user'；剩余不足一半时客户端自动续期）
 
 访问管理端点
   → Authorization: Bearer <用户 JWT>
@@ -159,7 +159,7 @@
 
 ## JWT 实现细节
 
-- 管理员**不再有独立 JWT**：管理端点复用用户 JWT（HS256、30 天、`role:'user'`），由 `adminAuthMiddleware` 逐请求校验 `isAdmin(username)`
+- 管理员**不再有独立 JWT**：管理端点复用用户 JWT（HS256、14 天滑动续期、`role:'user'`），由 `adminAuthMiddleware` 逐请求校验 `isAdmin(username)`
 - **签名密钥**：`JWT_SECRET` 环境变量（可选）；缺省时首启生成随机密钥并持久化到 `settings` 表（键 `jwt_secret`），重启复用
 - 名单为空/缺省时无任何管理员，应用其余功能不受影响
 

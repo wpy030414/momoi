@@ -156,8 +156,8 @@ Agent 级配置（存储在 agents 表）：
   → 无 JWT → 显示 LoginScreen
     → 输入用户名
     → GET /api/user/status → 有 PIN？
-      → 有 PIN → 输入 PIN → POST /api/user/verify → JWT（30天）
-      → 无 PIN → 设置 PIN → POST /api/user/set-pin → JWT（30天）
+      → 有 PIN → 输入 PIN → POST /api/user/verify → JWT（14天）
+      → 无 PIN → 设置 PIN → POST /api/user/set-pin → JWT（14天）
   → JWT 存入 localStorage → 进入主界面
 ```
 
@@ -282,7 +282,8 @@ App
 用户层：
   用户名 + 4 位 PIN
   PIN → PBKDF2（SHA-512, 10000 次, 随机 16 字节盐）→ settings 表 (pin:{username})
-  验证成功 → signUserToken() → JWT (HS256, 30天, role:'user', sub:username)
+  验证成功 → signUserToken() → JWT (HS256, 14天, role:'user', sub:username)
+  续期 → 剩余不足一半（<7天）时客户端 POST /api/user/refresh → 换发新 14 天 JWT（滑动会话）
   请求 → Authorization: Bearer <jwt>
   userAuthMiddleware → verifyUserToken() → c.set('userId', username)
 

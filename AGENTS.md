@@ -43,7 +43,7 @@
 - **数据库**：SQLite（@libsql/client + Drizzle ORM）—— 单文件 `data/momoi.db`，无需外部数据库
 - **AI**：OpenAI 兼容的 Chat Completions API，支持流式输出、function calling、多模态附件、思考模式
 - **技能**：SKILL.md 文件（YAML 前置元数据 + Markdown 内容），注入系统提示词
-- **认证**：用户 4 位 PIN（PBKDF2 哈希 + JWT 30 天）；管理员由 `ADMIN` 环境变量用户名名单授权（复用用户 JWT）
+- **认证**：用户 4 位 PIN（PBKDF2 哈希 + JWT 14 天滑动续期）；管理员由 `ADMIN` 环境变量用户名名单授权（复用用户 JWT）
 
 ## 关键目录
 
@@ -91,7 +91,7 @@ pnpm start        # 运行生产构建（node dist/index.js）
 ### 用户认证
 
 - 用户名 + 4 位数字 PIN，PBKDF2 安全哈希后存储（实现细节见 `docs/specs/module-auth.md`）
-- 验证成功后签发 JWT（30 天有效期）
+- 验证成功后签发 JWT（14 天有效期；剩余不足一半时客户端自动续期，形成滑动会话）
 - 请求通过 `Authorization: Bearer <jwt>` 认证；`userAuthMiddleware`（`middleware/userAuth.ts`）提取 `userId`
 - PIN 连续 5 次错误 → 封禁 IP 5 分钟（`rateLimiter.ts`）
 

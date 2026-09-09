@@ -668,3 +668,29 @@
 - `env` 新增 `ADMIN`（名单）与 `JWT_SECRET`；`settings` 表新增 `jwt_secret` 键
 - 新增 `GET /api/user/me`；bash 工具子进程环境剔除名单由 `ADMIN_KEY` 改为 `ADMIN`（防泄露管理员身份）
 - 文档同步：`module-auth.md`、`module-admin.md`、`module-config.md`、`ARCHITECTURE.md`、`AGENTS.md`、`PRD.md`、README、`.env.example`；D12 中「复用管理员签名密钥」的表述自此作废
+
+## D32：用户 JWT 改为 14 天 + 半衰自动续期
+
+**日期**：2026-09-09
+
+**背景**：原 30 天 token 有效期过长——泄露的 token 在一个月内都无法自然失效，与 PIN 这类轻量认证的风险面不匹配。但直接大幅缩短又会让活跃用户频繁重新输 PIN。
+
+**决策**：`signUserToken` 有效期 30 天 → 14 天；新增 `POST /api/user/refresh`（需用户 JWT）换发新 14 天 token。客户端（`App.tsx`）在 token **剩余寿命不足一半**（< 7 天）时自动刷新：登录/挂载时调度定时器、`visibilitychange`/`focus` 唤醒时复查（应对休眠唤醒）、失败 5 分钟后重试（401 则走既有 `auth:expired` 登出链路）。
+
+**原因**：
+- 滑动会话语义：活跃用户（应用保持打开，或每次回访间隔 < 7 天）永不再登录；连续 14 天未使用才会话过期重输 PIN——把「免登录时长」与「实际活跃度」绑定，而非签发时刻
+- 「半衰续期」是滑动会话的经典取法：续期点与过期线之间天然隔着半个 TTL 的容错（此处 7 天），对休眠唤醒、网络抖动、后台标签页定时器节流都有巨大余量；且单用户续期频率上限约每 7 天一次，签名开销可忽略
+- 14 天对 30 天：暴露窗口直接砍半，同时保留「两周一用」的低频用户免登录体验
+- 续期复用 `signUserToken`，服务端零新增状态：无刷新令牌、无会话表，仍是纯无状态 JWT
+
+**备选与权衡**：
+- ❌ 双 token（短 access + 长 refresh）：引入第二凭证与会话存储，与「零状态」架构相悖，超出需求
+- ❌ 响应头透明续期（每个中间件检查并回传新 token）：侵入所有路由与 SSE 流，复杂度高且收益与定时刷新相同
+- ❌ 24 小时短有效期：风险面更小，但迫使隔天使用的用户频繁输 PIN，与「轻量自托管」的体验取向不符
+- ⚠️ 多标签页各自刷新：无服务端会话，两个 token 均有效，localStorage 末次写入胜出——无锁死风险，可接受
+- ⚠️ 无单用户吊销能力不变：要强制某人/全员下线仍需轮换 `JWT_SECRET`（见 D31）
+
+**影响**：
+- `expires_at` 随 token 一并持久化到 localStorage（`token_expires_at`），登出/401 统一经 `clearSession()` 清理
+- `LoginScreen.onLogin` 增加第三参 `expiresAt`；`setToken(token, expiresAt?)` 扩展签名
+- 文档同步：`module-auth.md`（JWT 表 + `/refresh` 契约 + 行为约束 9）、`module-admin.md`、`AGENTS.md`、`ARCHITECTURE.md`、`PRD.md`、README；D12 的「JWT 30 天有效期」表述自此作废

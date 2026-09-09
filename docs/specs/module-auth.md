@@ -43,10 +43,12 @@
 |---|---|
 | 算法 | HS256 |
 | Payload | `{ role: 'user', sub: username }` |
-| 有效期 | 30 天 |
-| 签发函数 | `signUserToken(username)` |
+| 有效期 | 14 天（`USER_TOKEN_TTL_SECONDS`） |
+| 签发函数 | `signUserToken(username)`（`/verify`、`/set-pin`、`/refresh` 共用） |
 | 验证函数 | `verifyUserToken(token)` |
 | 响应字段 | `{ token, expires_at }` |
+
+- **滑动续期**：token 剩余寿命**不足一半**（< 7 天）时，客户端调 `POST /api/user/refresh` 换新 14 天 token（`App.tsx` 定时调度 + 页面唤醒时检查）。应用保持打开则永不过期；超过 14 天未打开应用，token 自然失效，需重新输 PIN
 
 - **签名密钥**：`JWT_SECRET` 环境变量（若提供）；否则首次启动生成 32 字节随机密钥并持久化到 `settings` 表（键 `jwt_secret`），重启后复用，用户 token 不因重启失效
 - 验证时除签名外还须匹配 `role === 'user'`，且 `sub` 为字符串
@@ -147,6 +149,13 @@
 
 **错误**：缺失/无效 token → 401
 
+### POST /api/user/refresh（需用户 JWT）
+
+以仍有效的 token 换发全新的 14 天 token（滑动续期；客户端在剩余不足一半时调用）。服务器不记录 token 清单：旧 token 到其自身过期前依旧有效，刷新只是重新签发。
+
+**响应**：`{ "token": "eyJ...", "expires_at": 1700086400 }`
+**错误**：缺失/无效/已过期 token → 401
+
 > 原端点 `POST /api/admin/auth`（密钥换管理员 JWT）已随 `ADMIN_KEY` 一并废除。
 
 ## 行为约束
@@ -160,3 +169,4 @@
 6. **认证 ≠ 授权**：JWT 只证明「是谁」，不证明「有权访问这条数据」。所有涉及具体资源的端点必须在 handler 内二次校验 `user_id` 归属（见 `chat.ts`、`conversations.ts` 的 `and(eq(id), eq(user_id, userId))` 查询），越权一律返回 404 而非 403（不泄露资源是否存在）
 7. **401 自动驱逐**：前端 `lib/api.ts` 收到 401 时触发 `window.dispatchEvent(new CustomEvent('auth:expired'))`，`App.tsx` 监听该事件→清空 token→回到登录页。403（非管理员）不触发驱逐
 8. **前端路由守卫**：`#/settings` 仅对 `/me` 返回 `is_admin: true` 的用户开放；其他用户（含未登录）访问该 hash 会被 `replaceState` 遣返首页。守卫只是体验层，真正的屏障是第 4 条的服务端鉴权
+9. **续期不等于吊销**：`/refresh` 只换发新 token，旧 token 在其过期前依然有效（无服务端会话表）。需要强制全员下线时，更换 `JWT_SECRET` 或删除 `settings` 表的 `jwt_secret` 行后重启
