@@ -62,10 +62,6 @@
     "groupMembers": "Members"
   },
   "menu": {
-    "title": "Settings",
-    "login": "Login",
-    "loginComingSoon": "Not available yet",
-    "loggedIn": "Logged in: {{username}}",
     "logout": "Logout",
     "changePin": "Change PIN",
     "language": "Language",

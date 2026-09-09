@@ -62,10 +62,6 @@
     "groupMembers": "群成员"
   },
   "menu": {
-    "title": "设置",
-    "login": "登录",
-    "loginComingSoon": "暂未开放",
-    "loggedIn": "已登录：{{username}}",
     "logout": "退出登录",
     "changePin": "更改 PIN",
     "language": "语言",

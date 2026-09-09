@@ -2,10 +2,11 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
-import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users } from 'lucide-react'
+import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Languages, SunMoon, Wrench } from 'lucide-react'
 import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation } from '@/shared/types'
+import type { Theme } from '../../hooks/useTheme'
 
 interface SidebarProps {
   conversations: Conversation[]
@@ -16,11 +17,17 @@ interface SidebarProps {
   onRename: (id: string, title: string) => void
   onDelete: (id: string) => void
   onExport: (id: string) => void
-  onMenuClick: () => void
   onManageGroupAgents?: (convId: string) => void
   appName: string
   currentUser: string
   showGithub?: boolean
+  onChangePin?: () => void
+  onLogout?: () => void
+  language?: string
+  onLanguageChange?: (lang: string) => void
+  theme?: Theme
+  onThemeChange?: (theme: Theme) => void
+  onAdminSettings?: () => void
 }
 
 interface MenuState {
@@ -28,15 +35,26 @@ interface MenuState {
   anchorRect: DOMRect
 }
 
-export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMenuClick, onManageGroupAgents, appName, currentUser, showGithub = true }: SidebarProps) {
-  const { t } = useTranslation()
+export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onManageGroupAgents, appName, currentUser, showGithub = true, onChangePin, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings }: SidebarProps) {
+  const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const userPopoverRef = useRef<HTMLDivElement>(null)
+  const settingsPopoverRef = useRef<HTMLDivElement>(null)
+  const userBtnRef = useRef<HTMLButtonElement>(null)
+  const settingsBtnRef = useRef<HTMLButtonElement>(null)
+  const [userPopoverOpen, setUserPopoverOpen] = useState(false)
+  const [settingsPopoverOpen, setSettingsPopoverOpen] = useState(false)
 
   const closeMenu = useCallback(() => setMenu(null), [])
+
+  const closeAllPopovers = useCallback(() => {
+    setUserPopoverOpen(false)
+    setSettingsPopoverOpen(false)
+  }, [])
 
   const startRename = useCallback((conv: Conversation) => {
     setRenamingId(conv.id)
@@ -84,6 +102,33 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
       scroller?.removeEventListener('scroll', closeMenu)
     }
   }, [menu, closeMenu])
+
+  // Close popovers on outside click / Escape
+  useEffect(() => {
+    if (!userPopoverOpen && !settingsPopoverOpen) return
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node
+      if (userPopoverRef.current && !userPopoverRef.current.contains(target) &&
+          !userBtnRef.current?.contains(target)) {
+        setUserPopoverOpen(false)
+      }
+      if (settingsPopoverRef.current && !settingsPopoverRef.current.contains(target) &&
+          !settingsBtnRef.current?.contains(target)) {
+        setSettingsPopoverOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeAllPopovers() }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', closeAllPopovers)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', closeAllPopovers)
+    }
+  }, [userPopoverOpen, settingsPopoverOpen, closeAllPopovers])
 
   return (
     <div className="flex flex-col h-full w-72 bg-card">
@@ -231,17 +276,133 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
 
       {/* Bottom bar — user info + settings */}
       <div className="border-t flex items-center justify-between px-3" style={{ height: '60px' }}>
-        <div className="flex items-center gap-2 min-w-0 ml-2">
+        {/* Left: user button with popover */}
+        <button
+          ref={userBtnRef}
+          className="flex items-center gap-2 min-w-0 hover:bg-accent/50 rounded-md px-2 py-1 transition-colors"
+          onClick={() => { setSettingsPopoverOpen(false); setUserPopoverOpen(!userPopoverOpen) }}
+        >
           <User className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
           <span className="text-sm truncate">{currentUser}</span>
-        </div>
+        </button>
+
+        {/* Right: settings button with popover */}
         <button
-          onClick={onMenuClick}
+          ref={settingsBtnRef}
           className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-accent/50 transition-colors"
+          onClick={() => { setUserPopoverOpen(false); setSettingsPopoverOpen(!settingsPopoverOpen) }}
         >
           <Settings className="h-4 w-4 text-muted-foreground" />
         </button>
       </div>
+
+      {/* User popover */}
+      {userPopoverOpen && createPortal(
+        <div
+          ref={userPopoverRef}
+          className="fixed z-[9999] w-40 rounded-md border bg-popover p-1 shadow-md animate-in fade-in-0 zoom-in-95"
+          style={{
+            bottom: '68px',
+            left: '12px',
+          }}
+        >
+          {onChangePin && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+              onClick={() => { closeAllPopovers(); onChangePin() }}
+            >
+              <Key className="h-3.5 w-3.5" />
+              {t('menu.changePin')}
+            </button>
+          )}
+          {onLogout && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+              onClick={() => { closeAllPopovers(); onLogout() }}
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              {t('menu.logout')}
+            </button>
+          )}
+        </div>,
+        document.body,
+      )}
+
+      {/* Settings popover */}
+      {settingsPopoverOpen && createPortal(
+        <div
+          ref={settingsPopoverRef}
+          className="fixed z-[9999] w-44 rounded-md border bg-popover p-1 shadow-md animate-in fade-in-0 zoom-in-95"
+          style={{
+            bottom: '68px',
+            left: '100px',
+          }}
+        >
+          {/* Language */}
+          <div className="px-2 py-1.5">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+              <Languages className="h-3 w-3" />
+              {t('menu.language')}
+            </div>
+            <div className="flex gap-1">
+              <button
+                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors ${
+                  language === 'zh-CN' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
+                }`}
+                onClick={() => onLanguageChange?.('zh-CN')}
+              >
+                中文
+              </button>
+              <button
+                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors ${
+                  language === 'en' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
+                }`}
+                onClick={() => onLanguageChange?.('en')}
+              >
+                English
+              </button>
+            </div>
+          </div>
+
+          {/* Theme */}
+          <div className="px-2 py-1.5">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+              <SunMoon className="h-3 w-3" />
+              {t('menu.theme')}
+            </div>
+            <div className="flex gap-1">
+              <button
+                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors ${
+                  theme === 'light' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
+                }`}
+                onClick={() => onThemeChange?.('light')}
+              >
+                {t('menu.themeLight')}
+              </button>
+              <button
+                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors ${
+                  theme === 'dark' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
+                }`}
+                onClick={() => onThemeChange?.('dark')}
+              >
+                {t('menu.themeDark')}
+              </button>
+            </div>
+          </div>
+
+          {/* Admin settings */}
+          {onAdminSettings && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors mt-1"
+              onClick={() => { closeAllPopovers(); onAdminSettings() }}
+            >
+              <Wrench className="h-3.5 w-3.5" />
+              {t('menu.adminSettings')}
+            </button>
+          )}
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }
