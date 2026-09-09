@@ -88,8 +88,7 @@ function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isG
 `
 
   if (infiniteMode) {
-    // 无限演算模式：不输出 suggestions 代码块（由中立 Agent 接管追问）
-    prompt = prompt.replace(/## 输出格式[\s\S]*?```\n`/, '')
+    // 无限演算模式：追问由中立 Agent 接管，不生成 suggestions
     prompt += `
 ## 无限演算模式
 你正处于无限演算模式中。在此模式下：
@@ -97,24 +96,6 @@ function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isG
 - 回复完毕后，会有一位中立观察者根据上下文自动生成追问
 - 你可以像真人聊天一样使用括号动作描述，如（笑了笑）、（托腮思考）
 - 保持对话自然流畅，不要每轮都长篇大论
-`
-  } else {
-    prompt += `
-## 建议
-每一条回复的【最末尾】必须输出一个 \`\`\`suggestions 代码块，里面恰好 3 个后续建议（每行一条，以 - 开头）。
-这个代码块是后台数据结构，用户不可见，不会破坏你的角色氛围，但缺少它系统会判定回复无效。
-建议内容必须是【用户本人会亲口打出来】的话：以用户的第一人称、口语化的口吻，像用户直接发一条消息那样，猜测用户看到这条回复后最可能追问的问题。
-正确示例（用户口吻）：
-\`\`\`suggestions
-- 具体怎么操作？
-- 再给我讲讲原理
-- 有没有别的办法？
-\`\`\`
-反面示例（助手对用户说话的口吻，禁止）：
-\`\`\`suggestions
-- 你可以试试这个方案
-- 要不要我帮你查一下？
-\`\`\`
 `
   }
 
@@ -516,6 +497,9 @@ function createStreamFn(agentModel: string, config: AppConfig, thinkingMode: boo
 
 // ---- Pi AgentEvent → SSE ServerMessage ----
 // 在 emit 回调中处理，维护 SSE 流所需的状态
+// 防御性兜底：系统提示词已不再注入 suggestions 指令（改由中立 Agent 在回复
+// 完成后单独生成），pending/suggestionsSeen 与 parseSuggestions 仅用于剥离
+// 模型自发输出的 ```suggestions 围栏，防止泄漏到前端 token 流。
 interface SSEState {
   send: SendFn
   fullThinking: string
@@ -723,7 +707,7 @@ function chatHistoryToAgentMessages(history: ChatMessage[], systemPrompt: string
   return result
 }
 
-// ---- parseSuggestions（从 loop.ts 迁移）----
+// ---- parseSuggestions（防御性兜底：正常路径恒为空建议）----
 function parseSuggestions(text: string): { reply: string; suggestions: string[] } {
   const fenceIdx = text.lastIndexOf(SUGGESTIONS_FENCE)
   if (fenceIdx === -1) {
