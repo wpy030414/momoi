@@ -78,12 +78,21 @@ export interface McpServerConfig {
 
 // ---- Tool Definition ----
 
+/** 工具参数 JSON Schema 属性节点（支持嵌套） */
+export interface ToolSchemaProperty {
+  type: string
+  description?: string
+  items?: ToolSchemaProperty
+  properties?: Record<string, ToolSchemaProperty>
+  required?: string[]
+}
+
 export interface ToolDefinition {
   name: string
   description: string
   input_schema: {
     type: 'object'
-    properties: Record<string, { type: string; description?: string; items?: { type: string } }>
+    properties: Record<string, ToolSchemaProperty>
     required?: string[]
   }
 }

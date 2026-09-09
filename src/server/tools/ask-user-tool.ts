@@ -86,17 +86,60 @@ export const askUserTool: ToolModule = {
   definition: {
     name: 'ask_user',
     description:
-      '当你在执行任务过程中需要用户补充信息、做出选择或确认某个决定时，调用此工具向用户提问。' +
-      '调用后你会暂停执行，直到用户回答。用户可以：选择选项、自由填写文字、或跳过问题。' +
-      '每个问题可以包含 2-4 个预设选项（支持单选/多选），也可以让用户自由输入。' +
-      '请仅在确实需要用户输入时使用此工具，避免为无关紧要的小事打断用户。',
+      '向用户提问并等待回答。当你需要用户做出选择、补充信息、确认决定、' +
+      '或任何你不确定而用户清楚的事情时，应当优先使用此工具而不是猜测或假设。' +
+      '典型场景：命名文件/变量/项目、选择技术方案/数据库/工具、确认操作（是否删除/覆盖）、' +
+      '询问偏好（格式/风格/语言）、索取缺失的必要参数。' +
+      '调用后你会暂停执行，直到用户回答。提供选项能让用户更快做出决定，但不是必须的——' +
+      '如果问题太开放无法预设选项，传空 options 即可让用户自由输入。' +
+      '不要在琐碎小事上使用（如"我可以开始了吗"），但遇到真正的决策点应主动询问。',
     input_schema: {
       type: 'object',
       properties: {
         questions: {
           type: 'array',
-          items: { type: 'object' },
-          description: '要问用户的问题列表。每个问题包含 header（短标签）、question（完整问题文本）、options（选项列表，2-4 个）、multiSelect（是否多选）。',
+          description:
+            '要问用户的问题列表（通常只需 1 个问题）。每个问题是一个对象，' +
+            '包含以下字段：header（短标签，最多 12 字符）、question（完整问题文本）、' +
+            'options（选项数组，每个选项包含 label 和可选的 description，2-4 个）、' +
+            'multiSelect（是否允许多选，默认 false）。如果不需要预设选项，options 可以设为空数组，' +
+            '用户将可以自由输入文字。',
+          items: {
+            type: 'object',
+            properties: {
+              header: {
+                type: 'string',
+                description: '问题的简短标签（如「文件命名」「数据库选择」），最多 12 字符，显示为 chip 标签',
+              },
+              question: {
+                type: 'string',
+                description: '完整的、需要用户回答的问题文本。应当清晰、具体，让用户一看就明白需要做什么决定',
+              },
+              options: {
+                type: 'array',
+                description: '预设选项列表，2-4 个。如果不需要选项，传空数组 []，用户将可以自由输入文字',
+                items: {
+                  type: 'object',
+                  properties: {
+                    label: {
+                      type: 'string',
+                      description: '选项的显示文本，如「SQLite」「PostgreSQL」',
+                    },
+                    description: {
+                      type: 'string',
+                      description: '可选：该选项的辅助说明文字，如轻量级优先选此',
+                    },
+                  },
+                  required: ['label'],
+                },
+              },
+              multiSelect: {
+                type: 'boolean',
+                description: '是否允许多选。false=单选，true=多选。默认为 false',
+              },
+            },
+            required: ['header', 'question', 'options', 'multiSelect'],
+          },
         },
       },
       required: ['questions'],

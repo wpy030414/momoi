@@ -88,6 +88,22 @@ function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isG
 现在的日期时间是${new Date().toLocaleString()}。
 `
 
+  // 引导 Agent 使用 ask_user 工具
+  prompt += `
+## 使用 ask_user 工具
+你可以在任何时候调用 \`ask_user\` 工具向用户提问，提问期间你会暂停，直到用户回答。
+**应当在以下场景主动使用 ask_user：**
+- 需要用户做出选择时（如「用 SQLite 还是 PostgreSQL？」）——给出 2-4 个选项让用户一键选择
+- 需要用户补充缺失信息时（如「文件的命名是？」「目标端口号是多少？」）
+- 需要用户确认有风险的操作时（如「确定要删除这个文件吗？」）
+- 给出了几种可行方案，希望用户决定方向时
+**不要**在以下场景使用：
+- 用户已经明确告诉你了答案——直接执行，不要反复确认
+- 纯信息查询类问题（「今天天气如何？」）——直接调用搜索工具
+- 过小的琐事（如「我可以继续吗？」「你看这个对不对？」）——自己判断即可
+提供选项时尽量用具体的选择而不是宽泛的描述，让用户能一键点击而不是手动打字。
+`
+
   if (infiniteMode) {
     // 无限演算模式：追问由中立 Agent 接管，不生成 suggestions
     prompt += `
@@ -125,24 +141,29 @@ ${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应�
 }
 
 // ---- JSON Schema 属性 → TypeBox schema ----
-function jsonSchemaToTypeBox(properties: Record<string, { type: string; description?: string; items?: { type: string } }>, required: string[] = []): TSchema {
+function schemaPropertyToTypeBox(prop: import('../../shared/types.js').ToolSchemaProperty): TSchema {
+  const desc = prop.description
+  switch (prop.type) {
+    case 'string': return desc ? Type.String({ description: desc }) : Type.String()
+    case 'number': return desc ? Type.Number({ description: desc }) : Type.Number()
+    case 'boolean': return desc ? Type.Boolean({ description: desc }) : Type.Boolean()
+    case 'array': {
+      const itemType = prop.items ? schemaPropertyToTypeBox(prop.items) : Type.Any()
+      return desc ? Type.Array(itemType, { description: desc }) : Type.Array(itemType)
+    }
+    case 'object': {
+      const inner = prop.properties ? jsonSchemaToTypeBox(prop.properties, prop.required || []) : Type.Record(Type.String(), Type.Any())
+      return desc ? Type.Object(inner.properties, { description: desc }) : inner
+    }
+    default: return desc ? Type.Any({ description: desc }) : Type.Any()
+  }
+}
+
+function jsonSchemaToTypeBox(properties: Record<string, import('../../shared/types.js').ToolSchemaProperty>, required: string[] = []): TSchema {
   const obj: Record<string, TSchema> = {}
   for (const [key, prop] of Object.entries(properties)) {
-    const desc = prop.description
-    switch (prop.type) {
-      case 'string': obj[key] = desc ? Type.String({ description: desc }) : Type.String(); break
-      case 'number': obj[key] = desc ? Type.Number({ description: desc }) : Type.Number(); break
-      case 'boolean': obj[key] = desc ? Type.Boolean({ description: desc }) : Type.Boolean(); break
-      case 'array': {
-        const itemType = prop.items?.type === 'string' ? Type.String() : Type.Any()
-        obj[key] = desc ? Type.Array(itemType, { description: desc }) : Type.Array(itemType)
-        break
-      }
-      default: obj[key] = desc ? Type.Any({ description: desc }) : Type.Any(); break
-    }
+    obj[key] = schemaPropertyToTypeBox(prop)
   }
-  // TypeBox 的 Optional 不支持在 Object 上直接标记，用 Partial + Required 组合
-  // 简化处理：所有字段都标记，Pi 自己会校验 required
   return Type.Object(obj)
 }
 
