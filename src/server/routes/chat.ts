@@ -19,6 +19,18 @@ import { SandboxFS } from '../tools/workspace.js'
 
 export const chatRoute = new Hono()
 
+// 构建中立 Agent 上下文：最近 20 条消息，用户/Agent 名字标注（follow_up 与 suggestions 共用）
+async function buildNeutralContext(convId: string): Promise<string> {
+  const allMsgs = await db.select().from(messages)
+    .where(eq(messages.conversation_id, convId))
+    .orderBy(messages.created_at).all()
+  const agents = await listAgents()
+  const agentNameById = new Map(agents.map((a) => [a.id, a.name]))
+  return allMsgs.slice(-20).map((m) =>
+    m.role === 'user' ? `用户: ${m.content}` : `[${m.agent_id ? (agentNameById.get(m.agent_id) || m.agent_id) : '助手'}]: ${m.content}`
+  ).join('\n')
+}
+
 // Global in-memory state for infinite mode control per conversation
 // Key: conversationId, Value: { enabled: boolean, messageCount: number }
 const infiniteState = new Map<string, { enabled: boolean; messageCount: number }>()
@@ -270,14 +282,8 @@ chatRoute.post('/', async (c) => {
         // Send follow_up_start first so client creates a placeholder bubble
         send({ type: 'follow_up_start' })
 
-        const allMsgs = await db.select().from(messages)
-          .where(eq(messages.conversation_id, convId))
-          .orderBy(messages.created_at).all()
+        const context = await buildNeutralContext(convId)
         const agents = await listAgents()
-        const agentNameById = new Map(agents.map((a) => [a.id, a.name]))
-        const context = allMsgs.slice(-20).map((m) =>
-          m.role === 'user' ? `用户: ${m.content}` : `[${m.agent_id ? (agentNameById.get(m.agent_id) || m.agent_id) : '助手'}]: ${m.content}`
-        ).join('\n')
 
         const config = await getConfig()
         const neutralAgent = agents.find((a) => a.id === NEUTRAL_AGENT_ID)
