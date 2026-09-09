@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
@@ -6,7 +6,11 @@ import { Upload } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 
-export function SkillManager() {
+export interface SkillManagerHandle {
+  triggerUpload: () => void
+}
+
+export const SkillManager = forwardRef<SkillManagerHandle>(function SkillManager(_props, ref) {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [skills, setSkills] = useState<any[]>([])
@@ -52,22 +56,19 @@ export function SkillManager() {
     setDeleteSkillName(null)
   }
 
+  useImperativeHandle(ref, () => ({ triggerUpload: () => fileInputRef.current?.click() }))
+
   return (
     <div className="space-y-4 pt-4">
-      <div className="flex items-center gap-2">
-        <input ref={fileInputRef} type="file" accept=".zip" className="hidden" onChange={handleUpload} />
-        <Button variant="outline" size="sm" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
-          <Upload className="mr-2 h-4 w-4" />
-          {uploading ? t('common.loading') : t('settings.uploadSkill')}
-        </Button>
-      </div>
+      <input ref={fileInputRef} type="file" accept=".zip" className="hidden" hidden onChange={handleUpload} />
       {uploadError && <p className="text-sm text-destructive">{uploadError}</p>}
       {fetching ? (
         <p className="text-muted-foreground">{t('common.loading')}</p>
       ) : skills.length === 0 ? (
         <p className="text-muted-foreground">{t('settings.noSkills')}</p>
       ) : (
-        skills.map((s) => (
+        <div className="space-y-2">
+          {skills.map((s) => (
           <div key={s.manifest?.name || s.name} className="flex items-center justify-between p-3 border rounded-md">
             <div>
               <p className="font-medium">{s.manifest?.name || s.name}</p>
@@ -79,7 +80,8 @@ export function SkillManager() {
               {t('common.remove')}
             </Button>
           </div>
-        ))
+          ))}
+        </div>
       )}
 
       {/* Delete confirmation dialog */}
@@ -103,4 +105,4 @@ export function SkillManager() {
       </Dialog>
     </div>
   )
-}
+})

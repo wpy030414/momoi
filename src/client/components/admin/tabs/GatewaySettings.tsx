@@ -1,13 +1,17 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Input } from '../../ui/input'
 import { Button } from '../../ui/button'
 import { Switch } from '../../ui/switch'
-import { Eye, EyeOff, RotateCcw } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 
-export function GatewaySettings() {
+export interface GatewaySettingsHandle {
+  loadFromEnv: () => void
+}
+
+export const GatewaySettings = forwardRef<GatewaySettingsHandle>(function GatewaySettings(_props, ref) {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [config, setConfig] = useState<any>(null)
@@ -17,6 +21,22 @@ export function GatewaySettings() {
   useEffect(() => {
     api.getConfig().then(setConfig).catch(console.error)
   }, [])
+
+  const handleLoadFromEnv = useCallback(async () => {
+    if (!config) return
+    try {
+      const envGateway = await api.getEnvGateway()
+      setConfig((prev: any) => ({
+        ...prev,
+        api_endpoint: envGateway.api_endpoint,
+        api_key: envGateway.api_key,
+      }))
+    } catch (err) {
+      console.error(err)
+    }
+  }, [config !== null])
+
+  useImperativeHandle(ref, () => ({ loadFromEnv: handleLoadFromEnv }), [handleLoadFromEnv])
 
   const handleSave = async () => {
     setSaving(true)
@@ -31,27 +51,10 @@ export function GatewaySettings() {
 
   if (!config) return <div className="py-8 text-center text-muted-foreground">{t('common.loading')}</div>
 
-  const handleLoadFromEnv = async () => {
-    try {
-      const envGateway = await api.getEnvGateway()
-      setConfig({
-        ...config,
-        api_endpoint: envGateway.api_endpoint,
-        api_key: envGateway.api_key,
-      })
-    } catch (err) {
-      console.error(err)
-    }
-  }
+  if (!config) return <div className="py-8 text-center text-muted-foreground">{t('common.loading')}</div>
 
   return (
     <div className="space-y-4 pt-4">
-      <div>
-        <Button variant="outline" size="sm" onClick={handleLoadFromEnv}>
-          <RotateCcw className="mr-2 h-4 w-4" />
-          {t('settings.gatewayLoadFromEnv')}
-        </Button>
-      </div>
       <div>
         <label className="text-sm font-medium">{t('settings.apiEndpoint')}</label>
         <Input value={config.api_endpoint || ''} onChange={(e) => setConfig({ ...config, api_endpoint: e.target.value })} className="mt-1" />
@@ -84,4 +87,4 @@ export function GatewaySettings() {
       <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>
   )
-}
+})

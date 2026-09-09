@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
@@ -9,7 +9,11 @@ import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 import type { McpServerConfig } from '@/shared/types'
 
-export function McpManager() {
+export interface McpManagerHandle {
+  triggerAdd: () => void
+}
+
+export const McpManager = forwardRef<McpManagerHandle>(function McpManager(_props, ref) {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [servers, setServers] = useState<McpServerConfig[]>([])
@@ -92,15 +96,10 @@ export function McpManager() {
     setDeleteId(null)
   }
 
+  useImperativeHandle(ref, () => ({ triggerAdd: openAdd }))
+
   return (
     <div className="space-y-4 pt-4">
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={openAdd}>
-          <Plus className="mr-2 h-4 w-4" />
-          {t('settings.mcpAddServer')}
-        </Button>
-      </div>
-
       {loading ? (
         <p className="text-muted-foreground">{t('common.loading')}</p>
       ) : servers.length === 0 ? (
@@ -195,4 +194,4 @@ export function McpManager() {
       </Dialog>
     </div>
   )
-}
+})

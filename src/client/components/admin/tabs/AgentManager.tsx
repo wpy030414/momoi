@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../../lib/api'
 import type { Agent } from '@/shared/types'
@@ -7,6 +7,10 @@ import { Button } from '../../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
 import { Pencil, Trash2, Plus, Upload, Copy, Shield } from 'lucide-react'
 import { useToast } from '../../ui/toast'
+
+export interface AgentManagerHandle {
+  triggerCreate: () => void
+}
 
 /** A single agent row — card in view mode, expands into edit form in edit mode */
 function AgentRow({
@@ -168,7 +172,7 @@ function AgentRow({
   )
 }
 
-export function AgentManager() {
+export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager(_props, ref) {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [agents, setAgents] = useState<Agent[]>([])
@@ -307,23 +311,15 @@ export function AgentManager() {
 
   const isEditing = !!(isCreating || editingId)
 
+  useImperativeHandle(ref, () => ({ triggerCreate: startCreate }))
+
   return (
     <div className="space-y-2 pt-4">
       {fetching ? (
         <p className="text-muted-foreground text-center py-4">{t('common.loading')}</p>
       ) : (
         <>
-          {/* Add button — inline at top, like SkillManager */}
-          {!isEditing && (
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={startCreate}>
-                <Plus className="mr-2 h-4 w-4" />
-                {t('settings.agentAdd')}
-              </Button>
-            </div>
-          )}
-
-          {/* Create form — inline at top, below the button */}
+          {/* Create form — inline at top */}
           {isCreating && (
             <AgentRow
               isEditing
@@ -411,4 +407,4 @@ export function AgentManager() {
       </Dialog>
     </div>
   )
-}
+})

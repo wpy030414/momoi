@@ -72,12 +72,12 @@
     "theme": "Theme",
     "themeLight": "Light",
     "themeDark": "Dark",
-    "adminSettings": "Admin Settings",
+    "adminSettings": "Admin",
     "about": "About",
     "advanced": "Advanced"
   },
   "settings": {
-    "title": "Admin Settings",
+    "title": "Admin",
     "subtitleAuthenticated": "Manage global agent configuration",
     "tabBranding": "Branding",
     "appName": "App Name",
@@ -124,7 +124,7 @@
     "agentNeutral": "Neutral Agent",
     "agentCustomModel": "Custom",
     "agentSelectPlaceholder": "Select Agent",
-    "agentRequired": "Configure at least one agent in Admin Settings",
+    "agentRequired": "Configure at least one agent in Admin",
     "modelSelect": "Select Model",
     "customModel": "Custom",
     "modelPlaceholder": "Enter model name",

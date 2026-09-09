@@ -1,15 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGroupChat } from './hooks/useGroupChat'
 import { useTheme } from './hooks/useTheme'
 import { Sidebar } from './components/sidebar/Sidebar'
+import { AdminSidebar } from './components/admin/AdminSidebar'
 import { ChatPanel } from './components/chat/ChatPanel'
-import { AdminScreen } from './components/admin/AdminScreen'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
+import { AgentManager, type AgentManagerHandle } from './components/admin/tabs/AgentManager'
+import { GatewaySettings, type GatewaySettingsHandle } from './components/admin/tabs/GatewaySettings'
+import { BrandingSettings } from './components/admin/tabs/BrandingSettings'
+import { McpManager, type McpManagerHandle } from './components/admin/tabs/McpManager'
+import { SkillManager, type SkillManagerHandle } from './components/admin/tabs/SkillManager'
+import { StatsPanel } from './components/admin/tabs/StatsPanel'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
-import { PanelLeft, X, Check } from 'lucide-react'
+import { PanelLeft, X, Check, Plus, RotateCcw, Upload, Server } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 
 export function App() {
@@ -17,6 +23,13 @@ export function App() {
   const chat = useGroupChat()
   const { theme, setTheme } = useTheme()
   const [adminViewOpen, setAdminViewOpen] = useState(false)
+  // Active tab in the admin management sidebar
+  const [adminTab, setAdminTab] = useState('agent')
+  // Refs to tab action-triggers (exposed via useImperativeHandle)
+  const agentRef = useRef<AgentManagerHandle>(null)
+  const gatewayRef = useRef<GatewaySettingsHandle>(null)
+  const mcpRef = useRef<McpManagerHandle>(null)
+  const skillRef = useRef<SkillManagerHandle>(null)
   const [changePinOpen, setChangePinOpen] = useState(false)
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
@@ -272,11 +285,6 @@ export function App() {
     return () => window.removeEventListener('hashchange', syncAdminRoute)
   }, [isAdminUser])
 
-  // Show admin settings as full-page view (admins only; guard above enforces it)
-  if (adminViewOpen) {
-    return <AdminScreen onBack={closeAdminView} />
-  }
-
   // Show login screen if not logged in
   if (!currentUser) {
     return <LoginScreen onLogin={handleLogin} />
@@ -294,27 +302,36 @@ export function App() {
         max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50
         ${sidebarOpen ? '' : 'max-md:w-0 md:w-0 md:border-r-0'}
       `}>
-        <Sidebar
-          conversations={chat.conversations}
-          activeId={chat.activeId}
-          onSelect={chat.selectConversation}
-          onNew={chat.createConversation}
-          onNewGroup={() => setGroupDialogOpen(true)}
-          onRename={chat.renameConversation}
-          onDelete={handleDeleteConversation}
-          onExport={chat.exportConversation}
-          onManageGroupAgents={handleManageGroupAgents}
-          appName={appName}
-          currentUser={currentUser}
-          showGithub={showGithub}
-          onChangePin={() => setChangePinOpen(true)}
-          onLogout={handleLogout}
-          language={i18n.language}
-          onLanguageChange={handleLanguageChange}
-          theme={theme}
-          onThemeChange={setTheme}
-          onAdminSettings={isAdminUser ? handleAdminSettings : undefined}
-        />
+        {/* Sidebar — admin mode: management nav; otherwise: conversations */}
+        {adminViewOpen ? (
+          <AdminSidebar
+            activeTab={adminTab}
+            onTabChange={setAdminTab}
+            onBack={closeAdminView}
+          />
+        ) : (
+          <Sidebar
+            conversations={chat.conversations}
+            activeId={chat.activeId}
+            onSelect={chat.selectConversation}
+            onNew={chat.createConversation}
+            onNewGroup={() => setGroupDialogOpen(true)}
+            onRename={chat.renameConversation}
+            onDelete={handleDeleteConversation}
+            onExport={chat.exportConversation}
+            onManageGroupAgents={handleManageGroupAgents}
+            appName={appName}
+            currentUser={currentUser}
+            showGithub={showGithub}
+            onChangePin={() => setChangePinOpen(true)}
+            onLogout={handleLogout}
+            language={i18n.language}
+            onLanguageChange={handleLanguageChange}
+            theme={theme}
+            onThemeChange={setTheme}
+            onAdminSettings={isAdminUser ? handleAdminSettings : undefined}
+          />
+        )}
       </div>
 
       {/* Mobile backdrop */}
@@ -325,42 +342,91 @@ export function App() {
         />
       )}
 
-      {/* Main area */}
-      <div className="flex-1 flex flex-col min-w-0 relative">
-        {/* Sidebar toggle button */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="absolute top-[14px] left-3 z-30 h-8 w-8 hover:bg-accent/50"
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-        >
-          <PanelLeft className="h-4 w-4" />
-        </Button>
-
-        {/* Chat area */}
-        <ChatPanel
-          messages={chat.messages}
-          loading={chat.loading}
-          onSend={chat.sendMessage}
-          onCancel={chat.cancel}
-          onRevert={chat.revertMessage}
-          backgroundImage={backgroundImage}
-          supportAttachments={supportAttachments}
-          agents={agents}
-          agentsLoading={agentsLoading}
-          selectedAgentId={selectedAgentId}
-          activeAgentId={activeAgentId}
-          onAgentChange={setSelectedAgentId}
-          isGroup={chat.isGroupMode}
-          groupAgents={chat.groupAgents}
-          onSendGroup={chat.sendGroupMessage}
-          infiniteMode={infiniteMode}
-          onInfiniteModeChange={handleInfiniteModeChange}
-          pendingQuestion={chat.pendingQuestion}
-          onSendAnswer={(answer, selectedOptions) => chat.sendAnswer(chat.pendingQuestion?.question_id || '', answer, selectedOptions)}
-          onSkipAnswer={() => chat.sendAnswer(chat.pendingQuestion?.question_id || '', '', [])}
-        />
-      </div>
+      {/* Main area — admin mode: management content; otherwise: chat */}
+        {adminViewOpen ? (
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Top bar — same height as AdminSidebar header, holds toggle + actions */}
+            <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 hover:bg-accent/50"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+              >
+                <PanelLeft className="h-4 w-4" />
+              </Button>
+              <div className="flex items-center gap-1.5">
+                {adminTab === 'agent' && (
+                  <Button variant="outline" size="sm" onClick={() => agentRef.current?.triggerCreate()}>
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    {t('settings.agentAdd')}
+                  </Button>
+                )}
+                {adminTab === 'gateway' && (
+                  <Button variant="outline" size="sm" onClick={() => gatewayRef.current?.loadFromEnv()}>
+                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                    {t('settings.gatewayLoadFromEnv')}
+                  </Button>
+                )}
+                {adminTab === 'mcp' && (
+                  <Button variant="outline" size="sm" onClick={() => mcpRef.current?.triggerAdd()}>
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    {t('settings.mcpAddServer')}
+                  </Button>
+                )}
+                {adminTab === 'skills' && (
+                  <Button variant="outline" size="sm" onClick={() => skillRef.current?.triggerUpload()}>
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    {t('settings.uploadSkill')}
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto min-h-0 px-6">
+              {adminTab === 'agent' && <AgentManager ref={agentRef} />}
+              {adminTab === 'gateway' && <GatewaySettings ref={gatewayRef} />}
+              {adminTab === 'branding' && <BrandingSettings />}
+              {adminTab === 'mcp' && <McpManager ref={mcpRef} />}
+              {adminTab === 'skills' && <SkillManager ref={skillRef} />}
+              {adminTab === 'stats' && <StatsPanel />}
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col min-w-0 relative">
+            {/* Sidebar toggle button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute top-[14px] left-3 z-30 h-8 w-8 hover:bg-accent/50"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+            >
+              <PanelLeft className="h-4 w-4" />
+            </Button>
+            {/* Chat area */}
+            <ChatPanel
+              messages={chat.messages}
+              loading={chat.loading}
+              onSend={chat.sendMessage}
+              onCancel={chat.cancel}
+              onRevert={chat.revertMessage}
+              backgroundImage={backgroundImage}
+              supportAttachments={supportAttachments}
+              agents={agents}
+              agentsLoading={agentsLoading}
+              selectedAgentId={selectedAgentId}
+              activeAgentId={activeAgentId}
+              onAgentChange={setSelectedAgentId}
+              isGroup={chat.isGroupMode}
+              groupAgents={chat.groupAgents}
+              onSendGroup={chat.sendGroupMessage}
+              infiniteMode={infiniteMode}
+              onInfiniteModeChange={handleInfiniteModeChange}
+              pendingQuestion={chat.pendingQuestion}
+              onSendAnswer={(answer, selectedOptions) => chat.sendAnswer(chat.pendingQuestion?.question_id || '', answer, selectedOptions)}
+              onSkipAnswer={() => chat.sendAnswer(chat.pendingQuestion?.question_id || '', '', [])}
+            />
+          </div>
+        )}
 
       {/* Change PIN Dialog */}
       <ChangePinDialog
