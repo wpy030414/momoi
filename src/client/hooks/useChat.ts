@@ -271,8 +271,10 @@ export function useChat() {
     abortRef.current = null
     refreshConversations()
 
-    // Re-fetch messages from server to get real IDs for locally-created messages
-    if (convId) {
+    // Re-fetch messages from server to get real IDs for locally-created messages.
+    // 竞态守卫：done 已提前结束 loading，用户可能在流关闭前抢发了新消息（本地流式
+    // 气泡已存在）——此时 abortRef 已被新一轮覆盖，跳过全量 refetch，避免抹掉新气泡。
+    if (convId && abortRef.current === abort) {
       try {
         const res = await api.getConversation(convId)
         setMessages(
@@ -384,6 +386,11 @@ export function useChat() {
         break
 
       case 'done':
+        // 单聊对齐 group_done：收到 done 即结束 loading
+        // （连接可能还要保持打开，等待中立 Agent 补发 suggestions）
+        if (!infiniteModeRef.current) {
+          setLoading(false)
+        }
         setMessages((prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
@@ -432,6 +439,19 @@ export function useChat() {
             suggestions: msg.suggestions,
             streaming: false,
           }]
+        })
+        break
+
+      case 'suggestions':
+        // 中立 Agent 补发的追问建议：挂到本轮最后一条 assistant 消息。
+        // 守卫 1：仅当最后一条消息仍是 assistant 气泡时应用——loading 已提前结束，
+        //         用户可能已抢发下一条消息，此时晚到的建议直接丢弃（DB 已持久化，刷新可见）。
+        // 守卫 2：群聊下 agent_id 不匹配（同上竞态）也丢弃。
+        setMessages((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          if (msg.agent_id && last.agent_id && last.agent_id !== msg.agent_id) return prev
+          return [...prev.slice(0, -1), { ...last, suggestions: msg.suggestions }]
         })
         break
 
