@@ -33,15 +33,31 @@ interface PendingToolCall {
   arguments: string
 }
 
-export async function* streamChatCompletion(
-  config: AppConfig,
+// `enable_thinking` / `thinking_budget` 源自 DashScope（Qwen 系），不是 OpenAI 规范字段。
+// 主流 provider 各有自己的思考控制参数，互不通用：
+//   OpenAI reasoning_effort；Anthropic thinking.budget_tokens；Gemini/Vertex thinkingConfig.thinkingBudget；
+//   OpenRouter reasoning.effort|max_tokens；Zhipu GLM thinking.type / reasoning_effort；Kimi thinking；
+//   MiniMax reasoning_split；腾讯云 TokenHub 的 Qwen 系列同样使用 enable_thinking。
+// 因此把 DashScope 的字段发给严格端点会被判为未知字段。
+// 严格实现的端点会以 400 UNKNOWN_FIELD 拒绝整个请求；一旦某端点这样拒绝，
+// 就记住它，后续请求不再携带这两个字段（思考内容仍经 delta.reasoning_content 透传）。
+const endpointsWithoutThinkingParams = new Set<string>()
+
+function isUnsupportedThinkingField(status: number, text: string): boolean {
+  return (
+    status === 400 &&
+    /(UNKNOWN_FIELD|unknown (request )?field|未知请求字段)/i.test(text) &&
+    /(enable_thinking|thinking_budget)/i.test(text)
+  )
+}
+
+function buildRequestBody(
   model: string,
   messages: ChatMessage[],
   tools: ToolDefinition[],
-  thinkingMode = true,
-): AsyncGenerator<StreamEvent> {
-  const url = `${config.api_endpoint.replace(/\/$/, '')}/chat/completions`
-
+  thinkingMode: boolean,
+  includeThinkingParams: boolean,
+): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
     messages,
@@ -49,13 +65,11 @@ export async function* streamChatCompletion(
     max_tokens: 100000,
   }
 
-  // Explicitly toggle reasoning/thinking at the upstream API level.
-  // DashScope-compatible: `enable_thinking` controls reasoning_content streaming,
-  // `thinking_budget: 0` disables the thinking phase entirely for models that
-  // default to always-on reasoning (e.g. Qwen3 thinking variants).
-  body.enable_thinking = thinkingMode
-  if (!thinkingMode) {
-    body.thinking_budget = 0
+  if (includeThinkingParams) {
+    body.enable_thinking = thinkingMode
+    if (!thinkingMode) {
+      body.thinking_budget = 0
+    }
   }
 
   if (tools.length > 0) {
@@ -69,28 +83,58 @@ export async function* streamChatCompletion(
     }))
   }
 
+  return body
+}
+
+export async function* streamChatCompletion(
+  config: AppConfig,
+  model: string,
+  messages: ChatMessage[],
+  tools: ToolDefinition[],
+  thinkingMode = true,
+): AsyncGenerator<StreamEvent> {
+  const endpoint = config.api_endpoint.replace(/\/$/, '')
+  const url = `${endpoint}/chat/completions`
+  const includeThinkingParams = !endpointsWithoutThinkingParams.has(endpoint)
+
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 120_000)
 
+  const post = async (includeParams: boolean): Promise<Response> => {
+    try {
+      return await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.api_key}`,
+        },
+        body: JSON.stringify(buildRequestBody(model, messages, tools, thinkingMode, includeParams)),
+        signal: controller.signal,
+      })
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        throw new Error('API request timed out after 120s')
+      }
+      throw err
+    }
+  }
+
   let response: Response
   try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.api_key}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-  } catch (err) {
-    clearTimeout(timeoutId)
-    if ((err as Error).name === 'AbortError') {
-      throw new Error('API request timed out after 120s')
+    response = await post(includeThinkingParams)
+
+    // 端点拒绝上述非规范字段时：记住该端点并原样重发一次（去掉这两个字段）。
+    if (!response.ok && includeThinkingParams && response.status === 400) {
+      const text = await response.text()
+      if (!isUnsupportedThinkingField(response.status, text)) {
+        throw new Error(`API error ${response.status}: ${text}`)
+      }
+      endpointsWithoutThinkingParams.add(endpoint)
+      response = await post(false)
     }
-    throw err
+  } finally {
+    clearTimeout(timeoutId)
   }
-  clearTimeout(timeoutId)
 
   if (!response.ok) {
     const text = await response.text()

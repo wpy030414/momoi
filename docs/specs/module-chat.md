@@ -176,7 +176,7 @@ POST {api_endpoint}/chat/completions
           enable_thinking: <bool>, tools?: [...] }
 ```
 
-- **思考模式**：透传 DashScope 兼容参数 `enable_thinking`；关闭时额外置 `thinking_budget: 0`
+- **思考模式**：透传 DashScope 兼容参数 `enable_thinking`；关闭时额外置 `thinking_budget: 0`（用于 Qwen3 等默认常开推理的模型彻底关掉思考阶段）。这两个字段不在 OpenAI 规范内：严格实现的端点会以 `400 UNKNOWN_FIELD` 拒绝整个请求，此时**去掉这两个字段原样重发一次**，并把该端点记入进程内缓存，后续请求不再携带；思考内容仍经 `delta.reasoning_content` 透传
 - **思考内容**：仅当 `thinkingMode` 为真时才 yield `thinking` 事件（读取 `delta.reasoning_content`）
 - **工具**：`ToolDefinition.input_schema` 映射为 OpenAI function 的 `parameters`
 - **tool_calls 聚合**：按 `index` 累积 `id`/`name`/`arguments`，`finish_reason` 到达时按 index 排序后一次性 yield
