@@ -38,6 +38,8 @@ export const agents = sqliteTable('agents', {
   avatar: text('avatar').notNull().default(''),
   role: text('role').notNull().default('default'),
   created_at: integer('created_at').notNull(),
+  // 导入来源溯源（JSON 文本），仅导入路径写入，用户 CRUD 不暴露
+  origin: text('origin'),
 })
 
 export const groupConversationAgents = sqliteTable('group_conversation_agents', {

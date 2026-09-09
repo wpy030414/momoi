@@ -51,6 +51,30 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json()
 }
 
+/**
+ * Multipart upload helper — deliberately omits Content-Type so the browser
+ * sets the boundary; shares the same 401 handling as `request`.
+ */
+async function multipartRequest<T>(path: string, token: string, file: File): Promise<T> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  })
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('user')
+      localStorage.removeItem('token')
+      window.dispatchEvent(new CustomEvent('auth:expired'))
+    }
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error || `HTTP ${res.status}`)
+  }
+  return res.json() as Promise<T>
+}
+
 export const api = {
   // User Auth
   getUserStatus: (username: string) => request<{ has_pin: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
@@ -117,24 +141,16 @@ export const api = {
   deleteMcpServer: (token: string, id: string) => request<{ success: boolean }>(`/api/admin/mcp-servers/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }),
 
   // Upload (multipart/form-data — do NOT set Content-Type, let browser set boundary)
-  uploadSkill: (token: string, file: File) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    return fetch('/api/admin/skills/upload', {
+  uploadSkill: (token: string, file: File) =>
+    multipartRequest<{ success: boolean; skills: import('@/shared/types').InstalledSkill[] }>('/api/admin/skills/upload', token, file),
+
+  // Admin - Agent package import (AIP)
+  importAgentPackage: (token: string, file: File) =>
+    multipartRequest<import('@/shared/types').AgentImportPreview>('/api/admin/agents/import', token, file),
+  commitAgentImport: (token: string, importId: string, body: import('@/shared/types').AgentImportCommitRequest) =>
+    request<import('@/shared/types').AgentImportCommitResult>(`/api/admin/agents/import/${encodeURIComponent(importId)}/commit`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    }).then(async (res) => {
-      if (!res.ok) {
-        if (res.status === 401) {
-          localStorage.removeItem('user')
-          localStorage.removeItem('token')
-          window.dispatchEvent(new CustomEvent('auth:expired'))
-        }
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(err.error || `HTTP ${res.status}`)
-      }
-      return res.json() as Promise<{ success: boolean; skills: import('@/shared/types').InstalledSkill[] }>
-    })
-  },
+      body: JSON.stringify(body),
+    }),
 }

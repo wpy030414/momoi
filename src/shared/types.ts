@@ -56,6 +56,14 @@ export interface AppConfig {
 
 // ---- Agent ----
 
+/** 导入来源溯源，写入 agents.origin（JSON 文本列），仅导入路径产生 */
+export interface AgentOrigin {
+  protocol: 'aip'
+  package: { name: string; version: string }
+  personaId: string
+  importedAt: number
+}
+
 export interface Agent {
   id: string
   name: string
@@ -64,6 +72,7 @@ export interface Agent {
   avatar: string
   role: 'default' | 'neutral'
   created_at: number
+  origin?: AgentOrigin | null
 }
 
 // ---- MCP Server Config ----
@@ -139,6 +148,77 @@ export interface AdminConversationRow {
   created_at: number
   updated_at: number
   message_count: number
+}
+
+// ---- Agent Import API ----
+
+export interface AgentImportPackageInfo {
+  name: string
+  version: string
+  host?: string
+}
+
+export interface AgentImportPersonaConflict {
+  agent_id: string
+  agent_name: string
+  same_origin: boolean
+}
+
+export interface AgentImportPersonaPreview {
+  id: string
+  name: string
+  primary: { file: string; bytes: number }
+  has_avatar: boolean
+  level_count: number
+  conflict?: AgentImportPersonaConflict
+}
+
+export interface AgentImportSkillConflict {
+  installed: boolean
+  content_identical: boolean
+}
+
+export interface AgentImportSkillPreview {
+  name: string
+  description: string
+  conflict: AgentImportSkillConflict
+}
+
+export interface AgentImportPreview {
+  import_id: string
+  package: AgentImportPackageInfo
+  candidates: AgentImportPersonaPreview[]
+  skills: AgentImportSkillPreview[]
+  warnings: string[]
+  errors: string[]
+}
+
+export type AgentImportPersonaAction = 'create' | 'overwrite' | 'skip'
+export type AgentImportSkillAction = 'install' | 'skip'
+
+export interface AgentImportPersonaDecision {
+  id: string
+  action: AgentImportPersonaAction
+  name?: string
+  model?: string
+}
+
+export interface AgentImportSkillDecision {
+  name: string
+  action: AgentImportSkillAction
+}
+
+export interface AgentImportCommitRequest {
+  personas?: AgentImportPersonaDecision[]
+  skills?: AgentImportSkillDecision[]
+}
+
+export interface AgentImportCommitResult {
+  imported: Array<{ id: string; name: string }>
+  overwritten: Array<{ id: string; name: string }>
+  skipped: string[]
+  skills: { installed: string[]; overwritten: string[]; skipped: string[] }
+  errors: string[]
 }
 
 // ---- API Responses ----
