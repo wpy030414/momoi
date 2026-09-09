@@ -70,7 +70,7 @@ Momoi 是一个**轻量级、可自托管的 Web AI 智能体平台**。它的�
 
 ### F4：工具系统
 
-- 12 个内置工具：文件读写、网络请求、文档处理、技能加载、bash 命令、钉钉 Token、群聊 @mention
+- 11 个内置工具：文件读写、网络请求、文档处理、技能加载、bash 命令、群聊 @mention
 - 工具作为 Agent 的基础能力，在沙盒化对话工作区中执行
 - 所有工具均通过 function calling 由 AI 自动调用
 - Pi Agent Core 提供并行执行、TypeBox 参数校验

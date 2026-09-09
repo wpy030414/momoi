@@ -559,28 +559,15 @@
 
 ---
 
-## D27：钉钉 Token 工具 — 服务端 OAuth2 令牌管理
+## D27：钉钉 Token 工具 — 移除，迁移至 MCP 服务
 
-**日期**：2026-09-08
+**日期**：2026-09-09
 
-**背景**：技能（如宜搭）需要调用钉钉 OpenAPI，每次请求都需有效的 Access Token。若让 AI 通过 bash 工具管理 token，需暴露 AppKey/AppSecret 给模型，存在安全风险。
+**背景**：钉钉 Token 管理原为内置工具，但此类外部服务集成的职责更适合作为 MCP 服务提供。
 
-**决策**：新增 `dingtalk_token` 内置工具，在服务端管理 OAuth2 令牌生命周期，AppKey/AppSecret 从环境变量读取，不暴露给 AI。
+**决策**：移除 `dingtalk_token` 内置工具，后续通过 MCP 客户端连接外部钉钉 MCP 服务来获取 token。
 
-**原因**：
-- AppKey/AppSecret 是敏感凭证，不应出现在 AI 上下文或命令输出中
-- 双层缓存（内存 + 磁盘）降低 API 调用频率
-- 提前 60s 刷新避免 token 过期窗口
-- 工具返回 token 到 AI 上下文中，但 summary 不暴露原始值
-
-**实现细节**：
-- `tools/dingtalk-token.ts`：`dingtalk_token` 工具
-- 环境变量：`DINGTALK_APP_KEY`、`DINGTALK_APP_SECRET`
-- 缓存：内存 `memoryCache` + 磁盘 `data/dingtalk-token.json`
-- 刷新策略：提前 60s 刷新，过期自动重新获取
-- 超时：15s 请求超时
-
-**影响**：新增 `tools/dingtalk-token.ts`；`registry.ts` 新增引用
+**影响**：删除 `tools/dingtalk-token.ts`；`registry.ts` 移除引用；环境变量 `DINGTALK_APP_KEY`/`DINGTALK_APP_SECRET` 移除。
 
 ---
 

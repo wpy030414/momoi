@@ -52,8 +52,6 @@ pnpm dev
 | `OPENAI_API_KEY` | | API 密钥 |
 | `OPENAI_MODEL` | `gpt-4o` | 模型名称 |
 | `PORT` | `11408` | 服务端端口 |
-| `DINGTALK_APP_KEY` | | 钉钉应用 AppKey（可选） |
-| `DINGTALK_APP_SECRET` | | 钉钉应用 AppSecret（可选） |
 
 ## 配置项
 
@@ -101,7 +99,6 @@ AI 在对话中可自动调用以下内置工具（沙盒隔离，每对话独�
 | `write_document` | 生成文档文件（DOCX/PPTX/XLSX，产物可下载） |
 | `load_skill` | 按需加载技能完整内容 |
 | `list_skill_files` | 列出技能目录中的文件 |
-| `dingtalk_token` | 获取钉钉 OAuth2 Access Token（双层缓存，提前刷新） |
 | `at_mention` | 群聊中 @ 点名其他 Agent（触发即时应答） |
 
 所有工具在 `data/workspaces/{conversationId}/` 沙盒内执行，防止访问宿主文件系统。详见 `docs/specs/module-tool-system.md`。

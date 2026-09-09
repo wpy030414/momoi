@@ -73,8 +73,6 @@ export const env = {
 | `OPENAI_BASE_URL` | API 地址 |
 | `OPENAI_API_KEY` | API 密钥 |
 | `PORT` | 服务端口（默认 3001） |
-| `DINGTALK_APP_KEY` | 钉钉应用 Key（`dingtalk_token` 工具使用） |
-| `DINGTALK_APP_SECRET` | 钉钉应用 Secret（`dingtalk_token` 工具使用） |
 
 ## 运行时 DB 层
 

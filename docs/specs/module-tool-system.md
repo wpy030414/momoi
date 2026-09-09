@@ -131,7 +131,6 @@
 | `src/server/tools/document-tools.ts` | 文档工具：`read_document`、`write_document` |
 | `src/server/tools/skill-tools.ts` | 技能工具：`load_skill`、`list_skill_files` |
 | `src/server/tools/bash-tool.ts` | Bash 命令执行：`bash`（受限沙盒执行） |
-| `src/server/tools/dingtalk-token.ts` | 钉钉 Access Token 管理：`dingtalk_token`（OAuth2 双层缓存） |
 | `src/server/tools/group-mention-tool.ts` | @mention 工具：`at_mention`（Agent 间点名调用） |
 | `src/server/tools/index.ts` | 统一导出 |
 | `src/server/ai/tools.ts` | 调用 `getToolDefinitions()` 聚合工具定义 |
@@ -408,28 +407,7 @@ export class SandboxFS {
 - 超时 → `⏱ 已超时终止`
 - 非零退出码 → 包含 `exit code N` 前缀
 
-### 6. 钉钉工具（`dingtalk-token.ts`）
-
-#### `dingtalk_token`
-
-获取钉钉开放平台 OAuth2 Access Token。
-
-**参数**：
-- `force_refresh` (boolean, optional): 是否强制刷新 token（忽略缓存），默认 `false`
-
-**行为**：
-- 从环境变量 `DINGTALK_APP_KEY` / `DINGTALK_APP_SECRET` 读取凭证（不暴露给 LLM/bash）
-- 内存 + 磁盘双层缓存，提前 60s 刷新
-- 调用钉钉 `/v1.0/oauth2/accessToken` 获取 token
-- summary 不暴露原始值（仅显示前后各 4 位的脱敏 token）
-- 完整 token 放在 `data.access_token` 字段返回给 LLM
-
-**错误**：
-- 凭证未配置 → `DINGTALK_APP_KEY 或 DINGTALK_APP_SECRET 未配置`
-- 请求超时 → `获取钉钉 access token 超时（15s）`
-- API 返回错误 → `钉钉 token 获取失败: {message}`
-
-### 7. @mention 工具（`group-mention-tool.ts`）
+### 6. @mention 工具（`group-mention-tool.ts`）
 
 #### `at_mention`
 
