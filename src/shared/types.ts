@@ -75,6 +75,16 @@ export interface Agent {
   origin?: AgentOrigin | null
 }
 
+// ---- MCP Server Config ----
+
+export interface McpServerConfig {
+  id: string
+  name: string
+  url: string
+  enabled: boolean
+  created_at: number
+}
+
 // ---- Tool Definition ----
 
 export interface ToolDefinition {
@@ -117,6 +127,7 @@ export type ServerMessage =
   | { type: 'agent_done'; agent_id: string; agent_name: string; reply: string; suggestions: string[] }
   | { type: 'group_start'; agent_ids: string[] }
   | { type: 'group_done'; infinite?: boolean }
+  | { type: 'follow_up_start' }
   | { type: 'follow_up'; text: string }
   | { type: 'infinite_mode_off' }
   | { type: 'done'; reply: string; suggestions: string[]; agent_id?: string; agent_name?: string; infinite?: boolean }

@@ -47,6 +47,7 @@ import {
 import { getConfig, getAgent, listAgents } from '../config.js'
 import { getAllTools } from './tools.js'
 import { resolveTool } from '../tools/registry.js'
+import { getMcpTools, callMcpTool } from '../tools/mcp-client.js'
 import type { ToolContext, ToolResult, ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
 import { createMentionTool } from '../tools/group-mention-tool.js'
@@ -164,7 +165,7 @@ function jsonSchemaToTypeBox(properties: Record<string, { type: string; descript
 }
 
 // ---- ToolModule → Pi AgentTool ----
-function createToolAdapter(toolCtx: ToolContext): AgentTool[] {
+async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
   const defs = getAllTools()
   const tools = defs.map((def) => {
     const toolModule = resolveTool(def.name)
@@ -246,6 +247,59 @@ function createToolAdapter(toolCtx: ToolContext): AgentTool[] {
       },
     }
     tools.push(mentionTool)
+  }
+
+  // 动态注入 MCP 工具（懒加载，首次或缓存过期时拉取）
+  try {
+    const mcpServers = await getMcpTools()
+    for (const server of mcpServers) {
+      for (const mcpTool of server.tools) {
+        const prefixedName = `${server.serverName}/${mcpTool.name}`
+        const schema = mcpTool.inputSchema.properties
+          ? jsonSchemaToTypeBox(mcpTool.inputSchema.properties, mcpTool.inputSchema.required || [])
+          : Type.Object({})
+
+        tools.push({
+          name: prefixedName,
+          label: prefixedName,
+          description: mcpTool.description || `MCP tool: ${mcpTool.name} (${server.serverName})`,
+          parameters: schema,
+          execute: async (
+            _toolCallId: string,
+            params: unknown,
+            signal?: AbortSignal,
+          ): Promise<AgentToolResult<any>> => {
+            const input = (params && typeof params === 'object' ? params : {}) as Record<string, unknown>
+            try {
+              const result = await callMcpTool(
+                server.serverId,
+                server.serverName,
+                server.serverUrl,
+                mcpTool.name,
+                input,
+              )
+
+              const mcpResult = result as { content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>; isError?: boolean }
+              const text = mcpResult?.content
+                ?.map((c) => c.text || c.data || '')
+                .join('\n') || 'Tool executed successfully'
+
+              return {
+                content: [{ type: 'text', text }],
+                details: { data: result, error: mcpResult?.isError === true },
+              }
+            } catch (err) {
+              return {
+                content: [{ type: 'text', text: `MCP tool error (${server.serverName}/${mcpTool.name}): ${(err as Error).message}` }],
+                details: { error: true },
+              }
+            }
+          },
+        })
+      }
+    }
+  } catch (err) {
+    console.warn('[mcp] Failed to inject MCP tools, continuing with built-in tools only:', (err as Error).message)
   }
 
   return tools
@@ -769,7 +823,7 @@ export async function runPiAgentLoop(
   }
 
   // 3. 创建 Pi 工具
-  const tools = createToolAdapter(toolCtx)
+  const tools = await createToolAdapter(toolCtx)
 
   // 4. 构建 Pi AgentContext
   const context: AgentContext = {

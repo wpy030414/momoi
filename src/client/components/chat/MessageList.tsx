@@ -40,7 +40,7 @@ export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, age
     lastAssistantIdx === -1 ? -1 : messages.length - 1 - lastAssistantIdx
 
   return (
-    <div className="space-y-4 max-w-3xl mx-auto">
+    <div className="space-y-2 max-w-3xl mx-auto">
       {messages.map((msg, idx) => {
         // Resolve agent avatar for group messages
         let msgAgentAvatar = agentAvatar

@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm'
 interface MessageContentProps {
   content: string
   streaming?: boolean
+  isUser?: boolean
 }
 
 const STREAM_THROTTLE_MS = 120
@@ -69,7 +70,7 @@ function renderContentWithMentions(content: string, streaming?: boolean): React.
   })
 }
 
-export function MessageContent({ content, streaming }: MessageContentProps) {
+export function MessageContent({ content, streaming, isUser }: MessageContentProps) {
   // Throttle content updates during streaming to avoid re-parsing markdown
   // on every single token (which causes garbled rendering)
   const [renderedContent, setRenderedContent] = useState(content)
@@ -99,7 +100,7 @@ export function MessageContent({ content, streaming }: MessageContentProps) {
   const parts = safeContent.split(/(```mermaid[\s\S]*?```)/g)
 
   return (
-    <div className="prose prose-sm max-w-none dark:prose-invert">
+    <div className={`prose prose-sm max-w-none [&_p]:my-1.5 ${isUser ? '[color:inherit] [--tw-prose-body:currentColor] [--tw-prose-headings:currentColor] [--tw-prose-bold:currentColor] [--tw-prose-links:currentColor] [--tw-prose-code:currentColor] [--tw-prose-counters:currentColor] [--tw-prose-bullets:currentColor] [--tw-prose-quotes:currentColor]' : 'dark:prose-invert'}`}>
       {parts.map((part, idx) => {
         if (part.startsWith('```mermaid')) {
           // Don't render mermaid while streaming (incomplete chart syntax)

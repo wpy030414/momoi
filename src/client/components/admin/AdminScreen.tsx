@@ -8,6 +8,7 @@ import { GatewaySettings } from './tabs/GatewaySettings'
 import { BrandingSettings } from './tabs/BrandingSettings'
 import { SkillManager } from './tabs/SkillManager'
 import { StatsPanel } from './tabs/StatsPanel'
+import { McpManager } from './tabs/McpManager'
 import { ArrowLeft } from 'lucide-react'
 import type { useAdmin } from '../../hooks/useAdmin'
 
@@ -37,10 +38,9 @@ export function AdminScreen({ onBack, admin }: AdminScreenProps) {
         <div className="flex items-center gap-4 px-6 border-b" style={{ height: '60px' }}>
           <button
             onClick={onBack}
-            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
-            {t('settings.backToChat')}
           </button>
           <h1 className="text-lg font-semibold">{t('settings.title')}</h1>
         </div>
@@ -68,10 +68,11 @@ export function AdminScreen({ onBack, admin }: AdminScreenProps) {
             </div>
           ) : (
             <Tabs defaultValue="agent" className="w-full flex flex-col min-h-0 flex-1 px-6 pt-4">
-              <TabsList className="w-full grid grid-cols-5 shrink-0">
+              <TabsList className="w-full grid grid-cols-6 shrink-0">
                 <TabsTrigger value="agent">{t('settings.tabAgent')}</TabsTrigger>
                 <TabsTrigger value="gateway">{t('settings.tabGateway')}</TabsTrigger>
                 <TabsTrigger value="branding">{t('settings.tabBranding')}</TabsTrigger>
+                <TabsTrigger value="mcp">{t('settings.tabMcp')}</TabsTrigger>
                 <TabsTrigger value="skills">{t('settings.tabSkills')}</TabsTrigger>
                 <TabsTrigger value="stats">{t('settings.tabStats')}</TabsTrigger>
               </TabsList>
@@ -84,6 +85,9 @@ export function AdminScreen({ onBack, admin }: AdminScreenProps) {
                 </TabsContent>
                 <TabsContent value="branding">
                   <BrandingSettings token={admin.token!} />
+                </TabsContent>
+                <TabsContent value="mcp">
+                  <McpManager token={admin.token!} />
                 </TabsContent>
                 <TabsContent value="skills">
                   <SkillManager token={admin.token!} />

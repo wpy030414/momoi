@@ -2,7 +2,10 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { sql } from 'drizzle-orm'
 import { adminAuthMiddleware, signAdminToken, verifyAdminKey } from '../auth.js'
-import { getConfig, updateConfig, listAgents, getAgent, createAgent, updateAgent, deleteAgent } from '../config.js'
+import { getConfig, updateConfig, listAgents, getAgent, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer } from '../config.js'
+import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '../../shared/constants.js'
+import fs from 'fs'
+import path from 'path'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
@@ -46,6 +49,8 @@ adminRoute.use('/agents/*', adminAuthMiddleware)
 adminRoute.use('/agents/import', adminAuthMiddleware)
 adminRoute.use('/agents/import/*', adminAuthMiddleware)
 adminRoute.use('/skills/*', adminAuthMiddleware)
+adminRoute.use('/mcp-servers', adminAuthMiddleware)
+adminRoute.use('/mcp-servers/*', adminAuthMiddleware)
 // '/stats' alone does NOT match sub-paths (e.g. /stats/conversations) in Hono —
 // mount both the exact and wildcard forms so every stats endpoint is protected.
 adminRoute.use('/stats', adminAuthMiddleware)
@@ -71,6 +76,32 @@ adminRoute.put('/config', async (c) => {
   const body = await c.req.json()
   const config = await updateConfig(body)
   return c.json(config)
+})
+
+// Get gateway defaults from .env (real-time file read, not cached)
+adminRoute.get('/config/env-gateway', async (c) => {
+  const envPath = path.resolve('.env')
+  const envVars: Record<string, string> = {}
+  try {
+    const raw = fs.readFileSync(envPath, 'utf-8')
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx === -1) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      const val = trimmed.slice(eqIdx + 1).trim()
+      envVars[key] = val
+    }
+  } catch {
+    // .env not found, fall back to process.env
+  }
+
+  return c.json({
+    api_endpoint: envVars['OPENAI_BASE_URL'] || process.env.OPENAI_BASE_URL || DEFAULT_API_ENDPOINT,
+    api_key: envVars['OPENAI_API_KEY'] || process.env.OPENAI_API_KEY || '',
+    model: envVars['OPENAI_MODEL'] || process.env.OPENAI_MODEL || DEFAULT_MODEL,
+  })
 })
 
 // ---- Agent CRUD ----
@@ -511,3 +542,76 @@ adminRoute.delete('/skills/:name', (c) => {
   skillRegistry.refresh()
   return c.json({ success: true, skills: skillRegistry.getAll() })
 })
+
+// ---- MCP Server CRUD ----
+
+adminRoute.get('/mcp-servers', async (c) => {
+  const servers = await listMcpServers()
+  return c.json({ servers })
+})
+
+adminRoute.post('/mcp-servers', async (c) => {
+  const body = await c.req.json<{ name: string; url: string }>()
+  if (!body.name?.trim() || !body.url?.trim()) {
+    return c.json({ error: 'Name and URL are required' }, 400)
+  }
+  const server = await createMcpServer(body.name.trim(), body.url.trim())
+  return c.json({ server })
+})
+
+adminRoute.put('/mcp-servers/:id', async (c) => {
+  const id = c.req.param('id')
+  const body = await c.req.json<{ name?: string; url?: string; enabled?: boolean }>()
+  const server = await updateMcpServer(id, body)
+  if (!server) return c.json({ error: 'MCP server not found' }, 404)
+  return c.json({ server })
+})
+
+adminRoute.delete('/mcp-servers/:id', async (c) => {
+  const id = c.req.param('id')
+  const ok = await deleteMcpServer(id)
+  if (!ok) return c.json({ error: 'MCP server not found' }, 404)
+  return c.json({ success: true })
+})
+
+// --- Helpers ---
+
+/** Determine if a zip has a single wrapper directory */
+function resolveZipRoot(zip: AdmZip): { wrapperDir: string | null } {
+  const entries = zip.getEntries().filter(
+    (e) => !e.entryName.startsWith('__MACOSX') && !e.entryName.endsWith('.DS_Store')
+  )
+  if (entries.length === 0) return { wrapperDir: null }
+
+  const topDirs = new Set<string>()
+  let hasRootFile = false
+
+  for (const entry of entries) {
+    const parts = entry.entryName.split('/')
+    if (parts.length <= 1) {
+      hasRootFile = true
+      break
+    }
+    topDirs.add(parts[0])
+  }
+
+  if (hasRootFile || topDirs.size !== 1) return { wrapperDir: null }
+  return { wrapperDir: [...topDirs][0] }
+}
+
+/** Remove __MACOSX directories and .DS_Store files */
+function cleanMacOSArtifacts(dir: string): void {
+  const macosDir = path.join(dir, '__MACOSX')
+  if (fs.existsSync(macosDir)) {
+    fs.rmSync(macosDir, { recursive: true })
+  }
+
+  function removeDSStore(d: string) {
+    const dsStore = path.join(d, '.DS_Store')
+    if (fs.existsSync(dsStore)) fs.unlinkSync(dsStore)
+    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      if (entry.isDirectory()) removeDSStore(path.join(d, entry.name))
+    }
+  }
+  removeDSStore(dir)
+}

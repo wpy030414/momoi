@@ -6,7 +6,6 @@ import { useTheme } from './hooks/useTheme'
 import { Sidebar } from './components/sidebar/Sidebar'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { AdminScreen } from './components/admin/AdminScreen'
-import { MenuDialog } from './components/settings/MenuDialog'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { Button } from './components/ui/button'
@@ -20,7 +19,6 @@ export function App() {
   const admin = useAdmin()
   const { theme, setTheme } = useTheme()
   const [adminViewOpen, setAdminViewOpen] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
   const [changePinOpen, setChangePinOpen] = useState(false)
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
@@ -174,7 +172,6 @@ export function App() {
   }
 
   const handleAdminSettings = () => {
-    setMenuOpen(false)
     // Radix Dialog 关闭时需要等待焦点管理完成，再打开新页面
     setTimeout(() => {
       setAdminViewOpen(true)
@@ -231,11 +228,17 @@ export function App() {
           onRename={chat.renameConversation}
           onDelete={handleDeleteConversation}
           onExport={chat.exportConversation}
-          onMenuClick={() => setMenuOpen(true)}
           onManageGroupAgents={handleManageGroupAgents}
           appName={appName}
           currentUser={currentUser}
           showGithub={showGithub}
+          onChangePin={() => setChangePinOpen(true)}
+          onLogout={handleLogout}
+          language={i18n.language}
+          onLanguageChange={handleLanguageChange}
+          theme={theme}
+          onThemeChange={setTheme}
+          onAdminSettings={handleAdminSettings}
         />
       </div>
 
@@ -279,20 +282,6 @@ export function App() {
           onInfiniteModeChange={handleInfiniteModeChange}
         />
       </div>
-
-      {/* Menu Dialog */}
-      <MenuDialog
-        open={menuOpen}
-        onOpenChange={setMenuOpen}
-        language={i18n.language}
-        onLanguageChange={handleLanguageChange}
-        theme={theme}
-        onThemeChange={setTheme}
-        onAdminSettings={handleAdminSettings}
-        currentUser={currentUser}
-        onLogout={handleLogout}
-        onChangePin={() => setChangePinOpen(true)}
-      />
 
       {/* Change PIN Dialog */}
       <ChangePinDialog

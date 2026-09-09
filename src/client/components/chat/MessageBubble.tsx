@@ -106,7 +106,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
           )}
 
           {/* Message content */}
-          <div className={`inline-block rounded-lg px-4 py-2 ${
+          <div className={`inline-block rounded-lg px-4 py-1 ${
             isUser ? 'bg-primary text-primary-foreground text-left' : 'bg-card border'
           }`}>
             {message.streaming && !message.content ? (
@@ -116,7 +116,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
                 <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
               </div>
             ) : (
-              <MessageContent content={message.content} streaming={message.streaming} />
+              <MessageContent content={message.content} streaming={message.streaming} isUser={isUser} />
             )}
           </div>
 

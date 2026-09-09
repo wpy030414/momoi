@@ -119,6 +119,7 @@ export const api = {
   // Admin
   adminAuth: (key: string) => request<{ token: string; expires_at: number }>('/api/admin/auth', { method: 'POST', body: JSON.stringify({ key }) }),
   getConfig: (token: string) => request<import('@/shared/types').AppConfig>('/api/admin/config', { headers: { Authorization: `Bearer ${token}` } }),
+  getEnvGateway: (token: string) => request<{ api_endpoint: string; api_key: string; model: string }>('/api/admin/config/env-gateway', { headers: { Authorization: `Bearer ${token}` } }),
   updateConfig: (token: string, config: Partial<import('@/shared/types').AppConfig>) => request<import('@/shared/types').AppConfig>('/api/admin/config', { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(config) }),
 
   // Admin - Agent CRUD
@@ -132,6 +133,12 @@ export const api = {
   getAdminStats: (token: string) => request<import('@/shared/types').AdminStats>('/api/admin/stats', { headers: { Authorization: `Bearer ${token}` } }),
   getAdminConversations: (token: string) => request<{ conversations: import('@/shared/types').AdminConversationRow[] }>('/api/admin/stats/conversations', { headers: { Authorization: `Bearer ${token}` } }),
   getAdminConversationMessages: (token: string, id: string) => request<{ conversation: any; messages: import('@/shared/types').Message[] }>(`/api/admin/stats/conversations/${id}/messages`, { headers: { Authorization: `Bearer ${token}` } }),
+
+  // Admin - MCP Servers
+  listMcpServers: (token: string) => request<{ servers: import('@/shared/types').McpServerConfig[] }>('/api/admin/mcp-servers', { headers: { Authorization: `Bearer ${token}` } }),
+  createMcpServer: (token: string, data: { name: string; url: string }) => request<{ server: import('@/shared/types').McpServerConfig }>('/api/admin/mcp-servers', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(data) }),
+  updateMcpServer: (token: string, id: string, data: { name?: string; url?: string; enabled?: boolean }) => request<{ server: import('@/shared/types').McpServerConfig }>(`/api/admin/mcp-servers/${id}`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(data) }),
+  deleteMcpServer: (token: string, id: string) => request<{ success: boolean }>(`/api/admin/mcp-servers/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }),
 
   // Upload (multipart/form-data — do NOT set Content-Type, let browser set boundary)
   uploadSkill: (token: string, file: File) =>

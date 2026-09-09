@@ -49,3 +49,11 @@ export const groupConversationAgents = sqliteTable('group_conversation_agents', 
 }, (table) => ({
   pk: primaryKey({ columns: [table.conversation_id, table.agent_id] }),
 }))
+
+export const mcpServers = sqliteTable('mcp_servers', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().default(''),
+  url: text('url').notNull().default(''),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  created_at: integer('created_at').notNull(),
+})
