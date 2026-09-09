@@ -2,45 +2,42 @@
 
 ## 概述
 
-管理员系统提供密钥认证、JWT Token 管理、全局配置管理能力，以及数据统计面板。所有配置变更通过管理员 API 持久化到 SQLite。用户认证（PIN）另见 `module-auth.md`。
+管理员由 `.env` 的 `ADMIN` 环境变量指定（逗号分隔的用户名名单，如 `ADMIN=xrl,咕咕,k3p0`），进程生命周期内固定，修改需停机改 `.env` 重启；留空或缺省即无管理员，不影响运行。管理员系统提供全局配置管理能力与数据统计面板，所有配置变更通过管理员 API 持久化到 SQLite。用户认证（PIN）另见 `module-auth.md`。
 
 ## 涉及文件
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/auth.ts` | JWT 签名/验证 + 密钥校验 + 认证中间件 |
-| `src/server/config.ts` | 环境变量读取 + DB 配置读写 |
+| `src/server/auth.ts` | `isAdmin()` 名单判定 + `adminAuthMiddleware`（用户 JWT + 名单校验） |
+| `src/server/config.ts` | 环境变量读取（含 `ADMIN` 名单解析）+ DB 配置读写 |
 | `src/server/routes/admin.ts` | 管理员 REST API（含统计、技能上传/卸载） |
-| `src/client/components/settings/SettingsDialog.tsx` | 管理面板（5 标签页：Agent/Gateway/Branding/Skills/Stats） |
+| `src/client/components/admin/AdminScreen.tsx` | 管理面板（6 标签页：Agent/Gateway/Branding/MCP/Skills/Stats） |
 
 ## 认证流程
 
 ```
-管理员输入密钥
-  → POST /api/admin/auth { key: "..." }
-  → verifyAdminKey() 比对 env.ADMIN_KEY（空串视为无效）
-  → signAdminToken() 签发 JWT (HS256, role:admin, 24h)
-  → 返回 { token, expires_at }
+管理员登录（普通用户 PIN 流程）
+  → 获得用户 JWT（30 天，role:'user'）
 
-后续请求
-  → Authorization: Bearer <jwt>
-  → adminAuthMiddleware 验证 JWT（校验签名 + role==='admin'）
-  → 通过则继续处理
+访问管理端点
+  → Authorization: Bearer <用户 JWT>
+  → adminAuthMiddleware 验证 JWT 签名
+  → isAdmin(username) 检查 env.ADMIN 名单
+  → 通过则继续处理；无效 token → 401；有效用户但不在名单 → 403
+
+客户端入口
+  → GET /api/user/me → { username, is_admin }
+  → is_admin=true：侧边栏设置显示「后台设置」入口，#/settings 直接进入
+  → 其他用户：无入口；直输 #/settings 被路由守卫遣返首页
 ```
 
-> 中间件按路径挂载（`adminRoute.use('/config', ...)` 等），`POST /api/admin/auth` 保持公开。
+> 中间件按路径挂载（`adminRoute.use('/config', ...)` 等），覆盖全部管理端点。
 
 ## 接口契约
 
-### POST /api/admin/auth
+> 以下所有端点均需用户 JWT，且用户名在 `ADMIN` 名单内（否则 401/403）。无独立的密钥认证端点。
 
-验证管理员密钥，返回 JWT。**无需认证。**
-
-**请求**：`{ "key": "管理员密钥" }`
-**响应**：`{ "token": "eyJ...", "expires_at": 1700086400 }`
-**错误**：密钥错误或为空 → 401 `{ "error": "Invalid key" }`
-
-### GET /api/admin/config（需 JWT）
+### GET /api/admin/config
 
 获取当前配置。
 
@@ -162,11 +159,9 @@
 
 ## JWT 实现细节
 
-- **算法**：HS256
-- **签名密钥**：`ADMIN_KEY` 的 UTF-8 编码字节（与用户 JWT 共用，靠 `role` 区分）
-- **Payload**：`{ role: "admin" }`
-- **有效期**：24 小时（`ADMIN_TOKEN_EXPIRY_HOURS`）
-- **回退密钥**：`ADMIN_KEY` 为空时使用 `"fallback-secret"`（不推荐）
+- 管理员**不再有独立 JWT**：管理端点复用用户 JWT（HS256、30 天、`role:'user'`），由 `adminAuthMiddleware` 逐请求校验 `isAdmin(username)`
+- **签名密钥**：`JWT_SECRET` 环境变量（可选）；缺省时首启生成随机密钥并持久化到 `settings` 表（键 `jwt_secret`），重启复用
+- 名单为空/缺省时无任何管理员，应用其余功能不受影响
 
 ## 技能上传
 
@@ -201,14 +196,14 @@
 5. **Skills** — 技能列表 / 上传 / 卸载
 6. **Stats** — 用户/对话/消息统计 + 对话表格（可展开查看消息）
 
-管理面板使用管理员 JWT（通过 `useAdmin` hook 管理），调用 API 时显式传入 `Authorization`，不被用户 token 覆盖（见 `lib/api.ts` 的「caller 提供 Authorization 则不覆盖」逻辑）。
+管理面板（`AdminScreen`）复用登录用户的 JWT：`lib/api.ts` 的请求层自动附加 `Authorization`，服务端由 `adminAuthMiddleware` 校验名单。路由守卫保证只有 `/me` 返回 `is_admin: true` 的用户能进入 `#/settings`。
 
 ## 安全约束
 
-1. `ADMIN_KEY` 永远不通过 API 返回给前端 ✅ 已实现
+1. `ADMIN` 名单、`JWT_SECRET` 永远不通过 API 返回给前端 ✅ 已实现
 2. 受保护路由：`/api/admin/config`、`/api/admin/skills/*`、`/api/admin/stats`、`/api/admin/mcp-servers`、`/api/admin/mcp-servers/*` ✅ 已实现
-3. 空密钥不被视为有效（`verifyAdminKey` 检查 `key !== ''`）✅ 已实现
-4. 统计面板可跨用户读取所有对话内容 —— 属管理员特权，受管理员 JWT 保护（`use('/stats', ...)` + `use('/stats/*', ...)` 双挂载覆盖精确路径与所有子路径；曾因只挂 `/stats` 导致 `/stats/conversations` 及 messages 子端点匿名可访问，已修复并实测验证）
+3. 无效用户 token → 401；有效用户但不在 `ADMIN` 名单 → 403（不触发前端自动登出）✅ 已实现
+4. 统计面板可跨用户读取所有对话内容 —— 属管理员特权，受名单校验保护（`use('/stats', ...)` + `use('/stats/*', ...)` 双挂载覆盖精确路径与所有子路径；曾因只挂 `/stats` 导致 `/stats/conversations` 及 messages 子端点匿名可访问，已修复并实测验证）
 
 ## ⚠️ 已知缺陷：API Key 未脱敏
 

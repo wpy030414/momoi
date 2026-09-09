@@ -292,15 +292,16 @@ IP 速率限制：
   成功登录后自动清除该 IP 的失败记录
 
 管理员层：
-  POST /api/admin/auth + ADMIN_KEY → JWT (HS256, 24h, role:'admin')
-  后续请求 → Authorization: Bearer <jwt>
-  adminAuthMiddleware → verifyAdminToken()
+  ADMIN 环境变量 = 管理员用户名名单（逗号分隔，进程生命周期内固定）
+  管理端点 → Authorization: Bearer <用户 JWT>
+  adminAuthMiddleware → verifyUserToken() + isAdmin(username)（名单内放行，否则 403）
+  客户端入口显隐 → GET /api/user/me → { username, is_admin }
 
 安全细节：
   - PBKDF2 10000 次迭代 + SHA-512
   - timingSafeEqual 防止时序攻击
-  - ADMIN_KEY 永远不暴露给前端
-  - 两种 JWT 共用同一个签名密钥（ADMIN_KEY 的 UTF-8 字节）
+  - JWT 签名密钥：JWT_SECRET 环境变量，或首启随机生成并持久化到 settings 表
+  - ADMIN 名单与 JWT_SECRET 不暴露给前端；客户端仅能通过 /me 得知自己是否管理员
 ```
 
 ## 部署架构

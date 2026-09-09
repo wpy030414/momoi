@@ -2,16 +2,16 @@
 
 ## 概述
 
-认证分为两层：**用户认证**（用户名 + 4 位 PIN → 用户 JWT）与**管理员认证**（`ADMIN_KEY` → 管理员 JWT）。两套 JWT 共用同一签名密钥，通过 payload 中的 `role` 字段区分。
+认证分为两层：**用户认证**（用户名 + 4 位 PIN → 用户 JWT）与**管理员授权**（用户 JWT + `ADMIN` 环境变量用户名名单）。没有独立的管理员密钥或管理员 token——管理员端点接受普通用户 JWT，并由 `adminAuthMiddleware` 逐请求校验用户名是否在 `ADMIN` 名单内。
 
 ## 涉及文件
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/auth.ts` | PIN 哈希/校验 + 用户与管理员 JWT 签发验证 + 两套中间件 |
+| `src/server/auth.ts` | PIN 哈希/校验 + 用户 JWT 签发验证 + 签名密钥管理 + `isAdmin()`/`adminAuthMiddleware` |
 | `src/server/middleware/userAuth.ts` | 独立的用户 JWT 认证中间件（严格模式，不接受 `X-User` 回退） |
-| `src/server/routes/user.ts` | 用户 PIN 相关端点（状态查询/验证/设置/修改） |
-| `src/server/config.ts` | `env.ADMIN_KEY` 读取 |
+| `src/server/routes/user.ts` | 用户 PIN 相关端点（状态查询/验证/设置/修改）+ `GET /me`（管理员身份探测） |
+| `src/server/config.ts` | `env.ADMIN` 名单解析、`env.JWT_SECRET` 读取 |
 | `src/server/rateLimiter.ts` | IP 速率限制器（PIN 暴力破解防护） |
 | `src/client/components/auth/LoginScreen.tsx` | 三步登录 UI |
 | `src/client/components/settings/ChangePinDialog.tsx` | 修改 PIN 表单 |
@@ -39,18 +39,18 @@
 
 ## JWT 实现细节
 
-| 项 | 用户 Token | 管理员 Token |
-|---|---|---|
-| 算法 | HS256 | HS256 |
-| Payload | `{ role: 'user', sub: username }` | `{ role: 'admin' }` |
-| 有效期 | 30 天 | 24 小时（`ADMIN_TOKEN_EXPIRY_HOURS`） |
-| 签发函数 | `signUserToken(username)` | `signAdminToken()` |
-| 验证函数 | `verifyUserToken(token)` | `verifyAdminToken(token)` |
-| 响应字段 | `{ token, expires_at }` | `{ token, expires_at }`（`AdminAuthResponse`） |
+| 项 | 用户 Token |
+|---|---|
+| 算法 | HS256 |
+| Payload | `{ role: 'user', sub: username }` |
+| 有效期 | 30 天 |
+| 签发函数 | `signUserToken(username)` |
+| 验证函数 | `verifyUserToken(token)` |
+| 响应字段 | `{ token, expires_at }` |
 
-- **签名密钥**：`ADMIN_KEY` 的 UTF-8 编码字节
-- **回退密钥**：`ADMIN_KEY` 为空时使用 `"fallback-secret"`（不推荐，仅防启动崩溃）
-- 验证时除签名外还须匹配 `role` 字段；用户 token 额外要求 `sub` 为字符串
+- **签名密钥**：`JWT_SECRET` 环境变量（若提供）；否则首次启动生成 32 字节随机密钥并持久化到 `settings` 表（键 `jwt_secret`），重启后复用，用户 token 不因重启失效
+- 验证时除签名外还须匹配 `role === 'user'`，且 `sub` 为字符串
+- 管理员授权与 token 无关：`adminAuthMiddleware` 验证用户 JWT 后检查 `isAdmin(username)`（`env.ADMIN` 名单，进程生命周期内固定）
 
 ## IP 速率限制
 
@@ -139,22 +139,24 @@
 **响应**：`{ "success": true }`
 **错误**：任一 PIN 非 4 位 → 400；未设置过 → 404；旧 PIN 不匹配 → 401 `Invalid current PIN`
 
-### POST /api/admin/auth
+### GET /api/user/me（需用户 JWT）
 
-验证管理员密钥，返回管理员 JWT。**无需认证。**
+返回当前登录用户信息，客户端用它探测管理员身份以决定「后台设置」入口的显隐与路由守卫。
 
-**请求**：`{ "key": "管理员密钥" }`
-**响应**：`{ "token": "...", "expires_at": 1700086400 }`
-**错误**：密钥错误或为空 → 401 `Invalid key`
+**响应**：`{ "username": "xrl", "is_admin": true | false }`
+
+**错误**：缺失/无效 token → 401
+
+> 原端点 `POST /api/admin/auth`（密钥换管理员 JWT）已随 `ADMIN_KEY` 一并废除。
 
 ## 行为约束
 
-1. `ADMIN_KEY` 与用户 PIN 明文**永不**通过任何 API 返回前端
-2. `verifyAdminKey()` 显式拒绝空字符串（`key === env.ADMIN_KEY && key !== ''`）
+1. 用户 PIN 明文与 `JWT_SECRET` **永不**通过任何 API 返回前端；`ADMIN` 名单也不下发（客户端只能通过 `/me` 得知**自己**是否管理员）
+2. 管理员判定即 `env.ADMIN.includes(username)`，逐请求执行——停机改 `.env` 重启后立即生效（含撤销），不存在残留的管理员 token
 3. PIN 校验一律 `^\d{4}$`，前后端一致
-4. 用户 token 与管理员 token 互不通用（`role` 不匹配即失败）
-5. 受保护资源：`/api/chat/*`、`/api/conversations/*`、`/api/upload/*`、`/api/workspace/*` 需用户 JWT；`/api/admin/config`、`/api/admin/skills/*`、`/api/admin/stats` 需管理员 JWT
-6. 管理员端点的保护通过 `adminRoute.use('<path>', adminAuthMiddleware)` 按路径挂载，**不是**全局挂载——`POST /api/admin/auth` 本身必须保持公开
+4. 受保护资源：`/api/chat/*`、`/api/conversations/*`、`/api/upload/*`、`/api/workspace/*` 需用户 JWT；`/api/admin/*` 需用户 JWT 且用户名在 `ADMIN` 名单内（401 未认证 / 403 非管理员）
+5. 管理员端点的保护通过 `adminRoute.use('<path>', adminAuthMiddleware)` 按路径挂载
    - ⚠️ **Hono 的 `use('/stats', mw)` 只精确匹配 `/stats`，不覆盖 `/stats/conversations` 等子路径**；保护一组端点须同时挂载精确路径与 `/*` 通配（本项目 `skills/*`、`stats` + `stats/*` 均已如此）。这是曾经踩过的坑：`/stats/conversations` 一度完全未鉴权，匿名即可拖取全站对话
-7. **认证 ≠ 授权**：JWT 只证明「是谁」，不证明「有权访问这条数据」。所有涉及具体资源的端点必须在 handler 内二次校验 `user_id` 归属（见 `chat.ts`、`conversations.ts` 的 `and(eq(id), eq(user_id, userId))` 查询），越权一律返回 404 而非 403（不泄露资源是否存在）
-8. **401 自动驱逐**：前端 `lib/api.ts` 收到 401 时触发 `window.dispatchEvent(new CustomEvent('auth:expired'))`，`App.tsx` 监听该事件→清空 token→回到登录页。确保非法/过期 JWT 被驱逐而非静默重试
+6. **认证 ≠ 授权**：JWT 只证明「是谁」，不证明「有权访问这条数据」。所有涉及具体资源的端点必须在 handler 内二次校验 `user_id` 归属（见 `chat.ts`、`conversations.ts` 的 `and(eq(id), eq(user_id, userId))` 查询），越权一律返回 404 而非 403（不泄露资源是否存在）
+7. **401 自动驱逐**：前端 `lib/api.ts` 收到 401 时触发 `window.dispatchEvent(new CustomEvent('auth:expired'))`，`App.tsx` 监听该事件→清空 token→回到登录页。403（非管理员）不触发驱逐
+8. **前端路由守卫**：`#/settings` 仅对 `/me` 返回 `is_admin: true` 的用户开放；其他用户（含未登录）访问该 hash 会被 `replaceState` 遣返首页。守卫只是体验层，真正的屏障是第 4 条的服务端鉴权

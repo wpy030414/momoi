@@ -203,7 +203,7 @@ export async function deleteAgent(id: string): Promise<boolean>
 
 ## API 端点
 
-所有端点挂载于 `/api/admin/agents`，需管理员 JWT（`adminAuthMiddleware`）。
+所有端点挂载于 `/api/admin/agents`，需管理员权限（用户 JWT + `ADMIN` 名单校验，`adminAuthMiddleware`）。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

@@ -643,3 +643,28 @@
 - JSON 输出格式：行格式 + 容错解析 + 名册交集已足够安全
 
 **影响**：新增 `decideGroupParticipants()`；`group-orchestrator.ts` 决策相位与内存缺席记忆；每轮群聊 +1 次轻量 LLM 调用（位于首个 `agent_start` 前，约 1-3s 首字延迟）
+
+## D31：管理员改为 ADMIN 用户名名单 — 废除 ADMIN_KEY 与管理员 JWT
+
+**日期**：2026-09-09
+
+**背景**：原设计以 `ADMIN_KEY` 密钥登录管理面板（`POST /api/admin/auth` 换 24h 管理员 JWT），该密钥同时兼作两套 JWT 的签名密钥。实际使用中管理员与普通用户本就是同一批登录用户，密钥成为纯多余的一层。
+
+**决策**：`ADMIN_KEY` 取缔，改为 `ADMIN` 环境变量（逗号分隔用户名名单，如 `ADMIN=xrl,咕咕,k3p0`）。管理员端点复用用户 JWT，由 `adminAuthMiddleware` 逐请求校验 `isAdmin(username)`；废除管理员 JWT 与 `/api/admin/auth`。JWT 签名密钥改由 `JWT_SECRET`（可选）或首启随机生成并持久化到 `settings` 表提供。客户端经 `GET /api/user/me` 获知自身管理员身份：入口按身份显隐，`#/settings` 路由守卫遣返非管理员。
+
+**原因**：
+- 「管理员 = 一组用户名」语义直接对齐使用场景：无需额外凭证，登录即知是否管理员
+- 逐请求名单校验使撤销即时生效（停机改 `.env` 重启即收权），不留 24h 残留 token
+- 用户名非机密信息，不可再充当签名密钥——签名密钥独立来源（`JWT_SECRET` / DB 持久化随机值），用户 token 30 天有效期在重启后依然有效
+- `ADMIN` 留空/缺省 = 无管理员，应用照常运行（无后台入口而已），零配置可跑
+
+**备选与权衡**：
+- ❌ 保留双 token（`/me` 换发管理员 JWT）：多一次往返、撤销有残留窗口，且密钥登录已无存在理由
+- ❌ 用 `ADMIN` 名单派生签名密钥：用户名是公开信息，等于无密钥，任何人可伪造 token
+- ⚠️ `JWT_SECRET` 未配置时首启生成并落库：换库/删库会使全部 token 失效（用户需重新登录），属可接受代价；显式配置 `JWT_SECRET` 可避免
+
+**影响**：
+- 删除 `signAdminToken` / `verifyAdminKey`、`POST /api/admin/auth`、`useAdmin` hook 与后台密钥输入 UI
+- `env` 新增 `ADMIN`（名单）与 `JWT_SECRET`；`settings` 表新增 `jwt_secret` 键
+- 新增 `GET /api/user/me`；bash 工具子进程环境剔除名单由 `ADMIN_KEY` 改为 `ADMIN`（防泄露管理员身份）
+- 文档同步：`module-auth.md`、`module-admin.md`、`module-config.md`、`ARCHITECTURE.md`、`AGENTS.md`、`PRD.md`、README、`.env.example`；D12 中「复用管理员签名密钥」的表述自此作废

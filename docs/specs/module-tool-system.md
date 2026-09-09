@@ -109,7 +109,7 @@
 - 超时终止（默认 30s，最大 120s）
 - 输出截断（30K 字符）
 - Windows 用 cmd.exe，其余用 /bin/sh，自动切 UTF-8 代码页
-- **环境变量脱敏**：`spawn` 前经 `scrubEnv()` 剔除敏感变量（精确名单：`ADMIN_KEY`；通用规则：名称含 `_API_KEY`/`_APIKEY`/`_TOKEN`/`_SECRET`/`PASSWORD`/`PASSWD`/`CREDENTIAL` 的变量），防止 `set` / `echo %VAR%` 读出 `.env` 注入的密钥
+- **环境变量脱敏**：`spawn` 前经 `scrubEnv()` 剔除敏感变量（精确名单：`ADMIN`；通用规则：名称含 `_API_KEY`/`_APIKEY`/`_TOKEN`/`_SECRET`/`PASSWORD`/`PASSWD`/`CREDENTIAL` 的变量），防止 `set` / `echo %VAR%` 读出 `.env` 注入的密钥与管理员名单
 
 ### D-T07：Pi 式并行批执行（已由 Pi Agent Core 替代）
 
@@ -502,7 +502,7 @@ HTTP 工具在发起请求前：
 - 破坏性命令黑名单（子串匹配，大小写不敏感）
 - 超时强杀（SIGTERM → 1s 后 SIGKILL）
 - 输出截断（30K 字符）
-- **环境变量脱敏**：子进程 env 由 `scrubEnv()` 构造——剔除精确名单（`ADMIN_KEY`）与通用规则命中项（名称含 `_API_KEY`/`_APIKEY`/`_TOKEN`/`_SECRET`/`PASSWORD`/`PASSWD`/`CREDENTIAL`，大写匹配），其余变量照常继承。新增密钥命名遵循通用规则即可自动生效；特例加入 `BLOCKED_ENV_VARS`
+- **环境变量脱敏**：子进程 env 由 `scrubEnv()` 构造——剔除精确名单（`ADMIN`）与通用规则命中项（名称含 `_API_KEY`/`_APIKEY`/`_TOKEN`/`_SECRET`/`PASSWORD`/`PASSWD`/`CREDENTIAL`，大写匹配），其余变量照常继承。新增密钥命名遵循通用规则即可自动生效；特例加入 `BLOCKED_ENV_VARS`
 
 ## AI 循环防护机制（D21 更新）
 

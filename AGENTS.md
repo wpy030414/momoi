@@ -2,7 +2,7 @@
 
 ## 项目：Momoi
 
-自托管的 Web AI 智能体平台。用户通过 PIN 认证登录后与 AI 对话；模型按需调用技能；支持文件附件多模态交互；管理员通过密钥控制一切。
+自托管的 Web AI 智能体平台。用户通过 PIN 认证登录后与 AI 对话；模型按需调用技能；支持文件附件多模态交互；管理员由 `.env` 的 `ADMIN` 用户名名单指定。
 
 ## 文档结构
 
@@ -43,7 +43,7 @@
 - **数据库**：SQLite（@libsql/client + Drizzle ORM）—— 单文件 `data/momoi.db`，无需外部数据库
 - **AI**：OpenAI 兼容的 Chat Completions API，支持流式输出、function calling、多模态附件、思考模式
 - **技能**：SKILL.md 文件（YAML 前置元数据 + Markdown 内容），注入系统提示词
-- **认证**：用户 4 位 PIN（PBKDF2 哈希 + JWT 30 天）；管理员密钥（JWT 24 小时）
+- **认证**：用户 4 位 PIN（PBKDF2 哈希 + JWT 30 天）；管理员由 `ADMIN` 环境变量用户名名单授权（复用用户 JWT）
 
 ## 关键目录
 
@@ -95,11 +95,13 @@ pnpm start        # 运行生产构建（node dist/index.js）
 - 请求通过 `Authorization: Bearer <jwt>` 认证；`userAuthMiddleware`（`middleware/userAuth.ts`）提取 `userId`
 - PIN 连续 5 次错误 → 封禁 IP 5 分钟（`rateLimiter.ts`）
 
-### 管理员认证
+### 管理员授权
 
-- `ADMIN_KEY` 在 `.env` 中设置，永远不会暴露给前端
-- 管理员端点需要 JWT Token（通过 `POST /api/admin/auth` 验证密钥获取）
-- JWT 24 小时后过期（HS256、`role: 'admin'`）
+- `ADMIN` 在 `.env` 中设置（逗号分隔用户名名单，如 `ADMIN=xrl,咕咕,k3p0`）；名单在进程生命周期内固定，修改需停机改 `.env` 重启
+- 留空或缺省 = 无管理员，应用其余功能照常运行
+- 管理员端点复用用户 JWT：`adminAuthMiddleware` 验证签名后检查 `isAdmin(username)`（401 未认证 / 403 非管理员），无独立密钥与管理员 token
+- 客户端经 `GET /api/user/me` 得知自身是否管理员：侧边栏入口按身份显隐，`#/settings` 路由守卫遣返非管理员
+- JWT 签名密钥：`JWT_SECRET`（可选），或首启随机生成并持久化到 `settings` 表
 - 所有配置变更持久化到 SQLite
 
 ## 数据库
@@ -115,7 +117,6 @@ pnpm start        # 运行生产构建（node dist/index.js）
 |---|---|---|
 | `MAX_HISTORY_MESSAGES` | 20 | 发送给 AI 的最大历史消息数 |
 | `SUGGESTIONS_FENCE` | `` ```suggestions `` | Suggestions 代码块标记 |
-| `ADMIN_TOKEN_EXPIRY_HOURS` | 24 | 管理员 JWT 有效期（小时） |
 | `DEFAULT_SYSTEM_PROMPT` | `''`（空） | 默认系统提示词 |
 | `DEFAULT_APP_NAME` | `Momoi` | 默认应用名称 |
 | `DEFAULT_MODEL` | `gpt-4o` | 默认模型 |

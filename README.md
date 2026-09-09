@@ -1,6 +1,6 @@
 # Momoi
 
-轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过内置工具执行文件读写、Shell 命令、网络请求、文档处理等任务，通过技能注入系统提示词，支持文件附件多模态交互，一切由管理员密钥统一管理。
+轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过内置工具执行文件读写、Shell 命令、网络请求、文档处理等任务，通过技能注入系统提示词，支持文件附件多模态交互，管理员由 `.env` 的 `ADMIN` 用户名名单指定。
 
 ## 核心特性
 
@@ -32,7 +32,7 @@ pnpm install
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env 填入 API Key 和管理员密钥
+# 编辑 .env 填入 API Key，按需配置 ADMIN 管理员名单
 
 # 开发模式（Vite 5173 + Hono 11408 同时启动）
 pnpm dev
@@ -47,7 +47,8 @@ pnpm dev
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `ADMIN_KEY` | （必填） | 管理员密钥，用于访问管理面板 |
+| `ADMIN` | （空） | 管理员用户名名单，逗号分隔（如 `ADMIN=xrl,咕咕,k3p0`）。名单在进程生命周期内固定，修改需停机改 `.env` 后重启；留空或缺省即无管理员，不影响运行 |
+| `JWT_SECRET` | （自动生成） | JWT 签名密钥；缺省时首次启动自动生成 32 字节随机密钥并持久化到数据库（重启不失效） |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容 API 地址 |
 | `OPENAI_API_KEY` | | API 密钥 |
 | `OPENAI_MODEL` | `gpt-4o` | 模型名称 |
@@ -75,7 +76,7 @@ pnpm dev
 
 ## 管理面板
 
-点击侧边栏 图标，输入 `ADMIN_KEY` 后可访问（Agent/Gateway/品牌/技能/统计）：
+在 `.env` 的 `ADMIN` 名单中的用户，登录后点击侧边栏设置图标即可看到「后台设置」入口，无需输入任何密钥（Agent/Gateway/品牌/技能/统计）。普通用户没有该入口；直接访问 `#/settings` 会被路由守卫遣返回首页。
 
 - **Agent** — 创建/编辑/删除 Agent，每个 Agent 独立配置模型、API 地址、密钥和系统提示词
 - **Gateway** — 全局 API 地址和密钥配置
@@ -201,7 +202,7 @@ momoi/
 │   │   │   ├── sidebar/ # 侧边栏（对话列表、导出、用户信息）
 │   │   │   ├── admin/   # 管理面板（Agent/Gateway/品牌/技能/统计）
 │   │   │   └── ui/      # shadcn/ui 基础组件
-│   │   ├── hooks/       # React Hooks（useChat、useGroupChat、useAdmin、useTheme）
+│   │   ├── hooks/       # React Hooks（useChat、useGroupChat、useTheme）
 │   │   ├── lib/         # API 客户端、工具函数
 │   │   ├── i18n/        # 国际化配置（zh-CN、en）
 │   │   └── styles/      # 全局 CSS（主题变量、滚动条、Mermaid）

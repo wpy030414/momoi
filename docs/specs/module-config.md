@@ -54,7 +54,8 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 
 ```typescript
 export const env = {
-  ADMIN_KEY: process.env.ADMIN_KEY || '',
+  ADMIN: (process.env.ADMIN || '').split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+  JWT_SECRET: process.env.JWT_SECRET || '',
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || DEFAULT_API_ENDPOINT,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
   PORT: parseInt(process.env.PORT || '3001', 10),
@@ -62,14 +63,15 @@ export const env = {
 ```
 
 - `dotenv/config` 在 `server/index.ts` 和 `config.ts` 中分别加载
-- `env` 对象在启动时初始化，运行时不可变
-- 只包含无 DB 回退的配置（`ADMIN_KEY`、`PORT`）和 DB 回退的默认值（`api_endpoint`、`api_key`）
+- `env` 对象在启动时初始化，运行时不可变（`ADMIN` 名单因此全程固定，改名单须停机重启）
+- 只包含无 DB 回退的配置（`ADMIN`、`JWT_SECRET`、`PORT`）和 DB 回退的默认值（`api_endpoint`、`api_key`）
 
 ### 环境变量（完整列表）
 
 | 变量名 | 说明 |
 |---|---|
-| `ADMIN_KEY` | 管理员密钥 |
+| `ADMIN` | 管理员用户名名单（逗号分隔，支持中英文逗号；留空 = 无管理员） |
+| `JWT_SECRET` | JWT 签名密钥（可选；缺省时自动生成并持久化到 DB） |
 | `OPENAI_BASE_URL` | API 地址 |
 | `OPENAI_API_KEY` | API 密钥 |
 | `PORT` | 服务端口（默认 3001） |
@@ -226,7 +228,7 @@ api.getAppName().then((r) => {
 
 ### 管理面板修改配置
 
-`SettingsDialog` 使用管理员 JWT 通过 `useAdmin` hook 调用 `api.updateConfig()`，API 调用时显式传入 `Authorization` 头，避免被用户 token 覆盖。
+`AdminScreen` 复用登录用户的 JWT（`lib/api.ts` 请求层自动附加 `Authorization`），服务端由 `adminAuthMiddleware` 校验 `ADMIN` 名单后放行。
 
 ## ⚠️ 已知缺陷
 
