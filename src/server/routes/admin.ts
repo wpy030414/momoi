@@ -9,8 +9,6 @@ import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
 import { skillRegistry } from '../skills/loader.js'
-import fs from 'fs'
-import path from 'path'
 import AdmZip from 'adm-zip'
 
 export const adminRoute = new Hono()
