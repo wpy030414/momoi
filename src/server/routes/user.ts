@@ -8,7 +8,8 @@ import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from 
 export const userRoute = new Hono()
 
 function getUsername(c: any): string {
-  return c.req.header('x-user') || ''
+  const raw = c.req.header('x-user') || ''
+  try { return decodeURIComponent(raw) } catch { return raw }
 }
 
 function pinKey(username: string): string {

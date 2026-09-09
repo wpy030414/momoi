@@ -54,22 +54,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   // User Auth
   getUserStatus: (username: string) => request<{ has_pin: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
-    headers: { 'X-User': username }
+    headers: { 'X-User': encodeURIComponent(username) }
   }),
   verifyPin: (username: string, pin: string) => request<{ token: string; expires_at: number }>('/api/user/verify', {
     method: 'POST',
     body: JSON.stringify({ pin }),
-    headers: { 'X-User': username }
+    headers: { 'X-User': encodeURIComponent(username) }
   }),
   setPin: (username: string, pin: string) => request<{ token: string; expires_at: number }>('/api/user/set-pin', {
     method: 'POST',
     body: JSON.stringify({ pin }),
-    headers: { 'X-User': username }
+    headers: { 'X-User': encodeURIComponent(username) }
   }),
   changePin: (username: string, oldPin: string, newPin: string) => request<{ success: boolean }>('/api/user/change-pin', {
     method: 'POST',
     body: JSON.stringify({ old_pin: oldPin, new_pin: newPin }),
-    headers: { 'X-User': username }
+    headers: { 'X-User': encodeURIComponent(username) }
   }),
 
   // Conversations
