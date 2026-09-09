@@ -12,7 +12,7 @@ import { GatewaySettings, type GatewaySettingsHandle } from './components/admin/
 import { BrandingSettings } from './components/admin/tabs/BrandingSettings'
 import { McpManager, type McpManagerHandle } from './components/admin/tabs/McpManager'
 import { SkillManager, type SkillManagerHandle } from './components/admin/tabs/SkillManager'
-import { StatsPanel } from './components/admin/tabs/StatsPanel'
+import { ReviewPanel } from './components/admin/tabs/ReviewPanel'
 import { UserManager, type UserManagerHandle } from './components/admin/tabs/UserManager'
 import { Button } from './components/ui/button'
 import { Switch } from './components/ui/switch'
@@ -414,7 +414,7 @@ export function App() {
               {adminTab === 'mcp' && <McpManager ref={mcpRef} />}
               {adminTab === 'skills' && <SkillManager ref={skillRef} />}
               {adminTab === 'users' && <UserManager ref={userRef} />}
-              {adminTab === 'stats' && <StatsPanel />}
+              {adminTab === 'review' && <ReviewPanel />}
             </div>
           </div>
         ) : (

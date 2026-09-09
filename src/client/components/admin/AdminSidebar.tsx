@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Bot, Globe, Palette, Server, Puzzle, BarChart3, Users } from 'lucide-react'
+import { ArrowLeft, Bot, Globe, Palette, Server, Puzzle, Users, MessageSquare } from 'lucide-react'
 import { Button } from '../ui/button'
 import { ScrollArea } from '../ui/scroll-area'
 
@@ -16,7 +16,7 @@ const TABS = [
   { value: 'mcp', labelKey: 'settings.tabMcp', Icon: Server },
   { value: 'skills', labelKey: 'settings.tabSkills', Icon: Puzzle },
   { value: 'users', labelKey: 'settings.tabUsers', Icon: Users },
-  { value: 'stats', labelKey: 'settings.tabStats', Icon: BarChart3 },
+  { value: 'review', labelKey: 'settings.tabReview', Icon: MessageSquare },
 ] as const
 
 export function AdminSidebar({ activeTab, onTabChange, onBack }: AdminSidebarProps) {
