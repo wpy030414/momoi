@@ -118,6 +118,7 @@ export type ServerMessage =
   | { type: 'agent_done'; agent_id: string; agent_name: string; reply: string; suggestions: string[] }
   | { type: 'group_start'; agent_ids: string[] }
   | { type: 'group_done'; infinite?: boolean }
+  | { type: 'suggestions'; suggestions: string[]; agent_id?: string | null }
   | { type: 'follow_up_start' }
   | { type: 'follow_up'; text: string }
   | { type: 'infinite_mode_off' }
