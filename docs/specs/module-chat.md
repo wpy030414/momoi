@@ -141,7 +141,7 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 
 ### 客户端（useChat.ts）
 
-1. **请求头**：同时携带 `X-User`（encodeURIComponent）与 `Authorization: Bearer <token>`
+1. **请求头**：携带 `X-User`（encodeURIComponent）；认证经同源 HttpOnly Cookie 自动携带
 2. **重试策略**：最多 3 次（`MAX_RETRIES`），指数退避 `2s → 4s → 8s`，上限 `10s`
 3. **重试标记**：重试请求带 `_retry: true`，并在重发前清空当前助手气泡内容
 4. **空闲超时**：60 秒无数据则 `abort()` 触发重试

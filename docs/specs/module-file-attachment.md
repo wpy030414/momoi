@@ -57,7 +57,7 @@ interface Attachment {
 - MIME 由扩展名映射表推断，未知类型回退 `application/octet-stream`
 - 文件不存在 → `404 Not found`（纯文本响应）
 
-> **设计后果**：由于下载需带 `Authorization` 头，URL **不能**直接塞进 `<img src>` / `<a href>`（浏览器发起的子资源请求不会附带该头）。因此前端展示/下载附件一律走 `fetch(url, { headers:{ Authorization } })` → 转 `Blob` → `createObjectURL`，见 `AttachmentCard.downloadFile`。若将来需要在 `<img>` 中内联预览图片附件，须改为：登录态图片转 base64 内联，或引入短时效签名 URL。
+> **设计后果**：附件下载经 HttpOnly Cookie 认证（同源 fetch 自动携带），URL 不能直接塞进 `<img src>` / `<a href>`（浏览器子资源请求不带 Cookie → 401）。因此前端展示/下载附件一律走 `fetch(url)` → 转 `Blob` → `createObjectURL`，见 `AttachmentCard.downloadFile`。若将来需要在 `<img>` 中内联预览图片附件，须改为：登录态图片转 base64 内联，或引入短时效签名 URL。
 
 ## 解析规则（`parseAttachment`）
 
@@ -103,15 +103,15 @@ interface Attachment {
 
 ## ✅ 已修复：上传与下载未携带 JWT
 
-**历史缺陷（已于本次修复）**：`InputBar` 上传与 `AttachmentCard` 下载都直接 `fetch` 而**未附加 `Authorization` 头**，而 `routes/upload.ts` 挂载严格版 `userAuthMiddleware`（只认 `Authorization: Bearer`，无 `X-User` 回退），导致：
+**历史缺陷（已于 D14 修复，D33 Cookie 化后简化）**：早期 `InputBar` 上传与 `AttachmentCard` 下载都直接 `fetch` 而未附加 `Authorization` 头，导致开启附件后必然 401。D14 修复为手动附加 `Bearer` 头；D33 将认证迁移至 HttpOnly Cookie 后，`fetch` 无需显式携带凭证——同源请求由浏览器自动附带 Cookie，`InputBar` 与 `AttachmentCard` 的代码也因此简化。
 
 - 上传：管理员开启 `support_attachments` 后，用户选文件必然 401 失败，错误仅落在 `console.error`，表现为「附件莫名消失」
 - 下载：消息中的附件卡片点击下载必然 401
 
 **修复内容**：
 
-1. `src/client/components/chat/InputBar.tsx` — 上传 fetch 增加 `headers: { Authorization: \`Bearer ${getToken() || ''}\` }`；不设 `Content-Type`（交给浏览器生成 multipart boundary）；`catch` 分支新增内联可见的错误提示（`uploadError` state + 可关闭的 `bg-destructive` 提示条），不再静默
-2. `src/client/components/chat/AttachmentCard.tsx` — `downloadFile` 的 fetch 同样增加 `Authorization` 头
+1. `src/client/components/chat/InputBar.tsx` — 上传 `fetch` 不设 `Content-Type`（交给浏览器生成 multipart boundary）；认证经同源 HttpOnly Cookie 自动携带；`catch` 分支有内联可见的错误提示（`uploadError` state + 可关闭的 `bg-destructive` 提示条）
+2. `src/client/components/chat/AttachmentCard.tsx` — `downloadFile` 的 `fetch` 同样经 HttpOnly Cookie 认证
 3. i18n：`chat.uploadFailed` 键（zh-CN / en）
 
 **实测验证**（隔离临时库，带 JWT 上传→200，带 JWT 下载→200 且返回原内容，无 JWT 上/下载→401）。

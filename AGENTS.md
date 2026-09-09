@@ -43,7 +43,7 @@
 - **数据库**：SQLite（@libsql/client + Drizzle ORM）—— 单文件 `data/momoi.db`，无需外部数据库
 - **AI**：OpenAI 兼容的 Chat Completions API，支持流式输出、function calling、多模态附件、思考模式
 - **技能**：SKILL.md 文件（YAML 前置元数据 + Markdown 内容），注入系统提示词
-- **认证**：用户 4 位 PIN（PBKDF2 哈希 + JWT 14 天滑动续期）；管理员由 `ADMIN` 环境变量用户名名单授权（复用用户 JWT）
+- **认证**：用户 4 位 PIN（PBKDF2 哈希 + JWT 14 天滑动续期，经 HttpOnly Cookie 传输）；管理员由 `ADMIN` 环境变量用户名名单授权（复用用户 JWT）
 
 ## 关键目录
 
@@ -92,15 +92,16 @@ pnpm start        # 运行生产构建（node dist/index.js）
 
 - 用户名 + 4 位数字 PIN，PBKDF2 安全哈希后存储（实现细节见 `docs/specs/module-auth.md`）
 - 验证成功后签发 JWT（14 天有效期；剩余不足一半时客户端自动续期，形成滑动会话）
-- 请求通过 `Authorization: Bearer <jwt>` 认证；`userAuthMiddleware`（`middleware/userAuth.ts`）提取 `userId`
+- 请求经 HttpOnly Cookie `momoi_token` 认证（`userAuthMiddleware`（`middleware/userAuth.ts`）提取 `userId`）
 - PIN 连续 5 次错误 → 封禁 IP 5 分钟（`rateLimiter.ts`）
 
 ### 管理员授权
 
 - `ADMIN` 在 `.env` 中设置（逗号分隔用户名名单，如 `ADMIN=xrl,咕咕,k3p0`）；名单在进程生命周期内固定，修改需停机改 `.env` 重启
 - 留空或缺省 = 无管理员，应用其余功能照常运行
-- 管理员端点复用用户 JWT：`adminAuthMiddleware` 验证签名后检查 `isAdmin(username)`（401 未认证 / 403 非管理员），无独立密钥与管理员 token
+- 管理员端点复用用户凭证：`adminAuthMiddleware` 验证签名后检查 `isAdmin(username)`（401 未认证 / 403 非管理员），无独立密钥与管理员 token
 - 客户端经 `GET /api/user/me` 得知自身是否管理员：侧边栏入口按身份显隐，`#/settings` 路由守卫遣返非管理员
+- JWT 经 HttpOnly Cookie（`HttpOnly; SameSite=Lax`，HTTPS 下加 `Secure`）传输，JS 不可读取；登出经 `POST /api/user/logout` 由服务端清除 Cookie
 - JWT 签名密钥：`JWT_SECRET`（可选），或首启随机生成并持久化到 `settings` 表
 - 所有配置变更持久化到 SQLite
 

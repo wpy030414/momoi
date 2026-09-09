@@ -694,3 +694,30 @@
 - `expires_at` 随 token 一并持久化到 localStorage（`token_expires_at`），登出/401 统一经 `clearSession()` 清理
 - `LoginScreen.onLogin` 增加第三参 `expiresAt`；`setToken(token, expiresAt?)` 扩展签名
 - 文档同步：`module-auth.md`（JWT 表 + `/refresh` 契约 + 行为约束 9）、`module-admin.md`、`AGENTS.md`、`ARCHITECTURE.md`、`PRD.md`、README；D12 的「JWT 30 天有效期」表述自此作废
+
+## D33：JWT 迁移至 HttpOnly Cookie 传输，唯一凭证载体
+
+**日期**：2026-09-09
+
+**背景**：安全为本项目的高优先级诉求。此前 JWT 存于 localStorage 并以 `Authorization: Bearer` 传输——任何 XSS 都能读取并外传 token，实现会话劫持与持久化植入。
+
+**决策**：JWT 改经 **HttpOnly Cookie `momoi_token`** 下发与携带：`HttpOnly; SameSite=Lax; Path=/; Max-Age=14d`，HTTPS 部署（含 `x-forwarded-proto` 判定）自动加 `Secure`。`/verify`、`/set-pin`、`/refresh` 响应体不再含 token，仅返回 `expires_at`；localStorage 只留用户名与过期时间戳（均非机密）。`Authorization: Bearer` 头**被完全移除**（`getAuthToken()` 只读 Cookie）——安全无小事，不留后门。新增 `POST /api/user/logout` 服务端清除 Cookie（JS 无法删除 HttpOnly Cookie）。
+
+**原因**：
+- HttpOnly 使 token 对 JS 完全不可见：XSS 最坏只能以受害者身份当次会话内发起请求，无法窃取凭证外传或长期冒充——把「一次 XSS = 永久失守」降级为「一次 XSS = 会话内受限」
+- SameSite=Lax 阻断跨站 POST 携带 Cookie，配合全 JSON `Content-Type` 的写接口构成 CSRF 防线，无需引入 CSRF token 基建
+- Bearer 回退虽然方便 curl/脚本运维，但留了一个不经过 Cookie 属性保护（HttpOnly/SameSite/Secure）的凭证入口——攻击者若能通过任意方式获取 JWT 明文（如日志泄漏），就能绕过 Cookie 的全部安全边界直接用 Bearer 头冒充。安全的原则是「只有一个门，守好它」
+- 生产部署（Hono 托管前端）与开发（Vite `/api` 代理）均为同源，Cookie 自动携带，客户端代码反而简化（删除全部手动 Authorization 附加逻辑）
+
+**备选与权衡**：
+- ❌ 继续 localStorage + Bearer：XSS 可窃取 token，与安全诉求冲突
+- ❌ 双通道（Cookie + Bearer 并存）：多一条路径多一个攻击面；日志/代理误泄 token 后 Bearer 可绕过 HttpOnly；curl 运维可改用浏览器 DevTools 复制 Cookie 或用 `--cookie` 参数，无实质功能损失
+- ❌ CSRF token 基建：SameSite=Lax + JSON-only 写接口下收益边际，复杂度高
+- ⚠️ Secure 标志按请求协议动态判定而非强制：纯 HTTP 局域网部署（自托管常态）强制 Secure 会导致 Cookie 被浏览器丢弃；HTTPS 反代场景经 `x-forwarded-proto` 正确识别
+- ⚠️ XSS 仍可当次冒充（发起请求）：彻底防御需 CSP 等输出编码体系，超出本次范围
+
+**影响**：
+- `auth.ts` 新增 `setAuthCookie`/`clearAuthCookie`/`getAuthToken`；`userAuthMiddleware` 与 `adminAuthMiddleware` 统一改走 `getAuthToken()`（只读 Cookie）
+- 客户端删除 `getToken`/`setToken` 与全部手动 Authorization 附加点（`request()`、SSE fetch、上传、附件下载）；`LoginScreen.onLogin` 签名变为 `(username, expiresAt)`
+- 所有 auth 相关 spec 文档中 Bearer/回退/迁移期 表述同步清除
+- D32 的续期机制不变，仅传输载体从 Bearer 变为 Cookie 且不可逆

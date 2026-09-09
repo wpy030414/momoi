@@ -176,6 +176,7 @@ Momoi 是一个**轻量级、可自托管的 Web AI 智能体平台**。它的�
 ### NF4：安全性
 
 - 管理员授权基于用户 JWT + `ADMIN` 名单逐请求校验（停机改 `.env` 即可即时收权），名单与 `JWT_SECRET` 不暴露给前端
+- JWT 经 HttpOnly Cookie 传输（`HttpOnly; SameSite=Lax`，HTTPS 下 `Secure`），不进入 localStorage/响应体，XSS 无法窃取
 - PIN 使用 PBKDF2（SHA-512、10000 次迭代、随机盐）安全哈希
 - JWT 认证保护管理员和用户端点
 - Zip slip 攻击防护

@@ -3,8 +3,8 @@ import { verifyUserToken, getAuthToken } from '../auth.js'
 
 /**
  * User auth middleware — validates the JWT from the HttpOnly cookie
- * (or the Authorization Bearer header, kept as a fallback for API clients),
- * sets `userId` in context for downstream routes.
+ * `momoi_token` (the sole credential transport).  Sets `userId` in context
+ * for downstream routes.
  */
 export async function userAuthMiddleware(c: Context, next: Next) {
   const token = getAuthToken(c)

@@ -86,7 +86,7 @@ export async function adminAuthMiddleware(c: Context, next: Next) {
   await next()
 }
 
-// ---- Token transport (HttpOnly Cookie primary, Bearer fallback) ----
+// ---- Token transport (HttpOnly Cookie only — no Bearer fallback) ----
 
 export const AUTH_COOKIE = 'momoi_token'
 
@@ -104,7 +104,7 @@ function authCookieOptions(c: Context) {
   }
 }
 
-/** Issue the JWT as an HttpOnly cookie (primary transport). */
+/** Issue the JWT as an HttpOnly cookie. */
 export function setAuthCookie(c: Context, token: string) {
   setCookie(c, AUTH_COOKIE, token, { ...authCookieOptions(c), maxAge: USER_TOKEN_TTL_SECONDS })
 }
@@ -115,13 +115,12 @@ export function clearAuthCookie(c: Context) {
 }
 
 /**
- * Extract the auth token: `Authorization: Bearer` header first (kept for API
- * clients/scripts and the localStorage→cookie migration window), then the
- * HttpOnly cookie.
+ * Extract the JWT from the HttpOnly cookie.  No Bearer fallback — the cookie
+ * is the single source of truth for browser sessions, and curl / API scripts
+ * should copy the cookie from the browser's DevTools or use a separate
+ * machine-to-machine auth mechanism (out of scope).
  */
 export function getAuthToken(c: Context): string | null {
-  const auth = c.req.header('Authorization')
-  if (auth?.startsWith('Bearer ')) return auth.slice(7)
   return getCookie(c, AUTH_COOKIE) || null
 }
 

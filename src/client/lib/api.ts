@@ -108,8 +108,8 @@ export const api = {
   // App config
   getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; show_github: boolean; agents: Array<{ id: string; name: string; avatar: string }> }>('/api/app-name'),
 
-  // Admin — no separate token: the request() helper attaches the logged-in
-  // user's JWT and the server checks ADMIN-list membership per request.
+  // Admin — the HttpOnly cookie authenticates every same-origin request
+  // automatically; the server additionally checks ADMIN-list membership.
   getConfig: () => request<import('@/shared/types').AppConfig>('/api/admin/config'),
   getEnvGateway: () => request<{ api_endpoint: string; api_key: string; model: string }>('/api/admin/config/env-gateway'),
   updateConfig: (config: Partial<import('@/shared/types').AppConfig>) => request<import('@/shared/types').AppConfig>('/api/admin/config', { method: 'PUT', body: JSON.stringify(config) }),

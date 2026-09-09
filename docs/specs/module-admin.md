@@ -20,7 +20,7 @@
   → 获得用户 JWT（14 天，role:'user'；剩余不足一半时客户端自动续期）
 
 访问管理端点
-  → Authorization: Bearer <用户 JWT>
+  → HttpOnly Cookie momoi_token 自动携带
   → adminAuthMiddleware 验证 JWT 签名
   → isAdmin(username) 检查 env.ADMIN 名单
   → 通过则继续处理；无效 token → 401；有效用户但不在名单 → 403
@@ -196,7 +196,7 @@
 5. **Skills** — 技能列表 / 上传 / 卸载
 6. **Stats** — 用户/对话/消息统计 + 对话表格（可展开查看消息）
 
-管理面板（`AdminScreen`）复用登录用户的 JWT：`lib/api.ts` 的请求层自动附加 `Authorization`，服务端由 `adminAuthMiddleware` 校验名单。路由守卫保证只有 `/me` 返回 `is_admin: true` 的用户能进入 `#/settings`。
+管理面板（`AdminScreen`）复用登录用户的 HttpOnly Cookie：同源请求由浏览器自动携带，服务端由 `adminAuthMiddleware` 校验名单。路由守卫保证只有 `/me` 返回 `is_admin: true` 的用户能进入 `#/settings`。
 
 ## 安全约束
 

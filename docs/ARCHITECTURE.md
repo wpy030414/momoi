@@ -31,7 +31,7 @@
 │  │                     中间件层                                │  │
 │  │  ┌──────────────────┐  ┌──────────────────────────────┐   │  │
 │  │  │ userAuth.ts      │  │ adminAuthMiddleware          │   │  │
-│  │  │ 用户 JWT 认证     │  │ 管理员 JWT 认证               │   │  │
+│  │  │ 用户 JWT 认证     │  │ 用户 JWT + ADMIN 名单校验      │   │  │
 │  │  └──────────────────┘  └──────────────────────────────┘   │  │
 │  │  ┌──────────────────┐                                     │  │
 │  │  │ rateLimiter.ts   │  IP 速率限制（PIN 登录）             │  │
@@ -152,13 +152,13 @@ Agent 级配置（存储在 agents 表）：
 
 ```
 用户打开应用
-  → localStorage 有 JWT？→ 验证有效 → 直接进入
-  → 无 JWT → 显示 LoginScreen
+  → localStorage 有 user + 浏览器有 HttpOnly Cookie？→ 验证有效 → 直接进入
+  → 无 → 显示 LoginScreen
     → 输入用户名
     → GET /api/user/status → 有 PIN？
-      → 有 PIN → 输入 PIN → POST /api/user/verify → JWT（14天）
-      → 无 PIN → 设置 PIN → POST /api/user/set-pin → JWT（14天）
-  → JWT 存入 localStorage → 进入主界面
+      → 有 PIN → 输入 PIN → POST /api/user/verify → Set-Cookie momoi_token（HttpOnly, 14天）
+      → 无 PIN → 设置 PIN → POST /api/user/set-pin → Set-Cookie momoi_token（HttpOnly, 14天）
+  → localStorage 仅存 username + expires_at（非机密）→ 进入主界面
 ```
 
 ## 模块依赖关系
@@ -284,7 +284,7 @@ App
   PIN → PBKDF2（SHA-512, 10000 次, 随机 16 字节盐）→ settings 表 (pin:{username})
   验证成功 → signUserToken() → JWT (HS256, 14天, role:'user', sub:username)
   续期 → 剩余不足一半（<7天）时客户端 POST /api/user/refresh → 换发新 14 天 JWT（滑动会话）
-  请求 → Authorization: Bearer <jwt>
+  请求 → HttpOnly Cookie momoi_token（同源自动携带）
   userAuthMiddleware → verifyUserToken() → c.set('userId', username)
 
 IP 速率限制：
@@ -294,13 +294,14 @@ IP 速率限制：
 
 管理员层：
   ADMIN 环境变量 = 管理员用户名名单（逗号分隔，进程生命周期内固定）
-  管理端点 → Authorization: Bearer <用户 JWT>
+  管理端点 → HttpOnly Cookie
   adminAuthMiddleware → verifyUserToken() + isAdmin(username)（名单内放行，否则 403）
   客户端入口显隐 → GET /api/user/me → { username, is_admin }
 
 安全细节：
   - PBKDF2 10000 次迭代 + SHA-512
   - timingSafeEqual 防止时序攻击
+  - JWT 经 HttpOnly Cookie 传输（SameSite=Lax；HTTPS 下 Secure）——JS 不可读，XSS 无法窃取
   - JWT 签名密钥：JWT_SECRET 环境变量，或首启随机生成并持久化到 settings 表
   - ADMIN 名单与 JWT_SECRET 不暴露给前端；客户端仅能通过 /me 得知自己是否管理员
 ```

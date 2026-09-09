@@ -11,13 +11,13 @@
 | `src/server/routes/conversations.ts` | REST API 路由 |
 | `src/server/db.ts` | 数据库连接和迁移 |
 | `src/server/schema.ts` | Drizzle ORM 表定义 |
-| `src/server/middleware/userAuth.ts` | 用户 JWT 认证中间件 |
+| `src/server/middleware/userAuth.ts` | 用户 JWT 认证中间件（从 HttpOnly Cookie `momoi_token` 提取 JWT） |
 
 ## 接口契约
 
 ### 通用要求
 
-所有端点均挂载 `userAuthMiddleware`（严格模式）：**必须**携带 `Authorization: Bearer <用户 JWT>`，缺失 → 401，无效 → 401。不接受 `X-User` 回退。
+所有端点均挂载 `userAuthMiddleware`：必须携带有效 JWT（经 HttpOnly Cookie `momoi_token`），缺失 → 401，无效 → 401。
 
 ### GET /api/conversations
 
