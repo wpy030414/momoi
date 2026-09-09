@@ -23,6 +23,15 @@ userRoute.get('/me', userAuthMiddleware, (c) => {
   return c.json({ username, is_admin: isAdmin(username) })
 })
 
+// Refresh — exchange a still-valid token for a fresh 14-day one (sliding session).
+// The server keeps no token registry: the old token stays valid until its own
+// expiry; renewal is purely re-issuance.
+userRoute.post('/refresh', userAuthMiddleware, async (c) => {
+  const username = (c as any).get('userId') as string
+  const result = await signUserToken(username)
+  return c.json(result)
+})
+
 // Check whether the user has set a PIN
 userRoute.get('/status', async (c) => {
   const username = getUsername(c)

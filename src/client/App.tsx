@@ -10,7 +10,7 @@ import { LoginScreen } from './components/auth/LoginScreen'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
 import { PanelLeft, X, Check } from 'lucide-react'
-import { api, getUser, setToken } from './lib/api'
+import { api, getUser, setToken, getTokenExpiresAt } from './lib/api'
 
 export function App() {
   const { t, i18n } = useTranslation()
@@ -85,9 +85,9 @@ export function App() {
     setDeleteConvTitle('')
   }
 
-  const handleLogin = (username: string, token: string) => {
+  const handleLogin = (username: string, token: string, expiresAt?: number) => {
     localStorage.setItem('user', username)
-    setToken(token)
+    setToken(token, expiresAt)
     setCurrentUser(username)
     // Reload conversations for the new user
     setTimeout(() => chat.refreshConversations(), 100)
@@ -116,6 +116,51 @@ export function App() {
     api.getMe()
       .then((r) => setIsAdminUser(!!r.is_admin))
       .catch(() => setIsAdminUser(false))
+  }, [currentUser])
+
+  // Auto-renew the JWT (14-day TTL) once less than half its life remains —
+  // sliding session. While the tab is alive the token never runs out; after
+  // 14 days without the app open, the token is gone and PIN login is required.
+  useEffect(() => {
+    if (!currentUser) return
+    // Keep in sync with USER_TOKEN_TTL_SECONDS (src/server/auth.ts)
+    const TOKEN_TTL_SEC = 14 * 24 * 60 * 60
+    const RENEW_WINDOW_SEC = TOKEN_TTL_SEC / 2 // renew when less than half remains
+    const RETRY_MS = 5 * 60 * 1000 // network failure retry interval
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let stopped = false
+
+    const schedule = () => {
+      if (stopped) return
+      const exp = getTokenExpiresAt()
+      if (!exp) { renew(); return } // legacy token without stored expiry — refresh once to learn it
+      const waitMs = (exp - RENEW_WINDOW_SEC) * 1000 - Date.now()
+      if (waitMs <= 0) { renew(); return }
+      timer = setTimeout(renew, Math.min(waitMs, 2 ** 31 - 1))
+    }
+
+    const renew = async () => {
+      if (stopped) return
+      try {
+        const res = await api.refreshToken()
+        setToken(res.token, res.expires_at)
+        schedule()
+      } catch {
+        // 401 already triggers the auth:expired logout; other failures retry later
+        if (!stopped) timer = setTimeout(renew, RETRY_MS)
+      }
+    }
+
+    const onWake = () => { if (document.visibilityState === 'visible') schedule() }
+    schedule()
+    document.addEventListener('visibilitychange', onWake)
+    window.addEventListener('focus', onWake)
+    return () => {
+      stopped = true
+      if (timer) clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onWake)
+      window.removeEventListener('focus', onWake)
+    }
   }, [currentUser])
 
   // Listen for auth:expired events dispatched by the API layer

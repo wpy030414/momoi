@@ -87,11 +87,22 @@ export async function adminAuthMiddleware(c: Context, next: Next) {
 
 // ---- User JWT ----
 
+/**
+ * User JWT lifetime: 14 days, kept alive by client-side auto-renewal
+ * (`POST /api/user/refresh` once less than half its life remains) — a sliding
+ * session. Active users never re-login; after 14 days of inactivity the token
+ * expires and PIN login is required again.
+ */
+export const USER_TOKEN_TTL_SECONDS = 14 * 24 * 60 * 60
+
 export async function signUserToken(username: string): Promise<{ token: string; expires_at: number }> {
-  const expires_at = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60 // 30 days
+  const expires_at = Math.floor(Date.now() / 1000) + USER_TOKEN_TTL_SECONDS
   const token = await new SignJWT({ role: 'user', sub: username })
     .setProtectedHeader({ alg: 'HS256' })
-    .setExpirationTime('30d')
+    .setIssuedAt()
+    // NOTE: jose treats a numeric argument as an ABSOLUTE epoch, not an offset —
+    // keep the relative form ('14d') in sync with USER_TOKEN_TTL_SECONDS.
+    .setExpirationTime('14d')
     .sign(await getSecret())
   return { token, expires_at }
 }

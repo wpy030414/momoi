@@ -10,12 +10,29 @@ export function getToken(): string | null {
   return localStorage.getItem('token')
 }
 
-export function setToken(token: string | null) {
+export function setToken(token: string | null, expiresAt?: number) {
   if (token) {
     localStorage.setItem('token', token)
+    if (expiresAt) localStorage.setItem('token_expires_at', String(expiresAt))
+    else localStorage.removeItem('token_expires_at')
   } else {
     localStorage.removeItem('token')
+    localStorage.removeItem('token_expires_at')
   }
+}
+
+export function getTokenExpiresAt(): number | null {
+  if (typeof window === 'undefined') return null
+  const raw = localStorage.getItem('token_expires_at')
+  const n = raw ? Number(raw) : 0
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+/** Wipe the persisted session (user, token, expiry) — used on 401 eviction and logout */
+export function clearSession() {
+  localStorage.removeItem('user')
+  localStorage.removeItem('token')
+  localStorage.removeItem('token_expires_at')
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -41,8 +58,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     if (res.status === 401) {
-      localStorage.removeItem('user')
-      localStorage.removeItem('token')
+      clearSession()
       window.dispatchEvent(new CustomEvent('auth:expired'))
     }
     const err = await res.json().catch(() => ({ error: res.statusText }))
@@ -73,6 +89,8 @@ export const api = {
   }),
   // Current user info (admin status detection)
   getMe: () => request<{ username: string; is_admin: boolean }>('/api/user/me'),
+  // Exchange a still-valid token for a fresh 14-day one (sliding session renewal)
+  refreshToken: () => request<{ token: string; expires_at: number }>('/api/user/refresh', { method: 'POST' }),
 
   // Conversations
   listConversations: () => request<{ conversations: import('@/shared/types').Conversation[] }>('/api/conversations'),
@@ -135,8 +153,7 @@ export const api = {
     }).then(async (res) => {
       if (!res.ok) {
         if (res.status === 401) {
-          localStorage.removeItem('user')
-          localStorage.removeItem('token')
+          clearSession()
           window.dispatchEvent(new CustomEvent('auth:expired'))
         }
         const err = await res.json().catch(() => ({ error: res.statusText }))

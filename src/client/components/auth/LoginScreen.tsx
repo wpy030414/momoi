@@ -5,7 +5,7 @@ import { Input } from '../ui/input'
 import { api } from '../../lib/api'
 
 interface LoginScreenProps {
-  onLogin: (username: string, token: string) => void
+  onLogin: (username: string, token: string, expiresAt?: number) => void
 }
 
 export function LoginScreen({ onLogin }: LoginScreenProps) {
@@ -45,7 +45,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     setError('')
     try {
       const result = await api.verifyPin(username.trim(), pin)
-      onLogin(username.trim(), result.token)
+      onLogin(username.trim(), result.token, result.expires_at)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('login.pinError'))
     } finally {
@@ -68,7 +68,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     setError('')
     try {
       const result = await api.setPin(username.trim(), newPin)
-      onLogin(username.trim(), result.token)
+      onLogin(username.trim(), result.token, result.expires_at)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('login.error'))
     } finally {
