@@ -10,7 +10,7 @@ import { LoginScreen } from './components/auth/LoginScreen'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
 import { PanelLeft, X, Check } from 'lucide-react'
-import { api, getUser, setToken, getTokenExpiresAt } from './lib/api'
+import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 
 export function App() {
   const { t, i18n } = useTranslation()
@@ -85,17 +85,18 @@ export function App() {
     setDeleteConvTitle('')
   }
 
-  const handleLogin = (username: string, token: string, expiresAt?: number) => {
+  const handleLogin = (username: string, expiresAt?: number) => {
     localStorage.setItem('user', username)
-    setToken(token, expiresAt)
+    setSessionExpiry(expiresAt)
     setCurrentUser(username)
     // Reload conversations for the new user
     setTimeout(() => chat.refreshConversations(), 100)
   }
 
   const handleLogout = () => {
-    localStorage.removeItem('user')
-    setToken(null)
+    // Ask the server to clear the HttpOnly cookie (JS cannot delete it)
+    api.logout().catch(() => {})
+    clearSession()
     setCurrentUser(null)
     setIsAdminUser(false)
     // Leave admin view (if open) and return home
@@ -143,7 +144,7 @@ export function App() {
       if (stopped) return
       try {
         const res = await api.refreshToken()
-        setToken(res.token, res.expires_at)
+        setSessionExpiry(res.expires_at)
         schedule()
       } catch {
         // 401 already triggers the auth:expired logout; other failures retry later

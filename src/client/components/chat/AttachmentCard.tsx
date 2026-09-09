@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Download, FileText, FileImage, FileSpreadsheet, File, FileType } from 'lucide-react'
-import { getToken } from '../../lib/api'
 
 interface Attachment {
   url: string
@@ -33,10 +32,9 @@ async function downloadFile(url: string, name: string) {
   // Build download URL with original filename as query param
   const sep = url.includes('?') ? '&' : '?'
   const downloadUrl = `${url}${sep}name=${encodeURIComponent(name)}`
-  // /api/upload/file/* sits behind the same user-JWT middleware as the upload endpoint
-  const res = await fetch(downloadUrl, {
-    headers: { Authorization: `Bearer ${getToken() || ''}` },
-  })
+  // /api/upload/file/* sits behind the same user auth as the upload endpoint;
+  // the HttpOnly cookie rides along automatically
+  const res = await fetch(downloadUrl)
   if (!res.ok) throw new Error(`Download failed: ${res.status}`)
   const blob = await res.blob()
   const blobUrl = URL.createObjectURL(blob)

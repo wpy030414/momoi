@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { db } from '../db.js'
 import { settings } from '../schema.js'
 import { eq } from 'drizzle-orm'
-import { hashPin, verifyPin, signUserToken, isAdmin } from '../auth.js'
+import { hashPin, verifyPin, signUserToken, isAdmin, setAuthCookie, clearAuthCookie } from '../auth.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../rateLimiter.js'
 
@@ -25,11 +25,20 @@ userRoute.get('/me', userAuthMiddleware, (c) => {
 
 // Refresh — exchange a still-valid token for a fresh 14-day one (sliding session).
 // The server keeps no token registry: the old token stays valid until its own
-// expiry; renewal is purely re-issuance.
+// expiry; renewal is purely re-issuance. New token goes out via Set-Cookie only
+// (never in the response body — the body must stay readable-by-XSS-free).
 userRoute.post('/refresh', userAuthMiddleware, async (c) => {
   const username = (c as any).get('userId') as string
   const result = await signUserToken(username)
-  return c.json(result)
+  setAuthCookie(c, result.token)
+  return c.json({ expires_at: result.expires_at })
+})
+
+// Logout — clear the HttpOnly cookie (client JS cannot touch it, so this must
+// be done server-side). Idempotent: safe to call without a valid session.
+userRoute.post('/logout', (c) => {
+  clearAuthCookie(c)
+  return c.json({ success: true })
 })
 
 // Check whether the user has set a PIN
@@ -66,7 +75,8 @@ userRoute.post('/verify', async (c) => {
 
   clearPinFailures(ip)
   const result = await signUserToken(username)
-  return c.json(result)
+  setAuthCookie(c, result.token)
+  return c.json({ expires_at: result.expires_at })
 })
 
 // Set PIN for the first time (no old PIN required)
@@ -88,7 +98,8 @@ userRoute.post('/set-pin', async (c) => {
   await db.insert(settings).values({ key: pinKey(username), value: hashed }).run()
 
   const result = await signUserToken(username)
-  return c.json(result)
+  setAuthCookie(c, result.token)
+  return c.json({ expires_at: result.expires_at })
 })
 
 // Change PIN (requires old PIN)

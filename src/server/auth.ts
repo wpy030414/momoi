@@ -1,5 +1,6 @@
 import { randomBytes, pbkdf2Sync, timingSafeEqual } from 'crypto'
 import type { Context, Next } from 'hono'
+import { getCookie, setCookie } from 'hono/cookie'
 import { SignJWT, jwtVerify } from 'jose'
 import { eq } from 'drizzle-orm'
 import { env } from './config.js'
@@ -70,11 +71,11 @@ export function verifyPin(pin: string, stored: string): boolean {
  * an admin. Sets `userId` for downstream handlers.
  */
 export async function adminAuthMiddleware(c: Context, next: Next) {
-  const auth = c.req.header('Authorization')
-  if (!auth?.startsWith('Bearer ')) {
+  const token = getAuthToken(c)
+  if (!token) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
-  const result = await verifyUserToken(auth.slice(7))
+  const result = await verifyUserToken(token)
   if (!result) {
     return c.json({ error: 'Invalid token' }, 401)
   }
@@ -83,6 +84,45 @@ export async function adminAuthMiddleware(c: Context, next: Next) {
   }
   c.set('userId', result.username)
   await next()
+}
+
+// ---- Token transport (HttpOnly Cookie primary, Bearer fallback) ----
+
+export const AUTH_COOKIE = 'momoi_token'
+
+function isHttps(c: Context): boolean {
+  const proto = c.req.header('x-forwarded-proto') || new URL(c.req.url).protocol.replace(':', '')
+  return proto === 'https'
+}
+
+function authCookieOptions(c: Context) {
+  return {
+    httpOnly: true, // invisible to JS — XSS cannot read/exfiltrate the token
+    sameSite: 'Lax' as const, // blocks cookies on cross-site POSTs (CSRF mitigation)
+    secure: isHttps(c), // only set Secure on HTTPS so plain-HTTP LAN deploys keep working
+    path: '/',
+  }
+}
+
+/** Issue the JWT as an HttpOnly cookie (primary transport). */
+export function setAuthCookie(c: Context, token: string) {
+  setCookie(c, AUTH_COOKIE, token, { ...authCookieOptions(c), maxAge: USER_TOKEN_TTL_SECONDS })
+}
+
+/** Clear the auth cookie (logout). */
+export function clearAuthCookie(c: Context) {
+  setCookie(c, AUTH_COOKIE, '', { ...authCookieOptions(c), maxAge: 0 })
+}
+
+/**
+ * Extract the auth token: `Authorization: Bearer` header first (kept for API
+ * clients/scripts and the localStorage→cookie migration window), then the
+ * HttpOnly cookie.
+ */
+export function getAuthToken(c: Context): string | null {
+  const auth = c.req.header('Authorization')
+  if (auth?.startsWith('Bearer ')) return auth.slice(7)
+  return getCookie(c, AUTH_COOKIE) || null
 }
 
 // ---- User JWT ----

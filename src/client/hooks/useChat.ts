@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, getUser, getToken } from '../lib/api'
+import { api, getUser, clearSession } from '../lib/api'
 import type { Conversation, Attachment, AskUserQuestion } from '@/shared/types'
 import type { ThinkingSegment } from '@/shared/thinking'
 import { decodeThinkingToSegments, thinkingSegmentHeader } from '@/shared/thinking'
@@ -154,7 +154,6 @@ export function useChat() {
           headers: {
             'Content-Type': 'application/json',
             'X-User': encodeURIComponent(getUser() || ''),
-            'Authorization': `Bearer ${getToken() || ''}`
           },
           body: JSON.stringify({
             message: text,
@@ -172,8 +171,7 @@ export function useChat() {
 
         if (!res.ok) {
           if (res.status === 401) {
-            localStorage.removeItem('user')
-            localStorage.removeItem('token')
+            clearSession()
             window.dispatchEvent(new CustomEvent('auth:expired'))
           }
           const err = await res.json().catch(() => ({ error: res.statusText }))

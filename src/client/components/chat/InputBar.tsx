@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Brain, Infinity, Loader2, Paperclip, X, Upload } from 'lucide-react'
-import { getToken } from '../../lib/api'
 
 interface Attachment {
   url: string
@@ -84,9 +83,9 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
       for (const file of Array.from(files)) {
         const formData = new FormData()
         formData.append('file', file)
+        // The HttpOnly cookie authenticates the upload automatically
         const res = await fetch('/api/upload', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${getToken() || ''}` },
           body: formData,
         })
         if (!res.ok) {

@@ -1,24 +1,18 @@
 const BASE = ''
 
+// Auth transport: the JWT lives in an HttpOnly cookie the browser attaches to
+// every same-origin request automatically — JS never touches the token, so XSS
+// cannot read or exfiltrate it. localStorage only keeps non-secret session
+// metadata: the username and the token expiry (for renewal scheduling).
+
 export function getUser(): string | null {
   if (typeof window === 'undefined') return null
   return localStorage.getItem('user')
 }
 
-export function getToken(): string | null {
-  if (typeof window === 'undefined') return null
-  return localStorage.getItem('token')
-}
-
-export function setToken(token: string | null, expiresAt?: number) {
-  if (token) {
-    localStorage.setItem('token', token)
-    if (expiresAt) localStorage.setItem('token_expires_at', String(expiresAt))
-    else localStorage.removeItem('token_expires_at')
-  } else {
-    localStorage.removeItem('token')
-    localStorage.removeItem('token_expires_at')
-  }
+export function setSessionExpiry(expiresAt?: number) {
+  if (expiresAt) localStorage.setItem('token_expires_at', String(expiresAt))
+  else localStorage.removeItem('token_expires_at')
 }
 
 export function getTokenExpiresAt(): number | null {
@@ -28,16 +22,15 @@ export function getTokenExpiresAt(): number | null {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
-/** Wipe the persisted session (user, token, expiry) — used on 401 eviction and logout */
+/** Wipe the persisted session metadata (also drops the legacy 'token' key) */
 export function clearSession() {
   localStorage.removeItem('user')
-  localStorage.removeItem('token')
+  localStorage.removeItem('token') // legacy pre-cookie storage
   localStorage.removeItem('token_expires_at')
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const user = getUser()
-  const token = getToken()
   const optsHeaders = (options?.headers as Record<string, string>) || {}
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -46,11 +39,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (user && !optsHeaders['X-User'] && !optsHeaders['x-user']) {
     headers['X-User'] = encodeURIComponent(user)
   }
-  // Only attach the user JWT if the caller didn't supply an explicit Authorization
-  // (admin calls pass their own admin JWT and must not be overwritten).
-  if (token && !optsHeaders['Authorization']) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
+  // The HttpOnly cookie rides along on same-origin fetches — no manual
+  // Authorization header needed (or possible: JS cannot read the cookie).
 
   const res = await fetch(`${BASE}${path}`, {
     ...options,
@@ -72,12 +62,13 @@ export const api = {
   getUserStatus: (username: string) => request<{ has_pin: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
     headers: { 'X-User': encodeURIComponent(username) }
   }),
-  verifyPin: (username: string, pin: string) => request<{ token: string; expires_at: number }>('/api/user/verify', {
+  // Token arrives via Set-Cookie (HttpOnly); the body only carries the expiry
+  verifyPin: (username: string, pin: string) => request<{ expires_at: number }>('/api/user/verify', {
     method: 'POST',
     body: JSON.stringify({ pin }),
     headers: { 'X-User': encodeURIComponent(username) }
   }),
-  setPin: (username: string, pin: string) => request<{ token: string; expires_at: number }>('/api/user/set-pin', {
+  setPin: (username: string, pin: string) => request<{ expires_at: number }>('/api/user/set-pin', {
     method: 'POST',
     body: JSON.stringify({ pin }),
     headers: { 'X-User': encodeURIComponent(username) }
@@ -89,8 +80,10 @@ export const api = {
   }),
   // Current user info (admin status detection)
   getMe: () => request<{ username: string; is_admin: boolean }>('/api/user/me'),
-  // Exchange a still-valid token for a fresh 14-day one (sliding session renewal)
-  refreshToken: () => request<{ token: string; expires_at: number }>('/api/user/refresh', { method: 'POST' }),
+  // Exchange a still-valid cookie for a fresh 14-day one (sliding session renewal)
+  refreshToken: () => request<{ expires_at: number }>('/api/user/refresh', { method: 'POST' }),
+  // Clear the HttpOnly cookie server-side (JS cannot delete it itself)
+  logout: () => request<{ success: boolean }>('/api/user/logout', { method: 'POST' }),
 
   // Conversations
   listConversations: () => request<{ conversations: import('@/shared/types').Conversation[] }>('/api/conversations'),
@@ -139,16 +132,13 @@ export const api = {
   updateMcpServer: (id: string, data: { name?: string; url?: string; enabled?: boolean }) => request<{ server: import('@/shared/types').McpServerConfig }>(`/api/admin/mcp-servers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteMcpServer: (id: string) => request<{ success: boolean }>(`/api/admin/mcp-servers/${id}`, { method: 'DELETE' }),
 
-  // Upload (multipart/form-data — do NOT set Content-Type, let browser set boundary)
+  // Upload (multipart/form-data — do NOT set Content-Type, let browser set boundary;
+  // the HttpOnly cookie authenticates the request automatically)
   uploadSkill: (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
-    const headers: Record<string, string> = {}
-    const token = getToken()
-    if (token) headers['Authorization'] = `Bearer ${token}`
     return fetch('/api/admin/skills/upload', {
       method: 'POST',
-      headers,
       body: formData,
     }).then(async (res) => {
       if (!res.ok) {
