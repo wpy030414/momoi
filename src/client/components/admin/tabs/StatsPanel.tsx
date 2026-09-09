@@ -3,11 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
 import { api } from '../../../lib/api'
 
-interface StatsPanelProps {
-  token: string
-}
-
-export function StatsPanel({ token }: StatsPanelProps) {
+export function StatsPanel() {
   const { t } = useTranslation()
   const [stats, setStats] = useState<{ total_users: number; total_conversations: number; total_messages: number } | null>(null)
   const [conversations, setConversations] = useState<any[]>([])
@@ -20,14 +16,14 @@ export function StatsPanel({ token }: StatsPanelProps) {
   const pageSize = 10
 
   useEffect(() => {
-    api.getAdminStats(token).then(setStats).catch(console.error)
-    api.getAdminConversations(token).then((r) => setConversations(r.conversations)).catch(console.error)
-    api.listAdminAgents(token).then((r) => {
+    api.getAdminStats().then(setStats).catch(console.error)
+    api.getAdminConversations().then((r) => setConversations(r.conversations)).catch(console.error)
+    api.listAdminAgents().then((r) => {
       const map = new Map<string, string>()
       r.agents.forEach((a) => map.set(a.id, a.name))
       setAgentNames(map)
     }).catch(console.error)
-  }, [token])
+  }, [])
 
   const formatTime = (ts: number) => {
     if (!ts) return '-'
@@ -56,7 +52,7 @@ export function StatsPanel({ token }: StatsPanelProps) {
     setExpandedConvId(convId)
     setLoadingMessages(true)
     try {
-      const data = await api.getAdminConversationMessages(token, convId)
+      const data = await api.getAdminConversationMessages(convId)
       setExpandedMessages(data.messages)
       setExpandedConv(data.conversation)
     } catch (err) {

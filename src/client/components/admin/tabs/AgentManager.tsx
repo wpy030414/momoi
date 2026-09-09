@@ -8,10 +8,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Pencil, Trash2, Plus, Upload, Copy, Shield } from 'lucide-react'
 import { useToast } from '../../ui/toast'
 
-interface AgentManagerProps {
-  token: string
-}
-
 /** A single agent row — card in view mode, expands into edit form in edit mode */
 function AgentRow({
   agent, isNeutral, isEditing, onEdit, onCancel, onSave, onCopy, onDelete,
@@ -172,7 +168,7 @@ function AgentRow({
   )
 }
 
-export function AgentManager({ token }: AgentManagerProps) {
+export function AgentManager() {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [agents, setAgents] = useState<Agent[]>([])
@@ -192,7 +188,7 @@ export function AgentManager({ token }: AgentManagerProps) {
 
   const fetchAgents = async () => {
     try {
-      const res = await api.listAdminAgents(token)
+      const res = await api.listAdminAgents()
       const all = res.agents
       setAgents(all.filter((a) => a.role !== 'neutral'))
       setNeutralAgent(all.find((a) => a.role === 'neutral') || null)
@@ -205,7 +201,7 @@ export function AgentManager({ token }: AgentManagerProps) {
 
   useEffect(() => {
     fetchAgents()
-  }, [token])
+  }, [])
 
   const handleSave = async () => {
     const editingAgent = editingId
@@ -225,9 +221,9 @@ export function AgentManager({ token }: AgentManagerProps) {
           body.system_prompt = formSystemPrompt
           body.avatar = formAvatar
         }
-        await api.updateAgent(token, editingAgent.id, body)
+        await api.updateAgent(editingAgent.id, body)
       } else {
-        await api.createAgent(token, {
+        await api.createAgent({
           name: formName.trim(),
           model: formModel.trim(),
           system_prompt: formSystemPrompt,
@@ -245,7 +241,7 @@ export function AgentManager({ token }: AgentManagerProps) {
 
   const handleCopy = async (agent: Agent) => {
     try {
-      await api.createAgent(token, {
+      await api.createAgent({
         name: `${agent.name} ${t('settings.agentCopy')}`,
         model: agent.model,
         system_prompt: agent.system_prompt,
@@ -265,7 +261,7 @@ export function AgentManager({ token }: AgentManagerProps) {
   const confirmDelete = async () => {
     if (!deleteTarget) return
     try {
-      await api.deleteAgent(token, deleteTarget.id)
+      await api.deleteAgent(deleteTarget.id)
       await fetchAgents()
       toast({ title: t('settings.toastAgentDeleted'), variant: 'success' })
     } catch (err) {

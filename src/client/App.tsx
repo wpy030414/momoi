@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGroupChat } from './hooks/useGroupChat'
-import { useAdmin } from './hooks/useAdmin'
 import { useTheme } from './hooks/useTheme'
 import { Sidebar } from './components/sidebar/Sidebar'
 import { ChatPanel } from './components/chat/ChatPanel'
@@ -16,7 +15,6 @@ import { api, getUser, setToken } from './lib/api'
 export function App() {
   const { t, i18n } = useTranslation()
   const chat = useGroupChat()
-  const admin = useAdmin()
   const { theme, setTheme } = useTheme()
   const [adminViewOpen, setAdminViewOpen] = useState(false)
   const [changePinOpen, setChangePinOpen] = useState(false)
@@ -25,6 +23,8 @@ export function App() {
   const [supportAttachments, setSupportAttachments] = useState(false)
   const [showGithub, setShowGithub] = useState(true)
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
+  // Admin status of the logged-in user (ADMIN usernames from server .env)
+  const [isAdminUser, setIsAdminUser] = useState(false)
   const [agents, setAgents] = useState<Array<{ id: string; name: string; avatar: string }>>([])
   const [agentsLoading, setAgentsLoading] = useState(true)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
@@ -97,9 +97,26 @@ export function App() {
     localStorage.removeItem('user')
     setToken(null)
     setCurrentUser(null)
+    setIsAdminUser(false)
+    // Leave admin view (if open) and return home
+    setAdminViewOpen(false)
+    if (window.location.hash === '#/settings') {
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
     // Clear current session
     chat.createConversation()
   }
+
+  // Detect admin status for the logged-in user
+  useEffect(() => {
+    if (!currentUser) {
+      setIsAdminUser(false)
+      return
+    }
+    api.getMe()
+      .then((r) => setIsAdminUser(!!r.is_admin))
+      .catch(() => setIsAdminUser(false))
+  }, [currentUser])
 
   // Listen for auth:expired events dispatched by the API layer
   // when a 401 response is received (token invalid/expired).
@@ -187,22 +204,31 @@ export function App() {
     }
   }
 
-  // Sync adminViewOpen with hash #/settings (mount + browser back/forward)
+  // Route guard: #/settings only opens for admins (mount + browser back/forward).
+  // Anyone else typing the path is bounced back home.
   useEffect(() => {
-    const onHashChange = () => {
-      setAdminViewOpen(window.location.hash === '#/settings')
+    const leaveAdminRoute = () => {
+      setAdminViewOpen(false)
+      if (window.location.hash === '#/settings') {
+        history.replaceState(null, '', window.location.pathname + window.location.search)
+      }
     }
-    // Check on mount
-    if (window.location.hash === '#/settings') {
-      setAdminViewOpen(true)
+    const syncAdminRoute = () => {
+      if (window.location.hash === '#/settings') {
+        if (isAdminUser) setAdminViewOpen(true)
+        else leaveAdminRoute()
+      } else {
+        setAdminViewOpen(false)
+      }
     }
-    window.addEventListener('hashchange', onHashChange)
-    return () => window.removeEventListener('hashchange', onHashChange)
-  }, [])
+    syncAdminRoute()
+    window.addEventListener('hashchange', syncAdminRoute)
+    return () => window.removeEventListener('hashchange', syncAdminRoute)
+  }, [isAdminUser])
 
-  // Show admin settings as full-page view (accessible even without login)
+  // Show admin settings as full-page view (admins only; guard above enforces it)
   if (adminViewOpen) {
-    return <AdminScreen onBack={closeAdminView} admin={admin} />
+    return <AdminScreen onBack={closeAdminView} />
   }
 
   // Show login screen if not logged in
@@ -241,7 +267,7 @@ export function App() {
           onLanguageChange={handleLanguageChange}
           theme={theme}
           onThemeChange={setTheme}
-          onAdminSettings={handleAdminSettings}
+          onAdminSettings={isAdminUser ? handleAdminSettings : undefined}
         />
       </div>
 

@@ -71,6 +71,8 @@ export const api = {
     body: JSON.stringify({ old_pin: oldPin, new_pin: newPin }),
     headers: { 'X-User': encodeURIComponent(username) }
   }),
+  // Current user info (admin status detection)
+  getMe: () => request<{ username: string; is_admin: boolean }>('/api/user/me'),
 
   // Conversations
   listConversations: () => request<{ conversations: import('@/shared/types').Conversation[] }>('/api/conversations'),
@@ -95,37 +97,40 @@ export const api = {
   // App config
   getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; show_github: boolean; agents: Array<{ id: string; name: string; avatar: string }> }>('/api/app-name'),
 
-  // Admin
-  adminAuth: (key: string) => request<{ token: string; expires_at: number }>('/api/admin/auth', { method: 'POST', body: JSON.stringify({ key }) }),
-  getConfig: (token: string) => request<import('@/shared/types').AppConfig>('/api/admin/config', { headers: { Authorization: `Bearer ${token}` } }),
-  getEnvGateway: (token: string) => request<{ api_endpoint: string; api_key: string; model: string }>('/api/admin/config/env-gateway', { headers: { Authorization: `Bearer ${token}` } }),
-  updateConfig: (token: string, config: Partial<import('@/shared/types').AppConfig>) => request<import('@/shared/types').AppConfig>('/api/admin/config', { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(config) }),
+  // Admin — no separate token: the request() helper attaches the logged-in
+  // user's JWT and the server checks ADMIN-list membership per request.
+  getConfig: () => request<import('@/shared/types').AppConfig>('/api/admin/config'),
+  getEnvGateway: () => request<{ api_endpoint: string; api_key: string; model: string }>('/api/admin/config/env-gateway'),
+  updateConfig: (config: Partial<import('@/shared/types').AppConfig>) => request<import('@/shared/types').AppConfig>('/api/admin/config', { method: 'PUT', body: JSON.stringify(config) }),
 
   // Admin - Agent CRUD
-  listAdminAgents: (token: string) => request<{ agents: import('@/shared/types').Agent[] }>('/api/admin/agents', { headers: { Authorization: `Bearer ${token}` } }),
-  createAgent: (token: string, data: { name: string; model: string; system_prompt: string; avatar?: string }) => request<{ agent: import('@/shared/types').Agent }>('/api/admin/agents', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(data) }),
-  updateAgent: (token: string, id: string, data: { name?: string; model?: string; system_prompt?: string; avatar?: string }) => request<{ agent: import('@/shared/types').Agent }>(`/api/admin/agents/${id}`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(data) }),
-  deleteAgent: (token: string, id: string) => request<{ success: boolean }>(`/api/admin/agents/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }),
-  listAdminSkills: (token: string) => request<{ skills: import('@/shared/types').InstalledSkill[] }>('/api/admin/skills', { headers: { Authorization: `Bearer ${token}` } }),
-  installSkill: (token: string, name: string) => request('/api/admin/skills/install', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ name }) }),
-  uninstallSkill: (token: string, name: string) => request(`/api/admin/skills/${name}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }),
-  getAdminStats: (token: string) => request<import('@/shared/types').AdminStats>('/api/admin/stats', { headers: { Authorization: `Bearer ${token}` } }),
-  getAdminConversations: (token: string) => request<{ conversations: import('@/shared/types').AdminConversationRow[] }>('/api/admin/stats/conversations', { headers: { Authorization: `Bearer ${token}` } }),
-  getAdminConversationMessages: (token: string, id: string) => request<{ conversation: any; messages: import('@/shared/types').Message[] }>(`/api/admin/stats/conversations/${id}/messages`, { headers: { Authorization: `Bearer ${token}` } }),
+  listAdminAgents: () => request<{ agents: import('@/shared/types').Agent[] }>('/api/admin/agents'),
+  createAgent: (data: { name: string; model: string; system_prompt: string; avatar?: string }) => request<{ agent: import('@/shared/types').Agent }>('/api/admin/agents', { method: 'POST', body: JSON.stringify(data) }),
+  updateAgent: (id: string, data: { name?: string; model?: string; system_prompt?: string; avatar?: string }) => request<{ agent: import('@/shared/types').Agent }>(`/api/admin/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAgent: (id: string) => request<{ success: boolean }>(`/api/admin/agents/${id}`, { method: 'DELETE' }),
+  listAdminSkills: () => request<{ skills: import('@/shared/types').InstalledSkill[] }>('/api/admin/skills'),
+  installSkill: (name: string) => request('/api/admin/skills/install', { method: 'POST', body: JSON.stringify({ name }) }),
+  uninstallSkill: (name: string) => request(`/api/admin/skills/${name}`, { method: 'DELETE' }),
+  getAdminStats: () => request<import('@/shared/types').AdminStats>('/api/admin/stats'),
+  getAdminConversations: () => request<{ conversations: import('@/shared/types').AdminConversationRow[] }>('/api/admin/stats/conversations'),
+  getAdminConversationMessages: (id: string) => request<{ conversation: any; messages: import('@/shared/types').Message[] }>(`/api/admin/stats/conversations/${id}/messages`),
 
   // Admin - MCP Servers
-  listMcpServers: (token: string) => request<{ servers: import('@/shared/types').McpServerConfig[] }>('/api/admin/mcp-servers', { headers: { Authorization: `Bearer ${token}` } }),
-  createMcpServer: (token: string, data: { name: string; url: string }) => request<{ server: import('@/shared/types').McpServerConfig }>('/api/admin/mcp-servers', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(data) }),
-  updateMcpServer: (token: string, id: string, data: { name?: string; url?: string; enabled?: boolean }) => request<{ server: import('@/shared/types').McpServerConfig }>(`/api/admin/mcp-servers/${id}`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(data) }),
-  deleteMcpServer: (token: string, id: string) => request<{ success: boolean }>(`/api/admin/mcp-servers/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }),
+  listMcpServers: () => request<{ servers: import('@/shared/types').McpServerConfig[] }>('/api/admin/mcp-servers'),
+  createMcpServer: (data: { name: string; url: string }) => request<{ server: import('@/shared/types').McpServerConfig }>('/api/admin/mcp-servers', { method: 'POST', body: JSON.stringify(data) }),
+  updateMcpServer: (id: string, data: { name?: string; url?: string; enabled?: boolean }) => request<{ server: import('@/shared/types').McpServerConfig }>(`/api/admin/mcp-servers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteMcpServer: (id: string) => request<{ success: boolean }>(`/api/admin/mcp-servers/${id}`, { method: 'DELETE' }),
 
   // Upload (multipart/form-data — do NOT set Content-Type, let browser set boundary)
-  uploadSkill: (token: string, file: File) => {
+  uploadSkill: (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
+    const headers: Record<string, string> = {}
+    const token = getToken()
+    if (token) headers['Authorization'] = `Bearer ${token}`
     return fetch('/api/admin/skills/upload', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
       body: formData,
     }).then(async (res) => {
       if (!res.ok) {

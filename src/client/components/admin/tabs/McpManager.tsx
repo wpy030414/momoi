@@ -9,11 +9,7 @@ import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 import type { McpServerConfig } from '@/shared/types'
 
-interface McpManagerProps {
-  token: string
-}
-
-export function McpManager({ token }: McpManagerProps) {
+export function McpManager() {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [servers, setServers] = useState<McpServerConfig[]>([])
@@ -27,7 +23,7 @@ export function McpManager({ token }: McpManagerProps) {
   const [formError, setFormError] = useState<string | null>(null)
 
   const fetchServers = () => {
-    api.listMcpServers(token)
+    api.listMcpServers()
       .then((r) => setServers(r.servers))
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -35,7 +31,7 @@ export function McpManager({ token }: McpManagerProps) {
 
   useEffect(() => {
     fetchServers()
-  }, [token])
+  }, [])
 
   const openAdd = () => {
     setEditingId(null)
@@ -62,9 +58,9 @@ export function McpManager({ token }: McpManagerProps) {
     setFormError(null)
     try {
       if (editingId) {
-        await api.updateMcpServer(token, editingId, { name: formName.trim(), url: formUrl.trim() })
+        await api.updateMcpServer(editingId, { name: formName.trim(), url: formUrl.trim() })
       } else {
-        await api.createMcpServer(token, { name: formName.trim(), url: formUrl.trim() })
+        await api.createMcpServer({ name: formName.trim(), url: formUrl.trim() })
       }
       setDialogOpen(false)
       fetchServers()
@@ -77,7 +73,7 @@ export function McpManager({ token }: McpManagerProps) {
 
   const handleToggle = async (server: McpServerConfig) => {
     try {
-      await api.updateMcpServer(token, server.id, { enabled: !server.enabled })
+      await api.updateMcpServer(server.id, { enabled: !server.enabled })
       fetchServers()
     } catch (err) {
       console.error('Failed to toggle MCP server:', err)
@@ -87,7 +83,7 @@ export function McpManager({ token }: McpManagerProps) {
   const confirmDelete = async () => {
     if (!deleteId) return
     try {
-      await api.deleteMcpServer(token, deleteId)
+      await api.deleteMcpServer(deleteId)
       fetchServers()
       toast({ title: t('settings.toastMcpDeleted'), variant: 'success' })
     } catch (err) {

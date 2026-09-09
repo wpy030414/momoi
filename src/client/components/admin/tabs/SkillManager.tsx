@@ -6,11 +6,7 @@ import { Upload } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 
-interface SkillManagerProps {
-  token: string
-}
-
-export function SkillManager({ token }: SkillManagerProps) {
+export function SkillManager() {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [skills, setSkills] = useState<any[]>([])
@@ -21,11 +17,11 @@ export function SkillManager({ token }: SkillManagerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    api.listAdminSkills(token)
+    api.listAdminSkills()
       .then((r) => setSkills(r.skills))
       .catch(console.error)
       .finally(() => setFetching(false))
-  }, [token])
+  }, [])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -33,7 +29,7 @@ export function SkillManager({ token }: SkillManagerProps) {
     setUploading(true)
     setUploadError(null)
     try {
-      const result = await api.uploadSkill(token, file)
+      const result = await api.uploadSkill(file)
       setSkills(result.skills)
       toast({ title: t('settings.toastSkillUploaded'), variant: 'success' })
     } catch (err: any) {
@@ -46,8 +42,8 @@ export function SkillManager({ token }: SkillManagerProps) {
   const confirmUninstallSkill = async () => {
     if (!deleteSkillName) return
     try {
-      await api.uninstallSkill(token, deleteSkillName)
-      const r = await api.listAdminSkills(token)
+      await api.uninstallSkill(deleteSkillName)
+      const r = await api.listAdminSkills()
       setSkills(r.skills)
       toast({ title: t('settings.toastSkillRemoved'), variant: 'success' })
     } catch (err) {

@@ -7,11 +7,7 @@ import { Eye, EyeOff, RotateCcw } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 
-interface GatewaySettingsProps {
-  token: string
-}
-
-export function GatewaySettings({ token }: GatewaySettingsProps) {
+export function GatewaySettings() {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [config, setConfig] = useState<any>(null)
@@ -19,13 +15,13 @@ export function GatewaySettings({ token }: GatewaySettingsProps) {
   const [showApiKey, setShowApiKey] = useState(false)
 
   useEffect(() => {
-    api.getConfig(token).then(setConfig).catch(console.error)
-  }, [token])
+    api.getConfig().then(setConfig).catch(console.error)
+  }, [])
 
   const handleSave = async () => {
     setSaving(true)
     try {
-      await api.updateConfig(token, config)
+      await api.updateConfig(config)
       toast({ title: t('settings.toastSaved'), variant: 'success' })
     } catch (err) {
       console.error(err)
@@ -37,7 +33,7 @@ export function GatewaySettings({ token }: GatewaySettingsProps) {
 
   const handleLoadFromEnv = async () => {
     try {
-      const envGateway = await api.getEnvGateway(token)
+      const envGateway = await api.getEnvGateway()
       setConfig({
         ...config,
         api_endpoint: envGateway.api_endpoint,

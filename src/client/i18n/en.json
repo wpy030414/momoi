@@ -9,8 +9,7 @@
     "saving": "Saving...",
     "cancel": "Cancel",
     "confirm": "Confirm",
-    "remove": "Remove",
-    "authenticate": "Authenticate"
+    "remove": "Remove"
   },
   "chat": {
     "inputPlaceholder": "Type a message... (Enter to send, Shift+Enter for newline)",
@@ -74,15 +73,12 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "adminSettings": "Admin Settings",
-    "adminSettingsDesc": "Admin password required",
     "about": "About",
     "advanced": "Advanced"
   },
   "settings": {
     "title": "Admin Settings",
     "subtitleAuthenticated": "Manage global agent configuration",
-    "subtitleUnauthenticated": "Enter admin key to access settings",
-    "adminKeyPlaceholder": "Admin key",
     "tabBranding": "Branding",
     "appName": "App Name",
     "appFavicon": "Favicon",
@@ -142,7 +138,6 @@
     "skillDeleteConfirm": "Uninstall this skill? This action cannot be undone and will delete the skill directory.",
     "noSkills": "No skills installed",
     "uploadSkill": "Upload Skill (.zip)",
-    "authFailed": "Auth failed",
     "mcpAddServer": "Add MCP Server",
     "mcpEditServer": "Edit MCP Server",
     "mcpServerName": "Server Name",

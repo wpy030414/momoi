@@ -6,11 +6,7 @@ import { Switch } from '../../ui/switch'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 
-interface BrandingSettingsProps {
-  token: string
-}
-
-export function BrandingSettings({ token }: BrandingSettingsProps) {
+export function BrandingSettings() {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [config, setConfig] = useState<any>(null)
@@ -19,13 +15,13 @@ export function BrandingSettings({ token }: BrandingSettingsProps) {
   const backgroundInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    api.getConfig(token).then(setConfig).catch(console.error)
-  }, [token])
+    api.getConfig().then(setConfig).catch(console.error)
+  }, [])
 
   const handleSave = async () => {
     setSaving(true)
     try {
-      await api.updateConfig(token, {
+      await api.updateConfig({
         app_name: config.app_name,
         app_favicon: config.app_favicon,
         app_background: config.app_background,

@@ -9,8 +9,7 @@
     "saving": "保存中...",
     "cancel": "取消",
     "confirm": "确认",
-    "remove": "移除",
-    "authenticate": "验证身份"
+    "remove": "移除"
   },
   "chat": {
     "inputPlaceholder": "输入消息...（Enter 发送，Shift+Enter 换行）",
@@ -80,8 +79,6 @@
   "settings": {
     "title": "后台设置",
     "subtitleAuthenticated": "管理全局智能体配置",
-    "subtitleUnauthenticated": "输入管理员密钥以访问设置",
-    "adminKeyPlaceholder": "管理员密钥",
     "tabBranding": "白标化",
     "appName": "产品名称",
     "appFavicon": "网站图标",
@@ -141,7 +138,6 @@
     "skillDeleteConfirm": "确定要卸载这个技能吗？此操作不可撤销，将删除技能目录。",
     "noSkills": "暂无已安装的技能",
     "uploadSkill": "上传技能 (.zip)",
-    "authFailed": "验证失败",
     "mcpAddServer": "添加 MCP 服务器",
     "mcpEditServer": "编辑 MCP 服务器",
     "mcpServerName": "服务器名称",
