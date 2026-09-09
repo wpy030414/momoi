@@ -4,7 +4,7 @@ import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
 import { Switch } from '../../ui/switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
-import { Plus, Trash2, Edit3, Server } from 'lucide-react'
+import { Plus, Trash2, Edit3 } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 import type { McpServerConfig } from '@/shared/types'
@@ -108,10 +108,7 @@ export function McpManager({ token }: McpManagerProps) {
       {loading ? (
         <p className="text-muted-foreground">{t('common.loading')}</p>
       ) : servers.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
-          <Server className="h-12 w-12 opacity-30" />
-          <p>{t('settings.mcpNoServers')}</p>
-        </div>
+        <p className="text-muted-foreground">{t('settings.mcpNoServers')}</p>
       ) : (
         <div className="space-y-2">
           {servers.map((s) => (

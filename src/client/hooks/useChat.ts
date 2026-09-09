@@ -552,9 +552,14 @@ export function useChat() {
   const exportConversation = useCallback(async (id: string) => {
     try {
       const res = await api.getConversation(id)
+      const agentMap = new Map<string, string>()
+      if (res.agents) {
+        res.agents.forEach((a) => agentMap.set(a.id, a.name))
+      }
       const lines = res.messages.map((m) => {
-        const role = m.role === 'user' ? '🧑 User' : '🤖 Assistant'
-        return `### ${role}\n${m.content}`
+        const time = m.created_at ? new Date(m.created_at * 1000).toLocaleString() : ''
+        const header = time ? `### ${m.role === 'user' ? 'User' : m.role === 'system' ? 'System' : m.role === 'tool' ? 'Tool' : (m.agent_id && agentMap.get(m.agent_id)) || 'Assistant'} — ${time}` : `### ${m.role === 'user' ? 'User' : m.role === 'system' ? 'System' : m.role === 'tool' ? 'Tool' : (m.agent_id && agentMap.get(m.agent_id)) || 'Assistant'}`
+        return `${header}\n${m.content}`
       })
       const title = res.conversation.title || 'conversation'
       const body = `# ${title}\n\n${lines.join('\n\n---\n\n')}\n`
@@ -562,7 +567,7 @@ export function useChat() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${title.replace(/[\\/:*?"<>|]/g, '_')}.txt`
+      a.download = `${title.replace(/[\\/:*?"<>|]/g, '_')}.md`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {

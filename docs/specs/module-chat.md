@@ -153,7 +153,7 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
    - 选中对话 → `pushState`（支持后退）
    - 新建/删除当前对话 → 清除 hash
    - 监听 `hashchange` 支持浏览器前进后退
-9. **导出**：客户端拼接 `# 标题` + 每条 `### 🧑 User` / `### 🤖 Assistant`，以 `---` 分隔，生成 `.txt` 下载
+9. **导出**：客户端拼接 `# 标题` + 每条 `### User` / `### <Agent 名称>`，以 `---` 分隔，生成 `.md` 下载
 10. **多轮思考分段渲染**：SSE `thinking` 事件带 `round` 字段时，前端按轮聚合为 `thinkingSegments`；历史消息通过 `decodeThinkingToSegments` 切分
 11. **群聊消息渲染**：消息带 `agent_id` / `agent_name` 字段，显示 Agent 头像和名称
 

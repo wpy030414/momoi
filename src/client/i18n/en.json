@@ -56,7 +56,7 @@
     "noConversations": "No conversations yet",
     "recent": "Recent",
     "rename": "Rename",
-    "saveAsTxt": "Save as TXT",
+    "saveAsMd": "Save as Markdown",
     "delete": "Delete",
     "deleteConfirm": "Delete conversation \"{{name}}\"? This action cannot be undone.",
     "groupMembers": "Members"
@@ -103,6 +103,8 @@
     "statsCreated": "Created",
     "statsUpdated": "Updated",
     "statsNoConversations": "No conversation data",
+    "statsPrevPage": "Previous",
+    "statsNextPage": "Next",
     "apiEndpoint": "API Endpoint",
     "apiKey": "API Key",
     "model": "Model",

@@ -15,16 +15,29 @@ export function StatsPanel({ token }: StatsPanelProps) {
   const [expandedConvId, setExpandedConvId] = useState<string | null>(null)
   const [expandedMessages, setExpandedMessages] = useState<any[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
+  const [agentNames, setAgentNames] = useState<Map<string, string>>(new Map())
   const pageSize = 10
 
   useEffect(() => {
     api.getAdminStats(token).then(setStats).catch(console.error)
     api.getAdminConversations(token).then((r) => setConversations(r.conversations)).catch(console.error)
+    api.listAdminAgents(token).then((r) => {
+      const map = new Map<string, string>()
+      r.agents.forEach((a) => map.set(a.id, a.name))
+      setAgentNames(map)
+    }).catch(console.error)
   }, [token])
 
   const formatTime = (ts: number) => {
     if (!ts) return '-'
     return new Date(ts * 1000).toLocaleString()
+  }
+
+  const roleLabel = (msg: any) => {
+    if (msg.role === 'user') return 'User'
+    if (msg.role === 'system') return 'System'
+    if (msg.role === 'tool') return 'Tool'
+    return msg.agent_id && agentNames.has(msg.agent_id) ? agentNames.get(msg.agent_id)! : 'Assistant'
   }
 
   const handleRowClick = async (convId: string) => {
@@ -109,7 +122,7 @@ export function StatsPanel({ token }: StatsPanelProps) {
                                 {expandedMessages.map((msg) => (
                                   <div key={msg.id} className="rounded-md border bg-background p-3">
                                     <div className="flex items-center justify-between mb-2">
-                                      <span className="text-xs font-medium text-muted-foreground uppercase">{msg.role}</span>
+                                      <span className="text-xs font-medium text-muted-foreground">{roleLabel(msg)}</span>
                                       <span className="text-xs text-muted-foreground">{formatTime(msg.created_at)}</span>
                                     </div>
                                     <div className="text-sm whitespace-pre-wrap break-words">{msg.content || '(empty)'}</div>
@@ -139,11 +152,11 @@ export function StatsPanel({ token }: StatsPanelProps) {
                 </p>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => { setCurrentPage(currentPage - 1); setExpandedConvId(null) }}>
-                    上一页
+                    {t('settings.statsPrevPage')}
                   </Button>
                   <span className="flex items-center px-3 text-sm">{currentPage} / {totalPages}</span>
                   <Button variant="outline" size="sm" disabled={currentPage === totalPages} onClick={() => { setCurrentPage(currentPage + 1); setExpandedConvId(null) }}>
-                    下一页
+                    {t('settings.statsNextPage')}
                   </Button>
                 </div>
               </div>
