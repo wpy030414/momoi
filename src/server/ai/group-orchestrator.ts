@@ -7,9 +7,40 @@ import type { ChatMessage, ContentPart } from './provider.js'
 import type { ServerMessage, Agent } from '../../shared/types.js'
 import type { ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
-import { getAgent } from '../config.js'
+import { getAgent, getConfig } from '../config.js'
+import { decideGroupParticipants, type GroupSkipHint } from './neutral-agent.js'
+import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 
 const MAX_MENTION_REDIRECTS = 5
+
+// ---- 本轮发言调度（中立 Agent 裁决）----
+const DECISION_TIMEOUT_MS = 10_000
+const SKIP_HINT_TTL_MS = 10 * 60_000
+const MAX_TRACKED_CONVERSATIONS = 200
+
+/** 上一轮未参与的成员（内存态，重启失效；带 TTL，仅作下一轮裁决的提示） */
+const previousSkipsByConversation = new Map<string, { at: number; skips: GroupSkipHint[] }>()
+
+function rememberSkips(conversationId: string, skips: GroupSkipHint[]): void {
+  previousSkipsByConversation.delete(conversationId)
+  if (skips.length === 0) return
+  previousSkipsByConversation.set(conversationId, { at: Date.now(), skips })
+  while (previousSkipsByConversation.size > MAX_TRACKED_CONVERSATIONS) {
+    const oldest = previousSkipsByConversation.keys().next().value
+    if (oldest === undefined) break
+    previousSkipsByConversation.delete(oldest)
+  }
+}
+
+function recallSkips(conversationId: string): GroupSkipHint[] | undefined {
+  const entry = previousSkipsByConversation.get(conversationId)
+  if (!entry) return undefined
+  if (Date.now() - entry.at > SKIP_HINT_TTL_MS) {
+    previousSkipsByConversation.delete(conversationId)
+    return undefined
+  }
+  return entry.skips
+}
 
 interface GroupOrchestratorOptions {
   userMessage: string | ContentPart[]
@@ -64,6 +95,49 @@ function prepareGroupHistory(history: ChatMessage[], agentNameById: Map<string, 
   })
 }
 
+const CONTEXT_MAX_MESSAGES = 20
+const CONTEXT_MAX_LINE_CHARS = 400
+const CONTEXT_MAX_USER_CHARS = 1500
+const CONTEXT_MAX_TOTAL_CHARS = 6000
+
+function toPlainText(content: ChatMessage['content']): string {
+  if (typeof content === 'string') return content
+  if (!content) return ''
+  return content.filter((p) => p.type === 'text').map((p) => p.text).join(' ')
+}
+
+/**
+ * 构造裁决上下文：最近 20 条历史 + 当前用户消息。
+ * - 逐行截断：用户消息可能含附件解析正文（可达 MB 级）
+ * - 跳过 tool/system 行：工具输出是原始转储，不应进入裁决
+ * - 超总量时保留最近部分
+ */
+function formatDecisionContext(
+  history: ChatMessage[],
+  userMessage: string | ContentPart[],
+  agentNameById: Map<string, string>,
+): string {
+  const lines: string[] = []
+  for (const msg of history.slice(-CONTEXT_MAX_MESSAGES)) {
+    if (msg.role === 'tool' || msg.role === 'system') continue
+    const text = toPlainText(msg.content).slice(0, CONTEXT_MAX_LINE_CHARS)
+    if (!text.trim()) continue
+    if (msg.role === 'user') {
+      lines.push(`用户: ${text}`)
+    } else {
+      const name = msg.agent_id ? agentNameById.get(msg.agent_id) || msg.agent_id : '助手'
+      lines.push(`[${name}]: ${text}`)
+    }
+  }
+  const current = toPlainText(userMessage).slice(0, CONTEXT_MAX_USER_CHARS)
+  if (current.trim()) lines.push(`用户: ${current}`)
+
+  const joined = lines.join('\n')
+  return joined.length > CONTEXT_MAX_TOTAL_CHARS
+    ? joined.slice(joined.length - CONTEXT_MAX_TOTAL_CHARS)
+    : joined
+}
+
 export async function orchestrateGroupChat(options: GroupOrchestratorOptions): Promise<void> {
   const { userMessage, history, send, signal, thinkingMode, conversationId, userId, agentIds, saveMessage } = options
 
@@ -87,10 +161,87 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
     ? parseUserMentions(userMessage, agentNameById)
     : []
 
-  // Shuffle agent order for natural conversation feel
-  const shuffled = agentIds.length > 1
-    ? [agentIds[0], ...shuffleArray(agentIds.slice(1))]
+  // ---- 本轮发言调度：中立 Agent 裁决哪些成员不需要参与 ----
+  // 失败开放：任何异常 / 超时 / 空结果都退回「全员参与」（本功能引入前的行为）。
+  const skippedIds = new Set<string>()
+  const skippedHints: GroupSkipHint[] = []
+  const shouldDecide =
+    agentNameById.size > 1 &&
+    history.length > 0 &&
+    userMentionedIds.length < agentIds.length
+
+  if (shouldDecide) {
+    const startedAt = Date.now()
+    try {
+      const [config, neutralAgent] = await Promise.all([
+        getConfig(),
+        getAgent(NEUTRAL_AGENT_ID),
+      ])
+      const model = neutralAgent?.model || agentsById.get(agentIds[0])?.model || 'gpt-4o'
+
+      // 超时保护：裁决位于首个 agent_start 之前，必须给等待设上限
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let timedOut = false
+      let skips: GroupSkipHint[] | null = null
+      try {
+        const timeout = new Promise<null>((resolve) => {
+          timer = setTimeout(() => { timedOut = true; resolve(null) }, DECISION_TIMEOUT_MS)
+        })
+        skips = await Promise.race([
+          decideGroupParticipants(
+            config,
+            model,
+            {
+              conversationContext: formatDecisionContext(history, userMessage, agentNameById),
+              memberNames: Array.from(agentNameById.values()),
+              previousSkips: recallSkips(conversationId),
+            },
+            neutralAgent?.system_prompt?.trim() || undefined,
+          ),
+          timeout,
+        ])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
+
+      if (skips === null) {
+        // 瞬时故障不清上一轮记忆，下一轮仍可拿到提示
+        console.warn(`Group chat: orchestration ${timedOut ? 'timed out' : 'failed'} after ${Date.now() - startedAt}ms, all agents will reply`)
+      } else {
+        for (const hint of skips) {
+          const id = await resolveAgentByName(hint.name, agentNameById)
+          if (!id || skippedIds.has(id)) continue
+          if (userMentionedIds.includes(id)) continue // 用户点名者强制参与
+          skippedIds.add(id)
+          skippedHints.push({ name: agentNameById.get(id)!, reason: hint.reason })
+        }
+
+        // 弱模型可能回显整个名册：全跳过一律作废，失败开放
+        if (skippedIds.size > 0 && skippedIds.size >= agentNameById.size) {
+          console.warn('Group chat: orchestration skipped every member, falling back to all')
+          skippedIds.clear()
+          skippedHints.length = 0
+        }
+
+        rememberSkips(conversationId, skippedHints)
+        console.log(skippedHints.length > 0
+          ? `Group chat: orchestration skipped ${skippedHints.map((s) => (s.reason ? `${s.name}(${s.reason})` : s.name)).join(', ')} (${Date.now() - startedAt}ms)`
+          : `Group chat: orchestration skipped none (${Date.now() - startedAt}ms)`)
+      }
+    } catch (err) {
+      // 裁决失败不影响本轮：全员参与
+      console.error('Group chat: orchestration failed, all agents will reply:', (err as Error).message)
+    }
+  }
+
+  const participants = skippedIds.size > 0
+    ? agentIds.filter((id) => !skippedIds.has(id))
     : [...agentIds]
+
+  // Shuffle agent order for natural conversation feel
+  const shuffled = participants.length > 1
+    ? [participants[0], ...shuffleArray(participants.slice(1))]
+    : [...participants]
 
   send({ type: 'group_start', agent_ids: shuffled })
 
