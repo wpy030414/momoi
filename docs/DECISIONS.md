@@ -611,8 +611,35 @@
 
 **实现细节**：
 - `tools/group-mention-tool.ts`：`createMentionTool(mentionSignal)` 工厂函数
-- 返回 `MentionSignal { triggered, agentName, message }` 信号
-- `group-orchestrator.ts` 检测 `mentionSignal.triggered`，插入被点名 Agent 到队列头部
+- 返回 `MentionSignal { triggered, agentNames: string[], message }` 信号
+- `group-orchestrator.ts` 检测 `mentionSignal.triggered`，插入被点名 Agent 到队列头部（其余 Agent 照常发言）
 - 最多 5 次 @mention 重定向（`MAX_MENTION_REDIRECTS`），防止死循环
 
 **影响**：新增 `tools/group-mention-tool.ts`；`registry.ts` 动态创建（`createMentionTool` 非静态模块）
+
+## D30：群聊发言调度 — 中立 Agent 裁决每轮参与成员
+
+**日期**：2026-09-09
+
+**背景**：群聊每轮把全部成员串行跑一遍。即使某成员上一轮已明确表示「已经睡下 / 退下了 / 这个不懂」，下一轮仍被拉出来发言，破坏群聊真实感。
+
+**决策**：每轮开始前由中立 Agent 做一次轻量裁决，输出「本轮不需要参与的成员」；用户点名 / 提及者强制参与；被跳过者仍可被其他 Agent 的 @mention 唤醒。
+
+**原因**：
+- 中立 Agent 已有基础设施（固定 ID、管理端可配 model/system_prompt）与 LLM 调用范式（追问、建议），复用它做编排成本最低
+- 采用「每轮重判 + 上一轮缺席名单提示」：既让「睡着了 / 退下了」自然延续，也让「不懂」这类话题性判断在换话题后自动回归，无需持久化状态
+- 完全静默（仅服务端日志）：不引入 SSE 事件与客户端改动，协议面最小
+- 失败开放：裁决失败 / 超时 / 全跳过一律退回全员参与，绝不让编排错误导致无人回复
+
+**实现细节**：
+- `ai/neutral-agent.ts`：`decideGroupParticipants()`（`ORCHESTRATION_SYSTEM_PROMPT` 含 `[group-orchestration]` 标记；额外指示排在输出格式之前；行级容错解析，保留名字中的裸数字）
+- `ai/group-orchestrator.ts`：决策相位位于 shuffle 之前，10s 超时、整体 try/catch；生效跳过集 = 名字解析 ∩ 名册 − 用户点名者；全跳过整体作废；缺席记忆 `Map<conversationId, { at, skips }>`（TTL 10min、上限 200 会话，重启失效）
+- 上下文截断：最近 20 条、行 400 字 / 用户消息 1500 字 / 总量 6000 字，跳过 tool/system 行
+- 门控：成员数 > 1、history 非空、非全员被点名（首轮不裁决，省一次调用）
+
+**被否方案**：
+- 粘滞跳过（判定退场后持续沉默，直到被点名）：「不懂」这类话题性判断会被过度沉默
+- 客户端可见事件（`agents_skipped`）：需新增 SSE 事件 + 前端渲染（现有收尾 refetch 会抹掉客户端临时行），与「静默」取向不符
+- JSON 输出格式：行格式 + 容错解析 + 名册交集已足够安全
+
+**影响**：新增 `decideGroupParticipants()`；`group-orchestrator.ts` 决策相位与内存缺席记忆；每轮群聊 +1 次轻量 LLM 调用（位于首个 `agent_start` 前，约 1-3s 首字延迟）

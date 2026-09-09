@@ -11,8 +11,8 @@
 | `src/server/routes/chat.ts` | SSE 流式端点 `POST /api/chat`、附件拼装、对话创建、无限模式开关 |
 | `src/server/ai/pi-adapter.ts` | Pi Agent Core 适配层：系统提示词构建 + 工具适配 + 流式映射 + Agent 循环入口 |
 | `src/server/ai/provider.ts` | OpenAI 兼容 API 流式客户端（含多模态与 thinking 参数） |
-| `src/server/ai/group-orchestrator.ts` | 群聊编排：多 Agent 串行回复 + @mention 处理 + 无限模式 |
-| `src/server/ai/neutral-agent.ts` | 中立 Agent：无限模式追问 + 回复后追问建议 |
+| `src/server/ai/group-orchestrator.ts` | 群聊编排：发言调度 + 多 Agent 串行回复 + @mention 处理 + 无限模式 |
+| `src/server/ai/neutral-agent.ts` | 中立 Agent：无限模式追问 + 回复后追问建议 + 群聊发言调度 |
 | `src/server/ai/tools.ts` | 工具注册表（委托到内置工具 registry） |
 | `src/server/tools/group-mention-tool.ts` | @mention 工具：Agent 间点名调用 |
 | `src/shared/thinking.ts` | thinking 分段的编解码 |
@@ -61,7 +61,7 @@
 | `tool_result` | `{ id?: string, name: string, summary: string, artifacts?, agent_id?, agent_name? }` | 工具调用结果 |
 | `agent_start` | `{ agent_id: string, agent_name: string }` | 群聊中某个 Agent 开始回复 |
 | `agent_done` | `{ agent_id: string, agent_name: string, reply: string, suggestions: string[] }` | 群聊中某个 Agent 回复完成 |
-| `group_start` | `{ agent_ids: string[] }` | 群聊开始（含 Agent 顺序） |
+| `group_start` | `{ agent_ids: string[] }` | 群聊开始（含本轮参与者与顺序） |
 | `group_done` | `{ infinite?: boolean }` | 群聊结束 |
 | `suggestions` | `{ suggestions: string[], agent_id?: string \| null }` | 回复完成后由中立 Agent 异步补发的追问建议（在 done/agent_done/group_done 之后到达） |
 | `follow_up` | `{ text: string }` | 无限模式：中立 Agent 生成的追问 |
@@ -131,12 +131,13 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 
 ### 群聊编排（group-orchestrator.ts）
 
-1. **Agent 顺序随机化**：第一个 Agent 保持原位，其余随机排列（制造自然对话感）
-2. **历史格式化**（`prepareGroupHistory`）：将其他 Agent 的 assistant 消息转换为 `[Agent名字]: 内容` 的 user 角色消息，避免模型误认为是自己说过的话
-3. **串行执行**：Agent 逐个回复，后续 Agent 能看到前面 Agent 的发言
-4. **@mention 检测**：Agent 调用 `at_mention` 工具后，当前轮剩余 Agent 被跳过，被点名者立即应答。最多 5 次重定向
-5. **事件标记**：所有 SSE 事件附加 `agent_id` 和 `agent_name` 字段，`agent_start` / `agent_done` 标记 Agent 回复边界
-6. **无限模式**：所有 Agent 回复完毕后，中立 Agent 生成追问
+1. **发言调度**：每轮开始前由中立 Agent 裁决本轮参与成员（规则与降级见 `module-group-chat.md`）；失败/超时/全跳过 → 全员参与；用户点名者强制参与
+2. **Agent 顺序随机化**：第一个 Agent 保持原位，其余随机排列（制造自然对话感）
+3. **历史格式化**（`prepareGroupHistory`）：将其他 Agent 的 assistant 消息转换为 `[Agent名字]: 内容` 的 user 角色消息，避免模型误认为是自己说过的话
+4. **串行执行**：Agent 逐个回复，后续 Agent 能看到前面 Agent 的发言
+5. **@mention 检测**：Agent 调用 `at_mention` 工具后，被点名者插入队首立即应答，其余 Agent 照常发言。最多 5 次重定向
+6. **事件标记**：所有 SSE 事件附加 `agent_id` 和 `agent_name` 字段，`agent_start` / `agent_done` 标记 Agent 回复边界
+7. **无限模式**：所有 Agent 回复完毕后，中立 Agent 生成追问
 
 ### 客户端（useChat.ts）
 

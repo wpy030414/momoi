@@ -41,8 +41,8 @@
 │  │                     业务逻辑层                              │  │
 │  │  ┌──────────────────┐  ┌───────────────────┐  ┌────────────────┐  │  │
 │  │  │ ai/pi-adapter.ts │  │ai/group-orchestr. │  │ai/neutral-agent│  │  │
-│  │  │ Pi Agent Core    │  │ 群聊编排           │  │ 中立 Agent 追问│  │  │
-│  │  │ 适配层           │  │ (串行多Agent对话)  │  │ (无限模式)     │  │  │
+│  │  │ Pi Agent Core    │  │ 群聊编排           │  │ 中立 Agent 调度│  │  │
+│  │  │ 适配层           │  │ (串行多Agent对话)  │  │ (追问/建议)    │  │  │
 │  │  └──────────────────┘  └───────────────────┘  └────────────────┘  │  │
 │  │  ┌──────────────────┐  ┌───────────────┐  ┌────────────────┐  │  │
 │  │  │   tools/         │  │  skills/      │  │   config.ts    │  │  │
@@ -177,7 +177,7 @@ routes/chat.ts
   │     ├── ai/pi-adapter.ts
   │     ├── tools/group-mention-tool.ts（@mention）
   │     └── config.ts（getAgent）
-  ├── ai/neutral-agent.ts（中立追问）
+  ├── ai/neutral-agent.ts（中立：追问 / 建议 / 发言调度）
   ├── files/parser.ts（附件解析）
   ├── db.ts + schema.ts
   └── middleware/userAuth.ts + rateLimiter.ts

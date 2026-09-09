@@ -104,7 +104,7 @@ export const groupConversationAgents = sqliteTable('group_conversation_agents', 
   - **不可删除**：路由层直接检查 `NEUTRAL_AGENT_ID`，返回 403
   - **不可改名/换头像**：PUT 请求中 `name` 和 `avatar` 字段被路由层静默剥离（`delete body.name; delete body.avatar`）
   - 仅可修改 `model` 和 `system_prompt`
-- 用途：无限演算模式中生成追问（`follow_up` 事件）及每轮回复完成后的追问建议（`suggestions` 事件，单聊与群聊通用，无限模式除外）
+- 用途：无限演算模式中生成追问（`follow_up` 事件）、每轮回复完成后的追问建议（`suggestions` 事件，单聊与群聊通用，无限模式除外）及群聊每轮开始前的参与成员裁决（静默，无 SSE 事件）；中立 Agent 本身不在群成员名册内
 
 ## 迁移逻辑
 

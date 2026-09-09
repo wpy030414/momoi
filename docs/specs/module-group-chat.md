@@ -2,14 +2,14 @@
 
 ## 概述
 
-群聊系统支持多个 Agent 在同一对话中依次回复，模拟真实群聊体验。Agent 间可通过 `@mention` 工具点名对话。无限演算模式（同样适用于个体聊天）开启后，中立 Agent 自动生成追问实现持续对话。
+群聊系统支持多个 Agent 在同一对话中依次回复，模拟真实群聊体验。Agent 间可通过 `@mention` 工具点名对话。每轮开始前，中立 Agent 会裁决本轮参与成员（已退场或不懂当前话题者可暂不发言，用户点名者强制参与）。无限演算模式（同样适用于个体聊天）开启后，中立 Agent 自动生成追问实现持续对话。
 
 ## 涉及文件
 
 | 文件 | 职责 |
 |---|---|
 | `src/server/ai/group-orchestrator.ts` | 群聊编排：多 Agent 串行回复 + 上下文格式化 + @mention 处理 |
-| `src/server/ai/neutral-agent.ts` | 中立 Agent：生成无限模式追问 |
+| `src/server/ai/neutral-agent.ts` | 中立 Agent：无限模式追问 + 回复后追问建议 + 群聊发言调度 |
 | `src/server/ai/pi-adapter.ts` | Agent 循环适配层：系统提示词注入群组身份 + @mention 工具注册 |
 | `src/server/tools/group-mention-tool.ts` | @mention 工具：Agent 间点名调用 |
 | `src/server/routes/chat.ts` | 群聊入口 + 无限模式开关 + SSE 流管理 |
@@ -48,7 +48,7 @@ CREATE TABLE group_conversation_agents (
 ```typescript
 interface MentionSignal {
   triggered: boolean
-  agentName: string | null
+  agentNames: string[]
   message: string | null
 }
 ```
@@ -72,11 +72,18 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
   │
   └─ orchestrateGroupChat()
       │
-      ├─ 预加载 Agent 名称映射（agentNameById Map，并行）
-      ├─ 随机打乱 agent_ids 顺序（shuffleArray）
+      ├─ 预加载 Agent 名称映射（agentNameById + agentsById，并行）
+      ├─ 解析用户消息中的 @提及（userMentionedIds：强制参与且排队首）
+      │
+      ├─ 中立 Agent 发言调度（详见下节）
+      │   ├─ 门控：成员数 > 1、history 非空、非全员被点名
+      │   ├─ 输出本轮跳过名单；失败/超时/全跳过 → 全员参与
+      │   └─ 记录缺席名单（内存 Map，供下一轮裁决提示）
+      │
+      ├─ 随机打乱参与者顺序（shuffleArray）
       │   └─ 第一个 Agent 保持原位，其余随机
       │
-      ├─ 发送 SSE: group_start { agent_ids: [...] }
+      ├─ 发送 SSE: group_start { agent_ids: [...本轮参与者] }
       │
       ├─ prepareGroupHistory() — 初始化累计历史
       │   └─ 其他 Agent 的 assistant 消息 → user 角色 + [Agent名字]: 内容
@@ -104,7 +111,7 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
           ├─ 检查 mentionSignal.triggered
           │   └─ 被点名 Agent 通过 resolveAgentByName() 查找
           │       └─ 精确匹配 → 模糊匹配（contains）
-          │   └─ 成功 → remaining = [targetAgentId]（清空队列，只留被点名者）
+          │   └─ 成功 → 被点名者插入队首（已发言者获准再次回复，其余 Agent 照常发言）
           │   └─ mentionDepth++，超过 MAX_MENTION_REDIRECTS(5) 则停止
           │
           └─ 异常处理：捕获错误，发送 agent_done（含错误信息），继续下一个 Agent
@@ -139,6 +146,25 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
 - `chat.ts` 的 `history` 和 `reloadHistory` 均保留 `agent_id` 字段
 - 无限模式的中立 Agent 追问上下文显示 Agent 名字而非 UUID
 
+## 中立 Agent 发言调度
+
+每轮群聊开始前，中立 Agent（`NEUTRAL_AGENT_ID`）基于上下文裁决「本轮哪些成员不需要参与回复」，让已退场（睡下 / 离开 / 拒绝）或明确表示不懂当前话题的成员暂不发言。
+
+**触发门控**：成员数 > 1、history 非空、且非「全员都被用户点名」时才调用（首轮新群聊不裁决，省一次 LLM 调用）。
+
+**输入**：
+- 成员名册（名字列表；完整名册，不含中立 Agent）
+- 上一轮缺席名单（名字 + 原因）：内存 `Map<conversationId, { at, skips }>`，TTL 10 分钟、上限 200 会话（插入序淘汰），服务重启失效
+- 对话上下文：最近 20 条历史 + 当前用户消息；逐行截断（行 400 字 / 用户消息 1500 字 / 总量 6000 字，超限保留最近部分），跳过 `tool` / `system` 行
+
+**输出**：每行 `成员名 | 简短原因`，无人需跳过则输出 `无`。解析容忍编号 / bullet / 围栏 / 包裹引号 / 尾部括号注，**保留名字中的裸数字**（如「3号机」）；名字经 `resolveAgentByName` 模糊匹配回成员，匹配不到的忽略。
+
+**规则**：用户点名 / 提及的成员不得跳过且仍排到队首；被跳过者本轮仍可被其他 Agent 的 `at_mention` 唤醒（现有队列重插逻辑）；至少保留一名成员参与。
+
+**降级（失败开放）**：调用失败 / 10s 超时 / 空结果 → 全员参与，且**不更新**上一轮缺席记忆（瞬时故障不清记忆）；模型回显整个名册导致全跳过 → 整体作废、全员参与。
+
+**静默**：不产生任何 SSE 事件与客户端 UI 变化，仅服务端日志（`Group chat: orchestration skipped ...`）。
+
 ## 系统提示词（群组规则）
 
 `buildSystemPrompt`（`pi-adapter.ts`）在 `isGroup=true` 时追加以下规则：
@@ -151,7 +177,7 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
 - 不要复述、引用或延续其他 Agent 已经说过的内容，也不要假装那些话是你说的。
 - 根据用户的最新消息，用你自己的人设独立、自然地回答。
 - 如果你需要某个特定 Agent 的专业知识，请使用 at_mention 工具 @他们。
-- 被 @ 的 Agent 会立即回复，其他 Agent 本轮会被跳过。
+- 被 @ 的 Agent 会在本轮内优先回复，但其他 Agent 仍然会照常发言。
 - 只在你确实需要对方回答用户问题或提供互补知识时才使用 at_mention，不要为了社交而 @。
 - 不要 @ 你自己。
 - 每次对话最多使用一次 at_mention。
@@ -167,12 +193,12 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
 - `message` (string, required) -- 发送给被点名 Agent 的消息
 
 **行为**：
-- 设置 `mentionSignal.triggered = true`
-- 返回 `terminate: true`（终止当前 Agent 的工具循环）
+- 设置 `mentionSignal.triggered = true`，记录 `agentNames` 与 `message`
+- 返回 `terminate: false`（工具循环继续，Agent 在回复文本中自然写出 @名字）
 - 编排器检测到信号后，通过 `resolveAgentByName` 查找目标 Agent：
   - 第一轮：精确匹配（大小写不敏感）
   - 第二轮：模糊匹配（name 包含搜索词）
-- 被点名 Agent 插入到处理队列头部（清空剩余队列，只留该 Agent）
+- 被点名 Agent 插入到处理队列头部；已发言者清出 `repliedAgents` 以获准再次回复；其余 Agent 照常发言
 - 最多 5 次 @mention 重定向（`MAX_MENTION_REDIRECTS`），防止死循环
 - 被点名 Agent 的应答再触发 @mention 时，继续递归处理（depth 计数）
 - 点名不存在的 Agent 名称时，信号静默忽略，继续处理后续 Agent
@@ -222,7 +248,7 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
 
 ```
 conversation_id { id }
-  → group_start { agent_ids: [...] }
+  → group_start { agent_ids: [...] }        // 本轮实际参与者（可能少于群成员）
     → agent_start { agent_id, agent_name }
       → token / thinking / tool_call / tool_result  (均带 agent_id + agent_name)
     → agent_done { agent_id, agent_name, reply, suggestions }   // suggestions 正常路径为空数组
@@ -246,7 +272,7 @@ conversation_id { id }
 | `suggestions` | 中立 Agent 补发的追问建议：更新最后一条 assistant 气泡的 chips（`agent_id` 为最后发言 Agent）；用户已抢发新消息或 agent_id 不匹配时静默丢弃 |
 | `follow_up` | 创建 user 消息气泡；群聊模式下不创建 assistant 占位气泡（由下一轮 `agent_start` 创建） |
 | `infinite_mode_off` | 设置 `loading=false` |
-| `group_start` | 静默消费（不产生 UI 变化） |
+| `group_start` | 静默消费（不产生 UI 变化）；`agent_ids` 为本轮实际参与者 |
 
 **气泡渲染**：`MessageBubble` 在非用户消息且 `agentName` 存在时，显示 Agent 名字标签和头像（`agentAvatar` 优先，否则默认 Bot 图标）。
 
@@ -336,8 +362,8 @@ conversation_id { id }
 1. **Agent 回复顺序**：第一个 Agent 保持原位，其余随机打乱（`shuffleArray`），每轮不同
 2. **上下文格式化**：前序 Agent 回复以 user 角色 + `[名字]: 内容` 注入后续上下文（防止复述/照抄）
 3. **@mention 重定向**：最多 5 次，防止死循环
-4. **@mention 队列清空**：被点名时清空剩余队列，只留被点名 Agent
-5. **中立 Agent 不参与群聊回复**：仅生成无限模式追问；`NEUTRAL_AGENT_ID` 在 Agent 列表 API 中排除，在添加 Agent 时拒绝
+4. **@mention 优先回复**：被点名 Agent 插入队首，其余 Agent 照常发言（不清空队列）
+5. **中立 Agent 不参与群聊回复**：仅生成无限模式追问、回复后追问建议与群聊发言调度；`NEUTRAL_AGENT_ID` 在 Agent 列表 API 中排除，在添加 Agent 时拒绝
 6. **无限模式状态存于内存**：`infiniteState` Map，服务重启后需重新开启
 7. **无限模式消息上限**：500 条后自动关闭（`MAX_INFINITE_MESSAGES`）
 8. **群聊对话创建**：`conversations.type = 'group'`，同时插入 `group_conversation_agents`
@@ -346,6 +372,10 @@ conversation_id { id }
 11. **Agent 不存在跳过**：`getAgent` 返回 null 时 `console.warn` 并跳过
 12. **SSE 写入链**：`writeChain` 串行化 `writeSSE` 调用，防止尾部事件（`agent_done`、`group_done`）因 `stream.close()` 提前关闭而丢失（D23）
 13. **保活**：每 15 秒发送 SSE 注释 `:\n\n`，防止代理/浏览器关闭空闲连接（群聊可能耗时较长）
+14. **发言调度失败开放**：裁决失败 / 超时（10s）/ 空结果 → 全员参与；模型回显整个名册导致全跳过 → 整体作废
+15. **用户点名强制参与**：用户 @ 或提及的成员不进入跳过集，且仍排到队首
+16. **发言调度静默**：不产生 SSE 事件与客户端 UI 变化，仅服务端日志
+17. **缺席记忆为内存态**：`Map<conversationId, { at, skips }>`，TTL 10 分钟、上限 200 会话，重启失效
 
 ## 客户端状态管理（useGroupChat.ts）
 
@@ -385,3 +415,6 @@ conversation_id { id }
 8. @mention 死循环防护生效（最多 5 次重定向）
 9. 无限模式消息上限 500 条后自动关闭
 10. 群聊与单 Agent 对话可共存，切换对话时正确识别模式
+11. 已声明退场 / 不懂当前话题的成员在后续轮次被跳过；用户 @ 后立即回归
+12. 发言调度失败 / 超时 / 全员被跳过 → 全员参与（失败开放），不出现未捕获异常
+13. 群聊发言调度不产生任何 SSE 事件与客户端 UI 变化
