@@ -768,18 +768,21 @@ export async function runPiAgentLoop(
   agentName?: string,
   groupAgentNames?: string[],
   mentionedBy?: string | null,
-): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[] }> {
+): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[]; agentId?: string }> {
   const config = await getConfig()
 
   // Resolve agent: use specified agentId, or fall back to first available agent
   let agentModel = config.api_endpoint ? 'gpt-4o' : '' // fallback
   let agentSystemPrompt = DEFAULT_SYSTEM_PROMPT
+  // 实际采用的 Agent：供调用方落库 messages.agent_id（单聊也记录发言者，历史/导出/气泡标签一致）
+  let resolvedAgentId: string | undefined
 
   if (agentId) {
     const agent = await getAgent(agentId)
     if (agent) {
       agentModel = agent.model
       agentSystemPrompt = agent.system_prompt
+      resolvedAgentId = agent.id
     }
   }
 
@@ -790,6 +793,7 @@ export async function runPiAgentLoop(
     if (fallbackAgent) {
       agentModel = fallbackAgent.model
       agentSystemPrompt = fallbackAgent.system_prompt
+      resolvedAgentId = fallbackAgent.id
     }
   }
   const convId = conversationId || 'default'
@@ -864,7 +868,7 @@ export async function runPiAgentLoop(
     )
   } catch (err) {
     send({ type: 'error', message: err instanceof Error ? err.message : 'Unknown error' })
-    return { reply: '', suggestions: [], thinking: sseState.fullThinking }
+    return { reply: '', suggestions: [], thinking: sseState.fullThinking, agentId: resolvedAgentId }
   }
 
   // 11. 解析最终回复
@@ -875,5 +879,6 @@ export async function runPiAgentLoop(
     suggestions,
     thinking: sseState.fullThinking,
     artifacts: sseState.producedArtifacts.length > 0 ? sseState.producedArtifacts : undefined,
+    agentId: resolvedAgentId,
   }
 }

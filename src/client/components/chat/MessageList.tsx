@@ -28,9 +28,11 @@ interface MessageListProps {
   agentAvatar?: string | null
   /** Group chat: agent lookup by id */
   agents?: AgentBrief[]
+  /** Direct chat: fallback display name for messages without agent_id（历史消息 / 流式气泡） */
+  fallbackAgentName?: string
 }
 
-export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, agents }: MessageListProps) {
+export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, agents, fallbackAgentName }: MessageListProps) {
   // Only the last assistant message shows its suggestion chips — older ones
   // were for a past turn and are meaningless as "what to ask next".
   const lastAssistantIdx = [...messages]
@@ -60,7 +62,7 @@ export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, age
             showSuggestions={idx === lastAssistantIdxFromEnd}
             onRevert={msg.role === 'user' && msg.id ? () => onRevert?.(idx) : undefined}
             agentAvatar={msgAgentAvatar}
-            agentName={msgAgentName || msg.agent_name || undefined}
+            agentName={msgAgentName || msg.agent_name || fallbackAgentName}
           />
         )
       })}

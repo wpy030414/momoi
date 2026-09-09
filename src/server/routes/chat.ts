@@ -391,14 +391,14 @@ chatRoute.post('/', async (c) => {
           },
         })
       } else {
-        const { reply, suggestions, thinking, artifacts } = await runPiAgentLoop(
+        const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId } = await runPiAgentLoop(
           currentPrompt, currentHistory, send, undefined,
           thinking_mode !== false, convId, userId,
           agent_id || undefined,
           undefined, false, isInfinite,
         )
         if (reply) {
-          await saveAssistantMsg(reply, thinking, suggestions, artifacts)
+          await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId)
         }
       }
 
@@ -436,14 +436,14 @@ chatRoute.post('/', async (c) => {
             },
           })
         } else {
-          const { reply, suggestions, thinking, artifacts } = await runPiAgentLoop(
+          const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId } = await runPiAgentLoop(
             currentPrompt, currentHistory, send, undefined,
             thinking_mode !== false, convId, userId,
             agent_id || undefined,
             undefined, false, isInfinite,
           )
           if (reply) {
-            await saveAssistantMsg(reply, thinking, suggestions, artifacts)
+            await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId)
           } else {
             // Agent returned empty reply — stop
             infiniteState.delete(convId)

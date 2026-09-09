@@ -210,6 +210,9 @@ export function App() {
     return <LoginScreen onLogin={handleLogin} />
   }
 
+  // 当前会话的 Agent（单聊气泡标签/头像优先用它，而非下拉选择）
+  const activeAgentId = chat.conversations.find((c) => c.id === chat.activeId)?.agent_id || null
+
   return (
     <div className="flex h-full overflow-hidden bg-background">
       {/* Sidebar */}
@@ -274,6 +277,7 @@ export function App() {
           agents={agents}
           agentsLoading={agentsLoading}
           selectedAgentId={selectedAgentId}
+          activeAgentId={activeAgentId}
           onAgentChange={setSelectedAgentId}
           isGroup={chat.isGroupMode}
           groupAgents={chat.groupAgents}

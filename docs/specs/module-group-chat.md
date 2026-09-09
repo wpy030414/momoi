@@ -41,7 +41,7 @@ CREATE TABLE group_conversation_agents (
 
 ### 消息追踪
 
-`messages` 表新增 `agent_id` 列，记录每条助手消息的发言 Agent。历史加载时保留 `agent_id`，支持回溯发言者身份。
+`messages` 表新增 `agent_id` 列，记录每条助手消息的发言 Agent（群聊与单聊均记录）。历史加载时保留 `agent_id`，支持回溯发言者身份。
 
 ### MentionSignal
 

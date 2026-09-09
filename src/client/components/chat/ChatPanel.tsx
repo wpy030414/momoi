@@ -36,6 +36,8 @@ interface ChatPanelProps {
   agents?: AgentBrief[]
   agentsLoading?: boolean
   selectedAgentId?: string | null
+  /** 当前会话的 Agent（单聊历史消息归属，优先于下拉选择） */
+  activeAgentId?: string | null
   onAgentChange?: (id: string) => void
   /** Group chat mode */
   isGroup?: boolean
@@ -48,7 +50,7 @@ interface ChatPanelProps {
 
 export function ChatPanel({
   messages, loading, onSend, onCancel, onRevert, backgroundImage, supportAttachments,
-  agents, agentsLoading, selectedAgentId, onAgentChange,
+  agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
   isGroup, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
 }: ChatPanelProps) {
@@ -65,7 +67,12 @@ export function ChatPanel({
 
   const hasMessages = messages.length > 0
   const hasAgents = agents && agents.length > 0
-  const selectedAgentAvatar = selectedAgentId ? agents?.find((a) => a.id === selectedAgentId)?.avatar : null
+  // 单聊气泡归属的 Agent：优先当前会话的 Agent（历史消息都来自它），否则回退到下拉选择
+  const directAgent = isGroup
+    ? undefined
+    : (activeAgentId ? agents?.find((a) => a.id === activeAgentId) : undefined)
+      || (selectedAgentId ? agents?.find((a) => a.id === selectedAgentId) : undefined)
+  const directAgentAvatar = directAgent?.avatar || null
 
   // Time-of-day greeting
   const timeGreeting = useMemo(() => {
@@ -192,8 +199,9 @@ export function ChatPanel({
               else onSend(text, thinkingMode, undefined, selectedAgentId, false, undefined, infiniteMode)
             }}
             onRevert={handleRevert}
-            agentAvatar={isGroup ? null : selectedAgentAvatar}
-            agents={isGroup ? (groupAgents || []) : undefined}
+            agentAvatar={isGroup ? null : directAgentAvatar}
+            agents={isGroup ? (groupAgents || []) : agents}
+            fallbackAgentName={isGroup ? undefined : directAgent?.name}
           />
         )}
       </div>

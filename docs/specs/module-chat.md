@@ -100,7 +100,7 @@
 5. **重试去重**：`_retry === true` 时**跳过**保存用户消息，避免重复入库
 6. **更新时间**：每次收到用户消息都刷新 `conversations.updated_at`
 7. **历史裁剪**：从 DB 读取该对话全部消息后 `slice(0, -1)` 去掉刚插入的当前消息，作为 history 传入 AI 循环
-8. **助手消息持久化**：仅当 `reply` 非空才写入，保存 `content`、`thinking`、`suggestions`、`attachments`、`agent_id`
+8. **助手消息持久化**：仅当 `reply` 非空才写入，保存 `content`、`thinking`、`suggestions`、`attachments`、`agent_id`（单聊记录实际采用的 Agent，群聊记录发言者）
 9. **追问建议补发**：非无限模式下，本轮最后一条 assistant 消息入库后由中立 Agent（其 `model` / `system_prompt` 现查）基于最近 20 条上下文生成 3 条追问建议：先 `UPDATE messages.suggestions`，再补发 `suggestions` SSE 事件。`done`/`agent_done` 中的 `suggestions` 字段正常路径为空数组。生成失败或超时（30s）静默降级为无建议；兜底路径（模型自发输出围栏被解析出建议）跳过生成，避免重复
 10. **文档附件复制到工作区**：`docx/pptx/xlsx/xls/pdf` 附件会自动复制到对话工作区
 11. **无限模式循环**：每次 Agent 回复后由中立 Agent 生成追问，重新加载历史并启动新一轮 AI 循环，直到关闭或达上限
@@ -156,9 +156,9 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
    - 选中对话 → `pushState`（支持后退）
    - 新建/删除当前对话 → 清除 hash
    - 监听 `hashchange` 支持浏览器前进后退
-10. **导出**：客户端拼接 `# 标题` + 每条 `### User` / `### <Agent 名称>`，以 `---` 分隔，生成 `.md` 下载
+10. **导出**：客户端拼接 `# 标题` + 每条 `### User` / `### <Agent 名称>`，以 `---` 分隔，生成 `.md` 下载；Agent 名称解析 = 消息 `agent_id`（群聊成员 + 全局 Agent 列表）→ 单聊回退会话所属 Agent
 11. **多轮思考分段渲染**：SSE `thinking` 事件带 `round` 字段时，前端按轮聚合为 `thinkingSegments`；历史消息通过 `decodeThinkingToSegments` 切分
-12. **群聊消息渲染**：消息带 `agent_id` / `agent_name` 字段，显示 Agent 头像和名称
+12. **消息渲染**：群聊按 `msg.agent_id` 显示各 Agent 头像和名称；单聊同样显示 Agent 名称（优先消息的 `agent_id`，回退当前会话的 Agent，再回退下拉选择）
 
 ### 客户端（useGroupChat.ts）
 

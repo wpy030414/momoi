@@ -572,14 +572,28 @@ export function useChat() {
   const exportConversation = useCallback(async (id: string) => {
     try {
       const res = await api.getConversation(id)
+      // Agent 名称映射：群聊成员（res.agents）+ 全局 Agent 列表（覆盖单聊与已退群成员）
       const agentMap = new Map<string, string>()
-      if (res.agents) {
-        res.agents.forEach((a) => agentMap.set(a.id, a.name))
+      res.agents?.forEach((a) => agentMap.set(a.id, a.name))
+      try {
+        const appInfo = await api.getAppName()
+        appInfo.agents?.forEach((a) => {
+          if (!agentMap.has(a.id)) agentMap.set(a.id, a.name)
+        })
+      } catch { /* 名称补全失败不影响导出 */ }
+      // 单聊：历史消息可能没有 agent_id，回退到会话所属 Agent
+      const conversationAgentName = res.conversation.type === 'direct' && res.conversation.agent_id
+        ? agentMap.get(res.conversation.agent_id)
+        : undefined
+      const nameOf = (m: { role: string; agent_id?: string | null }): string => {
+        if (m.role === 'user') return 'User'
+        if (m.role === 'system') return 'System'
+        if (m.role === 'tool') return 'Tool'
+        return (m.agent_id ? agentMap.get(m.agent_id) : undefined) || conversationAgentName || 'Assistant'
       }
       const lines = res.messages.map((m) => {
         const time = m.created_at ? new Date(m.created_at * 1000).toLocaleString() : ''
-        const header = time ? `### ${m.role === 'user' ? 'User' : m.role === 'system' ? 'System' : m.role === 'tool' ? 'Tool' : (m.agent_id && agentMap.get(m.agent_id)) || 'Assistant'} — ${time}` : `### ${m.role === 'user' ? 'User' : m.role === 'system' ? 'System' : m.role === 'tool' ? 'Tool' : (m.agent_id && agentMap.get(m.agent_id)) || 'Assistant'}`
-        return `${header}\n${m.content}`
+        return `### ${nameOf(m)}${time ? ` — ${time}` : ''}\n${m.content}`
       })
       const title = res.conversation.title || 'conversation'
       const body = `# ${title}\n\n${lines.join('\n\n---\n\n')}\n`

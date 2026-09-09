@@ -13,6 +13,7 @@ export function StatsPanel({ token }: StatsPanelProps) {
   const [conversations, setConversations] = useState<any[]>([])
   const [currentPage, setCurrentPage] = useState(1)
   const [expandedConvId, setExpandedConvId] = useState<string | null>(null)
+  const [expandedConv, setExpandedConv] = useState<{ type?: string; agent_id?: string | null } | null>(null)
   const [expandedMessages, setExpandedMessages] = useState<any[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [agentNames, setAgentNames] = useState<Map<string, string>>(new Map())
@@ -37,13 +38,19 @@ export function StatsPanel({ token }: StatsPanelProps) {
     if (msg.role === 'user') return 'User'
     if (msg.role === 'system') return 'System'
     if (msg.role === 'tool') return 'Tool'
-    return msg.agent_id && agentNames.has(msg.agent_id) ? agentNames.get(msg.agent_id)! : 'Assistant'
+    if (msg.agent_id && agentNames.has(msg.agent_id)) return agentNames.get(msg.agent_id)!
+    // 单聊：历史消息可能没有 agent_id，回退到会话所属 Agent
+    if (expandedConv?.type === 'direct' && expandedConv.agent_id && agentNames.has(expandedConv.agent_id)) {
+      return agentNames.get(expandedConv.agent_id)!
+    }
+    return 'Assistant'
   }
 
   const handleRowClick = async (convId: string) => {
     if (expandedConvId === convId) {
       setExpandedConvId(null)
       setExpandedMessages([])
+      setExpandedConv(null)
       return
     }
     setExpandedConvId(convId)
@@ -51,9 +58,11 @@ export function StatsPanel({ token }: StatsPanelProps) {
     try {
       const data = await api.getAdminConversationMessages(token, convId)
       setExpandedMessages(data.messages)
+      setExpandedConv(data.conversation)
     } catch (err) {
       console.error(err)
       setExpandedMessages([])
+      setExpandedConv(null)
     }
     setLoadingMessages(false)
   }
