@@ -38,10 +38,9 @@ export function AdminScreen({ onBack, admin }: AdminScreenProps) {
         <div className="flex items-center gap-4 px-6 border-b" style={{ height: '60px' }}>
           <button
             onClick={onBack}
-            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
-            {t('settings.backToChat')}
           </button>
           <h1 className="text-lg font-semibold">{t('settings.title')}</h1>
         </div>

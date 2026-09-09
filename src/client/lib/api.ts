@@ -95,6 +95,7 @@ export const api = {
   // Admin
   adminAuth: (key: string) => request<{ token: string; expires_at: number }>('/api/admin/auth', { method: 'POST', body: JSON.stringify({ key }) }),
   getConfig: (token: string) => request<import('@/shared/types').AppConfig>('/api/admin/config', { headers: { Authorization: `Bearer ${token}` } }),
+  getEnvGateway: (token: string) => request<{ api_endpoint: string; api_key: string; model: string }>('/api/admin/config/env-gateway', { headers: { Authorization: `Bearer ${token}` } }),
   updateConfig: (token: string, config: Partial<import('@/shared/types').AppConfig>) => request<import('@/shared/types').AppConfig>('/api/admin/config', { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(config) }),
 
   // Admin - Agent CRUD

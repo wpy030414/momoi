@@ -2,6 +2,9 @@ import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import { adminAuthMiddleware, signAdminToken, verifyAdminKey } from '../auth.js'
 import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer } from '../config.js'
+import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '../../shared/constants.js'
+import fs from 'fs'
+import path from 'path'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
@@ -47,6 +50,32 @@ adminRoute.put('/config', async (c) => {
   const body = await c.req.json()
   const config = await updateConfig(body)
   return c.json(config)
+})
+
+// Get gateway defaults from .env (real-time file read, not cached)
+adminRoute.get('/config/env-gateway', async (c) => {
+  const envPath = path.resolve('.env')
+  const envVars: Record<string, string> = {}
+  try {
+    const raw = fs.readFileSync(envPath, 'utf-8')
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx === -1) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      const val = trimmed.slice(eqIdx + 1).trim()
+      envVars[key] = val
+    }
+  } catch {
+    // .env not found, fall back to process.env
+  }
+
+  return c.json({
+    api_endpoint: envVars['OPENAI_BASE_URL'] || process.env.OPENAI_BASE_URL || DEFAULT_API_ENDPOINT,
+    api_key: envVars['OPENAI_API_KEY'] || process.env.OPENAI_API_KEY || '',
+    model: envVars['OPENAI_MODEL'] || process.env.OPENAI_MODEL || DEFAULT_MODEL,
+  })
 })
 
 // ---- Agent CRUD ----
