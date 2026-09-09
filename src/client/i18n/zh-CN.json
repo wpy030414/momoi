@@ -51,8 +51,8 @@
     "currentMembers": "当前成员"
   },
   "sidebar": {
-    "newChat": "新对话",
-    "newGroupChat": "新群组对话",
+    "newChat": "新会话",
+    "newGroupChat": "新群组会话",
     "noConversations": "暂无对话",
     "recent": "最近",
     "rename": "重命名",

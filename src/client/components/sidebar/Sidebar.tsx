@@ -154,7 +154,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
           {t('sidebar.newChat')}
         </Button>
         <Button className="w-full gap-2" variant="outline" onClick={onNewGroup}>
-          <MessagesSquare className="h-4 w-4" />
+          <Plus className="h-4 w-4" />
           {t('sidebar.newGroupChat')}
         </Button>
       </div>

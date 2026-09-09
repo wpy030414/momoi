@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import type { Attachment, ThinkingSegment } from '@/shared/types'
 
 interface AgentBrief {
@@ -161,15 +162,16 @@ export function ChatPanel({
                 ) : hasAgents ? (
                   <h2 className="text-xl font-semibold flex items-center gap-1 flex-wrap">
                     <span>{timeGreeting}{t('chat.greetingSuffix')}</span>
-                    <select
-                      value={selectedAgentId || ''}
-                      onChange={(e) => onAgentChange?.(e.target.value)}
-                      className="text-xl font-semibold bg-transparent border-none outline-none cursor-pointer text-primary underline underline-offset-4 decoration-primary/30 hover:decoration-primary"
-                    >
-                      {agents!.map((a) => (
-                        <option key={a.id} value={a.id} className="text-base">{a.name}</option>
-                      ))}
-                    </select>
+                    <Select value={selectedAgentId || ''} onValueChange={(v) => onAgentChange?.(v)}>
+                      <SelectTrigger className="h-auto w-auto gap-1 border-none bg-transparent p-0 text-xl font-semibold text-primary shadow-none underline decoration-primary/30 underline-offset-4 hover:decoration-primary focus:ring-0 focus:ring-offset-0 data-[state=open]:decoration-primary [&_svg]:h-5 [&_svg]:w-5">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {agents!.map((a) => (
+                          <SelectItem key={a.id} value={a.id} className="text-base">{a.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </h2>
                 ) : (
                   <h2 className="text-xl font-semibold text-destructive">{t('settings.agentRequired')}</h2>
