@@ -53,7 +53,7 @@
 | `src/client/` | React 前端（入口：`main.tsx`） |
 | `src/server/` | Hono 后端（入口：`index.ts`） |
 | `src/server/ai/` | Pi Agent Core 适配层（`pi-adapter.ts`）+ 群聊编排（`group-orchestrator.ts`）+ 中立 Agent（`neutral-agent.ts`） |
-| `src/server/tools/` | 内置工具系统（11 个工具：文件/网络/文档/技能/bash/群聊） |
+| `src/server/tools/` | 内置工具系统（11 个工具：文件/网络/文档/技能/bash/群聊）+ MCP 客户端（`mcp-client.ts`） |
 | `src/server/skills/` | 技能加载和注册（`loader.ts` → `registry.ts`） |
 | `src/server/files/` | 文件附件解析（`parser.ts`：图片→base64、xlsx→csv、pdf→text） |
 | `src/server/middleware/` | 用户 JWT 认证中间件（`userAuth.ts`）+ IP 速率限制（`rateLimiter.ts`） |

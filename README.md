@@ -100,8 +100,9 @@ AI 在对话中可自动调用以下内置工具（沙盒隔离，每对话独�
 | `load_skill` | 按需加载技能完整内容 |
 | `list_skill_files` | 列出技能目录中的文件 |
 | `at_mention` | 群聊中 @ 点名其他 Agent（触发即时应答） |
+| `{serverName}/{toolName}` | MCP 工具（动态注入，来自外部 MCP 服务器） |
 
-所有工具在 `data/workspaces/{conversationId}/` 沙盒内执行，防止访问宿主文件系统。详见 `docs/specs/module-tool-system.md`。
+所有工具在 `data/workspaces/{conversationId}/` 沙盒内执行，防止访问宿主文件系统。MCP 工具通过 HTTP+SSE 连接外部 MCP 服务器，工具列表缓存 5 分钟。详见 `docs/specs/module-tool-system.md`。
 
 ## AI 循环
 

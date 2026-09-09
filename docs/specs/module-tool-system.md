@@ -132,6 +132,7 @@
 | `src/server/tools/skill-tools.ts` | 技能工具：`load_skill`、`list_skill_files` |
 | `src/server/tools/bash-tool.ts` | Bash 命令执行：`bash`（受限沙盒执行） |
 | `src/server/tools/group-mention-tool.ts` | @mention 工具：`at_mention`（Agent 间点名调用） |
+| `src/server/tools/mcp-client.ts` | MCP 客户端：HTTP+SSE 连接外部 MCP 服务器，动态注入工具 |
 | `src/server/tools/index.ts` | 统一导出 |
 | `src/server/ai/tools.ts` | 调用 `getToolDefinitions()` 聚合工具定义 |
 | `src/server/ai/pi-adapter.ts` | Pi Agent 适配层：工具适配 + 循环入口 + 事件映射 |

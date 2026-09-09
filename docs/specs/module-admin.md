@@ -179,24 +179,34 @@
 | POST | `/api/admin/skills/install` | 安装/刷新已有目录 |
 | DELETE | `/api/admin/skills/:name` | 卸载技能 |
 
+### MCP 服务器
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/admin/mcp-servers` | 列出 MCP 服务器 |
+| POST | `/api/admin/mcp-servers` | 新增 MCP 服务器 |
+| PUT | `/api/admin/mcp-servers/:id` | 更新 MCP 服务器 |
+| DELETE | `/api/admin/mcp-servers/:id` | 删除 MCP 服务器 |
+
 > 插件系统已移除（commit 3530176），相关端点不再存在。
 
 ## 前端面板（SettingsDialog）
 
-5 个标签页：
+6 个标签页：
 
 1. **Agent** — Agent 列表 / 创建 / 编辑 / 删除（中立 Agent 不可删除，名称/头像不可修改）
 2. **Gateway** — API 地址、密钥（密钥输入框为 `type=password` 遮挡显示 + 明文切换按钮）
 3. **Branding** — 应用名称、Favicon（上传转 base64）、聊天背景图
-4. **Skills** — 技能列表 / 上传 / 卸载
-5. **Stats** — 用户/对话/消息统计 + 对话表格（可展开查看消息）
+4. **MCP** — MCP 服务器管理（添加/编辑/删除/启用禁用），存储于 `mcp_servers` 表
+5. **Skills** — 技能列表 / 上传 / 卸载
+6. **Stats** — 用户/对话/消息统计 + 对话表格（可展开查看消息）
 
 管理面板使用管理员 JWT（通过 `useAdmin` hook 管理），调用 API 时显式传入 `Authorization`，不被用户 token 覆盖（见 `lib/api.ts` 的「caller 提供 Authorization 则不覆盖」逻辑）。
 
 ## 安全约束
 
 1. `ADMIN_KEY` 永远不通过 API 返回给前端 ✅ 已实现
-2. 受保护路由：`/api/admin/config`、`/api/admin/skills/*`、`/api/admin/stats` ✅ 已实现
+2. 受保护路由：`/api/admin/config`、`/api/admin/skills/*`、`/api/admin/stats`、`/api/admin/mcp-servers`、`/api/admin/mcp-servers/*` ✅ 已实现
 3. 空密钥不被视为有效（`verifyAdminKey` 检查 `key !== ''`）✅ 已实现
 4. 统计面板可跨用户读取所有对话内容 —— 属管理员特权，受管理员 JWT 保护（`use('/stats', ...)` + `use('/stats/*', ...)` 双挂载覆盖精确路径与所有子路径；曾因只挂 `/stats` 导致 `/stats/conversations` 及 messages 子端点匿名可访问，已修复并实测验证）
 
