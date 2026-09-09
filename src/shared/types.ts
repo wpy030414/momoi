@@ -123,7 +123,22 @@ export type ServerMessage =
   | { type: 'follow_up'; text: string }
   | { type: 'infinite_mode_off' }
   | { type: 'done'; reply: string; suggestions: string[]; agent_id?: string; agent_name?: string; infinite?: boolean }
+  | { type: 'ask_user'; question_id: string; tool_call_id: string; questions: AskUserQuestion[]; agent_id?: string; agent_name?: string }
   | { type: 'error'; message: string; agent_id?: string; agent_name?: string }
+
+// ---- Ask User Tool ----
+
+export interface AskUserOption {
+  label: string
+  description?: string
+}
+
+export interface AskUserQuestion {
+  header: string          // 短标签（最多 12 字符）
+  question: string        // 完整问题
+  options: AskUserOption[]  // 2-4 个选项
+  multiSelect: boolean    // 是否多选
+}
 
 // ---- Admin Auth ----
 

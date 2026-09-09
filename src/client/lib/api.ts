@@ -89,6 +89,9 @@ export const api = {
   // Infinite Mode
   setInfiniteMode: (conversationId: string, enabled: boolean) => request<{ success: boolean; enabled: boolean }>('/api/chat/infinite-mode', { method: 'POST', body: JSON.stringify({ conversation_id: conversationId, enabled }) }),
 
+  // Ask User
+  answerQuestion: (conversationId: string, questionId: string, answer: string, selectedOptions?: string[]) => request<{ success: boolean }>(`/api/chat/${conversationId}/answer`, { method: 'POST', body: JSON.stringify({ question_id: questionId, answer, selected_options: selectedOptions }) }),
+
   // App config
   getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; show_github: boolean; agents: Array<{ id: string; name: string; avatar: string }> }>('/api/app-name'),
 

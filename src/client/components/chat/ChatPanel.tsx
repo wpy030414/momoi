@@ -3,8 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
+import { QuestionBar } from './QuestionBar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
-import type { Attachment, ThinkingSegment } from '@/shared/types'
+import type { Attachment, ThinkingSegment, AskUserQuestion } from '@/shared/types'
 
 interface AgentBrief {
   id: string
@@ -47,6 +48,10 @@ interface ChatPanelProps {
   /** Infinite mode */
   infiniteMode?: boolean
   onInfiniteModeChange?: (enabled: boolean) => void
+  /** Ask user tool */
+  pendingQuestion?: (import('@/shared/types').ServerMessage & { type: 'ask_user' }) | null
+  onSendAnswer?: (answer: string, selectedOptions?: string[]) => void
+  onSkipAnswer?: () => void
 }
 
 export function ChatPanel({
@@ -54,6 +59,7 @@ export function ChatPanel({
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
   isGroup, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
+  pendingQuestion, onSendAnswer, onSkipAnswer,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -208,12 +214,21 @@ export function ChatPanel({
         )}
       </div>
 
+      {/* Ask user question bar */}
+      {pendingQuestion && pendingQuestion.questions.length > 0 && (
+        <QuestionBar
+          questions={pendingQuestion.questions}
+          onAnswer={(answer, selectedOptions) => onSendAnswer?.(answer, selectedOptions)}
+          onSkip={() => onSkipAnswer?.()}
+        />
+      )}
+
       {/* Input area */}
       {hasMessages && (
         <div className="relative z-10">
           <InputBar
             onSend={handleSend}
-            disabled={loading}
+            disabled={loading || !!pendingQuestion}
             externalValue={revertedText}
             onExternalValueConsumed={handleExternalValueConsumed}
             thinkingMode={thinkingMode}

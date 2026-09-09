@@ -6,6 +6,9 @@ import type { ToolDefinition } from '../../shared/types.js'
 import type { SandboxFS } from './workspace.js'
 import type { MentionSignal } from './group-mention-tool.js'
 
+/** Pi Agent Core 的进度回调类型（避免直接依赖 pi-agent-core） */
+export type ToolUpdateCallback = (partialResult: { content?: Array<{ type: string; text?: string }>; details?: unknown }) => void
+
 /** Context passed to every tool's execute function */
 export interface ToolContext {
   conversationId: string
@@ -14,6 +17,10 @@ export interface ToolContext {
   signal?: AbortSignal
   /** Group chat: @mention signal shared between orchestrator and at_mention tool */
   mentionSignal?: MentionSignal
+  /** Current tool call ID (assigned by Pi loop) */
+  currentToolCallId?: string
+  /** Pi Agent Core 的进度回调，用于 tool_execution_update 事件 */
+  onUpdate?: ToolUpdateCallback
 }
 
 /** Optional artifact: a file produced by a tool, surfaced to the user */

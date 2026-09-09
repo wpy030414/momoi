@@ -19,6 +19,7 @@ import type {
   AgentMessage,
   AgentTool,
   AgentToolResult,
+  AgentToolUpdateCallback,
   StreamFn,
 } from '@earendil-works/pi-agent-core'
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
@@ -157,10 +158,12 @@ async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
       label: def.name,
       description: def.description,
       parameters: schema,
+      executionMode: def.name === 'ask_user' ? 'sequential' as const : undefined,
       execute: async (
-        _toolCallId: string,
+        toolCallId: string,
         params: unknown,
         signal?: AbortSignal,
+        onUpdate?: AgentToolUpdateCallback,
       ): Promise<AgentToolResult<any>> => {
         const input = (params && typeof params === 'object' ? params : {}) as Record<string, unknown>
         if (!toolModule) {
@@ -170,7 +173,12 @@ async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
           }
         }
 
-        const ctx: ToolContext = { ...toolCtx, signal: signal || toolCtx.signal }
+        const ctx: ToolContext = {
+          ...toolCtx,
+          signal: signal || toolCtx.signal,
+          currentToolCallId: toolCallId,
+          onUpdate: onUpdate as ToolContext['onUpdate'],
+        }
         let result: ToolResult
         try {
           result = await toolModule.execute(input, ctx)
@@ -638,7 +646,21 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
         break
       }
 
-      // message_start / message_end / tool_execution_update / compaction_* 暂不处理
+      // tool_execution_update: 工具执行期间进度更新（ask_user 通过此事件下发问题）
+      case 'tool_execution_update': {
+        const details = event.partialResult?.details as Record<string, unknown> | undefined
+        if (details?.type === 'ask_user') {
+          state.send({
+            type: 'ask_user',
+            question_id: details.questionId as string,
+            tool_call_id: event.toolCallId,
+            questions: details.questions as import('../../shared/types.js').AskUserQuestion[],
+          })
+        }
+        break
+      }
+
+      // message_start / message_end / compaction_* 暂不处理
     }
   }
 }

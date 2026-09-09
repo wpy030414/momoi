@@ -47,6 +47,11 @@
     "minAgentsRequired": "至少需要 2 个 Agent",
     "agentThinking": "{{name}} 正在思考…",
     "agentReplied": "{{name}} 已回复",
+    "askUser": {
+      "skip": "跳过",
+      "submit": "提交",
+      "placeholder": "输入你的回答..."
+    },
     "infiniteMode": "无限演算",
     "currentMembers": "当前成员"
   },

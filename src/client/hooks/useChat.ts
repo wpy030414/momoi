@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, getUser, getToken } from '../lib/api'
-import type { Conversation, Attachment } from '@/shared/types'
+import type { Conversation, Attachment, AskUserQuestion } from '@/shared/types'
 import type { ThinkingSegment } from '@/shared/thinking'
 import { decodeThinkingToSegments, thinkingSegmentHeader } from '@/shared/thinking'
 
@@ -35,6 +35,7 @@ export function useChat() {
   const [loading, setLoading] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const infiniteModeRef = useRef(false)
+  const [pendingQuestion, setPendingQuestion] = useState<(import('@/shared/types').ServerMessage & { type: 'ask_user' }) | null>(null)
 
   // Load conversations on mount
   useEffect(() => {
@@ -383,6 +384,11 @@ export function useChat() {
           }
           return [...prev.slice(0, -1), { ...last, toolCalls: calls }]
         })
+        // 如果 pendingQuestion 的 tool_call_id 匹配，清除问题卡片
+        setPendingQuestion((prev) => {
+          if (prev && msg.id && prev.tool_call_id === msg.id) return null
+          return prev
+        })
         break
 
       case 'done':
@@ -495,14 +501,33 @@ export function useChat() {
           return updated
         })
         break
+
+      case 'ask_user':
+        // Agent 向用户提问 —— 显示问题卡片
+        setPendingQuestion(msg as (import('@/shared/types').ServerMessage & { type: 'ask_user' }))
+        break
     }
   }
 
+  const sendAnswer = useCallback(async (questionId: string, answer: string, selectedOptions?: string[]) => {
+    if (!activeId) return
+    setPendingQuestion(null)
+    try {
+      await api.answerQuestion(activeId, questionId, answer, selectedOptions)
+    } catch (err) {
+      console.error('Failed to send answer:', err)
+    }
+  }, [activeId])
+
   const cancel = useCallback(() => {
+    // 如果有待回答的问题，先发送空答案（跳过）
+    if (pendingQuestion) {
+      sendAnswer(pendingQuestion.question_id, '', [])
+    }
     abortRef.current?.abort()
     abortRef.current = null
     setLoading(false)
-  }, [])
+  }, [pendingQuestion, sendAnswer])
 
   const selectConversation = useCallback(async (id: string) => {
     try {
@@ -643,5 +668,7 @@ export function useChat() {
     refreshConversations,
     cancel,
     revertMessage,
+    pendingQuestion,
+    sendAnswer,
   }
 }

@@ -12,6 +12,7 @@ import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage, Attachment } from '../../shared/types.js'
 import { randomUUID } from 'crypto'
 import { getConfig, listAgents } from '../config.js'
+import { resolveQuestion, getPendingQuestion } from '../tools/ask-user-tool.js'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
@@ -468,4 +469,36 @@ chatRoute.post('/', async (c) => {
       await writeChain
     }
   })
+})
+
+// ---- Answer Endpoint: 用户回答 ask_user 问题 ----
+chatRoute.post('/:conversationId/answer', async (c) => {
+  const userId = (c as any).get('userId') as string
+  if (!userId) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const conversationId = c.req.param('conversationId')
+  const body = await c.req.json<{ question_id: string; answer: string; selected_options?: string[] }>()
+  const { question_id, answer, selected_options } = body
+
+  if (!question_id) {
+    return c.json({ error: 'question_id is required' }, 400)
+  }
+
+  // 验证问题属于当前会话
+  const pending = getPendingQuestion(question_id)
+  if (!pending) {
+    return c.json({ error: 'Question not found or has expired' }, 410)
+  }
+  if (pending.conversationId !== conversationId) {
+    return c.json({ error: 'Question does not belong to this conversation' }, 403)
+  }
+
+  const resolved = resolveQuestion(question_id, answer || '', selected_options)
+  if (!resolved) {
+    return c.json({ error: 'Question already answered or expired' }, 410)
+  }
+
+  return c.json({ success: true })
 })

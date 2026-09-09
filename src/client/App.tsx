@@ -284,6 +284,9 @@ export function App() {
           onSendGroup={chat.sendGroupMessage}
           infiniteMode={infiniteMode}
           onInfiniteModeChange={handleInfiniteModeChange}
+          pendingQuestion={chat.pendingQuestion}
+          onSendAnswer={(answer, selectedOptions) => chat.sendAnswer(chat.pendingQuestion?.question_id || '', answer, selectedOptions)}
+          onSkipAnswer={() => chat.sendAnswer(chat.pendingQuestion?.question_id || '', '', [])}
         />
       </div>
 

@@ -47,6 +47,11 @@
     "minAgentsRequired": "At least 2 agents required",
     "agentThinking": "{{name}} is thinking...",
     "agentReplied": "{{name}} replied",
+    "askUser": {
+      "skip": "Skip",
+      "submit": "Submit",
+      "placeholder": "Type your answer..."
+    },
     "infiniteMode": "Infinite",
     "currentMembers": "Current Members"
   },
