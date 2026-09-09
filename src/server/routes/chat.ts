@@ -7,7 +7,7 @@ import { conversations, messages, groupConversationAgents } from '../schema.js'
 import { eq, and, count, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
-import { generateNeutralFollowUp } from '../ai/neutral-agent.js'
+import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutral-agent.js'
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage, Attachment } from '../../shared/types.js'
 import { randomUUID } from 'crypto'
@@ -256,6 +256,11 @@ chatRoute.post('/', async (c) => {
         infiniteState.set(convId, { enabled: true, messageCount: existing?.value ?? 0 })
       }
 
+      // 本轮最后一条 assistant 消息定位（供 suggestions 补挂；群聊取最后发言的 Agent）
+      let lastAssistantMsgId: number | undefined
+      let lastAssistantAgentId: string | undefined
+      let lastAssistantHadSuggestions = false
+
       // Helper: save assistant message to DB
       const saveAssistantMsg = async (content: string, thinking: string | null, suggestionsList: string[], artifactsLocal?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }>, agentId?: string) => {
         const replyNow = Math.floor(Date.now() / 1000)
@@ -265,7 +270,7 @@ chatRoute.post('/', async (c) => {
             url: a.downloadUrl, name: a.displayName, size: 0, type: a.mimeType,
           })))
         }
-        await db.insert(messages).values({
+        const res = await db.insert(messages).values({
           conversation_id: convId,
           role: 'assistant',
           content,
@@ -275,6 +280,9 @@ chatRoute.post('/', async (c) => {
           agent_id: agentId || null,
           created_at: replyNow,
         }).run()
+        lastAssistantMsgId = Number(res.lastInsertRowid)
+        lastAssistantAgentId = agentId || undefined
+        lastAssistantHadSuggestions = suggestionsList.length > 0
       }
 
       // Helper: generate follow-up and save as user message
@@ -297,6 +305,46 @@ chatRoute.post('/', async (c) => {
           conversation_id: convId, role: 'user', content: text, created_at: nowF,
         }).run()
         return text
+      }
+
+      // Helper: 中立 Agent 补发生成 suggestions —— done 已先行发出、前端 loading 已结束，
+      // 此处后台生成，完成后先 UPDATE messages 再补发 suggestions SSE 事件。
+      // 必须在 streamSSE handler 返回前 await（finally 里的 writeChain 只保证已入队事件 flush）。
+      const SUGGESTIONS_TIMEOUT_MS = 30_000
+      const generateAndSendSuggestions = async (): Promise<void> => {
+        if (lastAssistantMsgId === undefined) return // 本轮空回复，无 assistant 消息可挂
+        if (lastAssistantHadSuggestions) return // 兜底路径已带出 suggestions，跳过重复生成
+        try {
+          const [config, agents, context] = await Promise.all([
+            getConfig(), listAgents(), buildNeutralContext(convId),
+          ])
+          const neutralAgent = agents.find((a) => a.id === NEUTRAL_AGENT_ID)
+          const model = neutralAgent?.model || agents[0]?.model || 'gpt-4o'
+          const extraPrompt = neutralAgent?.system_prompt?.trim() || undefined
+
+          // 超时保护：provider 只对响应头有超时，流本身无界；
+          // 不设上限的话一次挂起会把 SSE 连接（和客户端）无限拖住。超时即放弃，静默降级。
+          let timer: ReturnType<typeof setTimeout> | undefined
+          const timeout = new Promise<null>((resolve) => {
+            timer = setTimeout(() => resolve(null), SUGGESTIONS_TIMEOUT_MS)
+          })
+          const suggestions = await Promise.race([
+            generateNeutralSuggestions(config, model, context, extraPrompt),
+            timeout,
+          ])
+          if (timer) clearTimeout(timer)
+          if (!suggestions || suggestions.length === 0) return
+
+          // 先落库再发事件：保证客户端任何时点的收尾 refetch 与事件状态一致
+          await db.update(messages)
+            .set({ suggestions: JSON.stringify(suggestions) })
+            .where(eq(messages.id, lastAssistantMsgId))
+            .run()
+          send({ type: 'suggestions', suggestions, agent_id: lastAssistantAgentId ?? null })
+        } catch (err) {
+          // done 已是终止事件，之后绝不能再发 error（前端会把错误写进气泡）——只记日志
+          console.error('Neutral agent suggestions failed:', (err as Error).message)
+        }
       }
 
       // Helper: reload history from DB
@@ -352,6 +400,12 @@ chatRoute.post('/', async (c) => {
         if (reply) {
           await saveAssistantMsg(reply, thinking, suggestions, artifacts)
         }
+      }
+
+      // 非无限模式：本轮回复完成后，由中立 Agent 生成追问建议并补发
+      // （无限模式不生成 suggestions，追问由中立 Agent 的 follow_up 负责）
+      if (!isInfinite) {
+        await generateAndSendSuggestions()
       }
 
       // Infinite loop: continue while state says so
