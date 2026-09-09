@@ -81,7 +81,7 @@ export const groupConversationAgents = sqliteTable('group_conversation_agents', 
 |---|---|---|
 | `DEFAULT_AGENT_NAME` | `'Momoi'` | 默认 Agent 显示名称 |
 | `DEFAULT_AGENT_MODEL` | `'gpt-4o'` | 默认 Agent 模型 |
-| `DEFAULT_AGENT_SYSTEM_PROMPT` | `''`（空字符串） | 默认系统提示词（空，由 pi-adapter.ts 的 buildSystemPrompt 动态注入建议格式指令） |
+| `DEFAULT_AGENT_SYSTEM_PROMPT` | `''`（空字符串） | 默认系统提示词（空；追问建议由中立 Agent 在回复完成后单独生成，不注入普通 Agent 提示词） |
 | `NEUTRAL_AGENT_NAME` | `'中立 Agent'` | 中立 Agent 显示名称 |
 | `NEUTRAL_AGENT_ID` | `'neutral-agent'` | 中立 Agent 固定 ID |
 
@@ -104,7 +104,7 @@ export const groupConversationAgents = sqliteTable('group_conversation_agents', 
   - **不可删除**：路由层直接检查 `NEUTRAL_AGENT_ID`，返回 403
   - **不可改名/换头像**：PUT 请求中 `name` 和 `avatar` 字段被路由层静默剥离（`delete body.name; delete body.avatar`）
   - 仅可修改 `model` 和 `system_prompt`
-- 用途：无限演算模式中生成追问（`follow_up` 事件）
+- 用途：无限演算模式中生成追问（`follow_up` 事件）及每轮回复完成后的追问建议（`suggestions` 事件，单聊与群聊通用，无限模式除外）
 
 ## 迁移逻辑
 

@@ -111,6 +111,11 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
 
   └─ 发送 SSE: group_done
 
+  └─ 追问建议（非无限模式）：
+      └─ 中立 Agent 基于本轮上下文生成一份 suggestions
+          → UPDATE 最后一条 assistant 消息的 suggestions 列
+          → 补发 SSE: suggestions { suggestions, agent_id }
+
   └─ 无限模式：
       └─ 若 infiniteState 启用且未达 MAX_INFINITE_MESSAGES(500)
           └─ generateAndSaveFollowUp() → SSE: follow_up
@@ -206,8 +211,10 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
 ### 无限演算模式下的系统提示词
 
 `buildSystemPrompt` 在 `infiniteMode=true` 时：
-- 移除 suggestions 格式要求（由中立 Agent 接管追问）
+- 不注入 suggestions 相关指令（普通 Agent 的提示词已彻底不含建议生成要求，任何模式下均由中立 Agent 单独负责）
 - 追加对话规则：自然回复、允许括号动作描述、保持流畅
+
+无限模式下（单聊与群聊）不生成 suggestions，追问由中立 Agent 的 follow_up 负责。
 
 ## SSE 事件流
 
@@ -218,11 +225,12 @@ conversation_id { id }
   → group_start { agent_ids: [...] }
     → agent_start { agent_id, agent_name }
       → token / thinking / tool_call / tool_result  (均带 agent_id + agent_name)
-    → agent_done { agent_id, agent_name, reply, suggestions }
+    → agent_done { agent_id, agent_name, reply, suggestions }   // suggestions 正常路径为空数组
     → agent_start { agent_id, agent_name }  // 下一个 Agent
       → ...
     → agent_done
   → group_done
+  → suggestions { suggestions, agent_id }  // 非无限模式：中立 Agent 补发一份（挂在最后发言 Agent 的消息上）
   → follow_up { text }      // 无限模式追问（可选）
   → infinite_mode_off       // 无限模式关闭（可选）
 ```
@@ -233,8 +241,9 @@ conversation_id { id }
 |---|---|
 | `agent_start` | 创建新的 streaming assistant 气泡，带 `agent_id` + `agent_name` |
 | `token` / `thinking` / `tool_call` / `tool_result` | 追加到最后一个 assistant 气泡（与单 Agent 模式相同，但事件带 `agent_id`/`agent_name` 辅助字段） |
-| `agent_done` | 标记该 Agent 气泡为完成，覆盖 `reply` 和 `suggestions` |
+| `agent_done` | 标记该 Agent 气泡为完成，覆盖 `reply` 和 `suggestions`（正常为空数组） |
 | `group_done` | 非无限模式时设置 `loading=false` |
+| `suggestions` | 中立 Agent 补发的追问建议：更新最后一条 assistant 气泡的 chips（`agent_id` 为最后发言 Agent）；用户已抢发新消息或 agent_id 不匹配时静默丢弃 |
 | `follow_up` | 创建 user 消息气泡；群聊模式下不创建 assistant 占位气泡（由下一轮 `agent_start` 创建） |
 | `infinite_mode_off` | 设置 `loading=false` |
 | `group_start` | 静默消费（不产生 UI 变化） |

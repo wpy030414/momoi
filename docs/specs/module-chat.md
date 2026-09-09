@@ -12,7 +12,7 @@
 | `src/server/ai/pi-adapter.ts` | Pi Agent Core 适配层：系统提示词构建 + 工具适配 + 流式映射 + Agent 循环入口 |
 | `src/server/ai/provider.ts` | OpenAI 兼容 API 流式客户端（含多模态与 thinking 参数） |
 | `src/server/ai/group-orchestrator.ts` | 群聊编排：多 Agent 串行回复 + @mention 处理 + 无限模式 |
-| `src/server/ai/neutral-agent.ts` | 中立 Agent：生成无限模式追问 |
+| `src/server/ai/neutral-agent.ts` | 中立 Agent：无限模式追问 + 回复后追问建议 |
 | `src/server/ai/tools.ts` | 工具注册表（委托到内置工具 registry） |
 | `src/server/tools/group-mention-tool.ts` | @mention 工具：Agent 间点名调用 |
 | `src/shared/thinking.ts` | thinking 分段的编解码 |
@@ -63,6 +63,7 @@
 | `agent_done` | `{ agent_id: string, agent_name: string, reply: string, suggestions: string[] }` | 群聊中某个 Agent 回复完成 |
 | `group_start` | `{ agent_ids: string[] }` | 群聊开始（含 Agent 顺序） |
 | `group_done` | `{ infinite?: boolean }` | 群聊结束 |
+| `suggestions` | `{ suggestions: string[], agent_id?: string \| null }` | 回复完成后由中立 Agent 异步补发的追问建议（在 done/agent_done/group_done 之后到达） |
 | `follow_up` | `{ text: string }` | 无限模式：中立 Agent 生成的追问 |
 | `infinite_mode_off` | `{}` | 无限模式已关闭 |
 | `done` | `{ reply: string, suggestions: string[], agent_id?, agent_name?, infinite? }` | 对话完成（终止事件） |
@@ -100,8 +101,9 @@
 6. **更新时间**：每次收到用户消息都刷新 `conversations.updated_at`
 7. **历史裁剪**：从 DB 读取该对话全部消息后 `slice(0, -1)` 去掉刚插入的当前消息，作为 history 传入 AI 循环
 8. **助手消息持久化**：仅当 `reply` 非空才写入，保存 `content`、`thinking`、`suggestions`、`attachments`、`agent_id`
-9. **文档附件复制到工作区**：`docx/pptx/xlsx/xls/pdf` 附件会自动复制到对话工作区
-10. **无限模式循环**：每次 Agent 回复后由中立 Agent 生成追问，重新加载历史并启动新一轮 AI 循环，直到关闭或达上限
+9. **追问建议补发**：非无限模式下，本轮最后一条 assistant 消息入库后由中立 Agent（其 `model` / `system_prompt` 现查）基于最近 20 条上下文生成 3 条追问建议：先 `UPDATE messages.suggestions`，再补发 `suggestions` SSE 事件。`done`/`agent_done` 中的 `suggestions` 字段正常路径为空数组。生成失败或超时（30s）静默降级为无建议；兜底路径（模型自发输出围栏被解析出建议）跳过生成，避免重复
+10. **文档附件复制到工作区**：`docx/pptx/xlsx/xls/pdf` 附件会自动复制到对话工作区
+11. **无限模式循环**：每次 Agent 回复后由中立 Agent 生成追问，重新加载历史并启动新一轮 AI 循环，直到关闭或达上限
 
 ### 服务端（pi-adapter.ts）
 
@@ -113,14 +115,13 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
    - 若存在技能，追加 `## Available Skills` + 每个技能的名称和描述摘要
    - 思考模式关闭时追加 `/no_think` 指令
    - 追加当前日期时间
-   - 无限模式：替换 suggestions 指令为「无限演算模式」指引
-   - 非无限模式：追加硬编码的 `## 建议` + suggestions 格式指令（置于末尾保证即使 system_prompt 是强人设也不会吞掉）
+   - 无限模式：追加「无限演算模式」指引（不生成 suggestions，追问由中立 Agent 负责）
    - 群聊模式：追加群组对话规则 + Agent 身份感知 + at_mention 使用指引
 3. **工具适配**：12 个 `ToolModule` → Pi `AgentTool`（TypeBox schemas）。群聊时额外添加 `at_mention` 工具
 4. **Stream 函数**（`createStreamFn`）：包装 `provider.ts` 为 Pi 兼容的 `StreamFn`，将 Pi 消息格式转换为 `ChatMessage` 格式
 5. **Pi `runAgentLoop`**：内置多轮工具调用循环、并行执行、事件流式输出
-6. **Suggestions 围栏扣留**：维护 `SUGGESTIONS_FENCE.length` 长度的缓冲区，围栏跨 token chunk 到达时仍然被完整检测
-7. **Suggestions 解析**（`parseSuggestions`）：
+6. **Suggestions 围栏扣留（防御性兜底）**：提示词已不注入 suggestions 指令（改由中立 Agent 在回复完成后单独生成），维护 `SUGGESTIONS_FENCE.length` 长度的缓冲区仅用于剥离模型自发输出的围栏，围栏跨 token chunk 到达时仍然被完整检测
+7. **Suggestions 解析（防御性兜底）**（`parseSuggestions`）：
    - 用 `lastIndexOf` 定位**真正末尾**的 `` ```suggestions `` 块
    - 去除行首空白、`-`、`*`、数字与点等前缀，过滤空行，最多取 3 条
    - 未找到围栏时只做 `trimEnd()`
@@ -147,15 +148,16 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
    - 已收到过 token → 视为**优雅关闭**，保留已有内容，不再重试
    - 完全没收到 token → 抛错进入重试
 6. **取消判定**：通过 `abortRef.current !== abort` 区分「用户主动取消」与「空闲超时中断」
-7. **收尾对齐**：整轮结束后重新 `GET /api/conversations/{id}` 拉取真实消息，为本地乐观创建的消息补上服务端 ID
-8. **哈希路由**：`#/c/{conversationId}`
+7. **收尾对齐**：整轮结束后重新 `GET /api/conversations/{id}` 拉取真实消息（含 suggestions），为本地乐观创建的消息补上服务端 ID。带竞态守卫：`done` 已提前结束 loading，用户抢发新消息（`abortRef` 被覆盖）时跳过全量重拉，避免抹掉新的本地气泡
+8. **loading 提前结束**：收到 `done` 即 `setLoading(false)`（连接为等待 `suggestions` 补发保持打开）；`suggestions` 事件挂到本轮最后一条 assistant 气泡，若用户已抢发新消息或群聊 `agent_id` 不匹配则静默丢弃（DB 已持久化）
+9. **哈希路由**：`#/c/{conversationId}`
    - 首次消息创建对话 → `replaceState` 写入 hash
    - 选中对话 → `pushState`（支持后退）
    - 新建/删除当前对话 → 清除 hash
    - 监听 `hashchange` 支持浏览器前进后退
-9. **导出**：客户端拼接 `# 标题` + 每条 `### User` / `### <Agent 名称>`，以 `---` 分隔，生成 `.md` 下载
-10. **多轮思考分段渲染**：SSE `thinking` 事件带 `round` 字段时，前端按轮聚合为 `thinkingSegments`；历史消息通过 `decodeThinkingToSegments` 切分
-11. **群聊消息渲染**：消息带 `agent_id` / `agent_name` 字段，显示 Agent 头像和名称
+10. **导出**：客户端拼接 `# 标题` + 每条 `### User` / `### <Agent 名称>`，以 `---` 分隔，生成 `.md` 下载
+11. **多轮思考分段渲染**：SSE `thinking` 事件带 `round` 字段时，前端按轮聚合为 `thinkingSegments`；历史消息通过 `decodeThinkingToSegments` 切分
+12. **群聊消息渲染**：消息带 `agent_id` / `agent_name` 字段，显示 Agent 头像和名称
 
 ### 客户端（useGroupChat.ts）
 
