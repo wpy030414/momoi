@@ -256,14 +256,19 @@ export function App() {
     // Radix Dialog 关闭时需要等待焦点管理完成，再打开新页面
     setTimeout(() => {
       setAdminViewOpen(true)
-      history.pushState(null, '', '#/settings')
+      history.pushState(null, '', `#/settings/${adminTab}`)
     }, 300)
+  }
+
+  const handleAdminTabChange = (tab: string) => {
+    setAdminTab(tab)
+    history.pushState(null, '', `#/settings/${tab}`)
   }
 
   const closeAdminView = () => {
     setAdminViewOpen(false)
     // Clear hash if currently on settings
-    if (window.location.hash === '#/settings') {
+    if (window.location.hash.startsWith('#/settings')) {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
   }
@@ -277,19 +282,25 @@ export function App() {
     }
   }
 
-  // Route guard: #/settings only opens for admins (mount + browser back/forward).
+  // Route guard: #/settings/{tab} only opens for admins (mount + browser back/forward).
   // Anyone else typing the path is bounced back home.
   useEffect(() => {
     const leaveAdminRoute = () => {
       setAdminViewOpen(false)
-      if (window.location.hash === '#/settings') {
+      if (window.location.hash.startsWith('#/settings')) {
         history.replaceState(null, '', window.location.pathname + window.location.search)
       }
     }
     const syncAdminRoute = () => {
-      if (window.location.hash === '#/settings') {
-        if (isAdminUser) setAdminViewOpen(true)
-        else leaveAdminRoute()
+      const match = window.location.hash.match(/^#\/settings(?:\/(\w+))?$/)
+      if (match) {
+        if (isAdminUser) {
+          const tab = match[1]
+          if (tab) setAdminTab(tab)
+          setAdminViewOpen(true)
+        } else {
+          leaveAdminRoute()
+        }
       } else {
         setAdminViewOpen(false)
       }
@@ -320,7 +331,7 @@ export function App() {
         {adminViewOpen ? (
           <AdminSidebar
             activeTab={adminTab}
-            onTabChange={setAdminTab}
+            onTabChange={handleAdminTabChange}
             onBack={closeAdminView}
           />
         ) : (
