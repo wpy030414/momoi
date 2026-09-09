@@ -266,7 +266,10 @@ chatRoute.post('/', async (c) => {
       }
 
       // Helper: generate follow-up and save as user message
-      const generateAndSaveFollowUp = async (): Promise<string | null> => {
+      const generateAndSaveFollowUp = async (): Promise<string> => {
+        // Send follow_up_start first so client creates a placeholder bubble
+        send({ type: 'follow_up_start' })
+
         const allMsgs = await db.select().from(messages)
           .where(eq(messages.conversation_id, convId))
           .orderBy(messages.created_at).all()
@@ -281,14 +284,13 @@ chatRoute.post('/', async (c) => {
         const model = neutralAgent?.model || agents[0]?.model || 'gpt-4o'
         const extraPrompt = neutralAgent?.system_prompt?.trim() || undefined
         const followUp = await generateNeutralFollowUp(config, model, context, extraPrompt)
-        if (followUp) {
-          send({ type: 'follow_up', text: followUp })
-          const now = Math.floor(Date.now() / 1000)
-          await db.insert(messages).values({
-            conversation_id: convId, role: 'user', content: followUp, created_at: now,
-          }).run()
-        }
-        return followUp || null
+        const text = followUp || '（继续）'
+        send({ type: 'follow_up', text })
+        const nowF = Math.floor(Date.now() / 1000)
+        await db.insert(messages).values({
+          conversation_id: convId, role: 'user', content: text, created_at: nowF,
+        }).run()
+        return text
       }
 
       // Helper: reload history from DB
@@ -355,10 +357,6 @@ chatRoute.post('/', async (c) => {
         if (state) state.messageCount++
 
         const followUp = await generateAndSaveFollowUp()
-        if (!followUp) {
-          infiniteState.delete(convId)
-          break
-        }
 
         currentHistory = await reloadHistory()
         currentPrompt = followUp

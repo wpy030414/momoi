@@ -446,17 +446,33 @@ export function useChat() {
         setLoading(false)
         break
 
+      case 'follow_up_start':
+        // Infinite mode: neutral agent is about to generate a follow-up
+        // Create a placeholder user message bubble with loading animation
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user' as const, content: '', streaming: true },
+        ])
+        break
+
       case 'follow_up':
         // Infinite mode: neutral agent generated a follow-up question
-        // For direct chat: create user + new streaming assistant message
-        // For group chat: just create user message (agent_start will create agent bubbles)
+        // Replace the placeholder user message with actual content
         setMessages((prev) => {
           const isGroupChat = prev.some((m) => m.agent_id)
-          return [
-            ...prev,
-            { role: 'user' as const, content: msg.text },
-            ...(isGroupChat ? [] : [{ role: 'assistant' as const, content: '', streaming: true, thinkingSegments: [] }]),
-          ]
+          // Find the last user message (the placeholder) and replace its content
+          const updated = [...prev]
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].role === 'user') {
+              updated[i] = { ...updated[i], content: msg.text, streaming: false }
+              break
+            }
+          }
+          // For direct chat: also create the streaming assistant bubble
+          if (!isGroupChat) {
+            updated.push({ role: 'assistant' as const, content: '', streaming: true, thinkingSegments: [] })
+          }
+          return updated
         })
         break
     }
