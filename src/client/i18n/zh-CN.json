@@ -163,7 +163,10 @@
     "registrationOpen": "开放注册",
     "registrationClose": "关闭注册",
     "registrationOpened": "已开放注册",
-    "registrationClosed": "已关闭注册"
+    "registrationClosed": "已关闭注册",
+    "recommendedQuestions": "首页推荐问题",
+    "recommendedQuestionsHint": "最多 3 个问题，每个不超过 20 个字符，留空表示不展示。",
+    "questionPlaceholder": "推荐问题 {{n}}"
   },
   "server": {
     "bannerTitle": "智能体服务",

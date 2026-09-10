@@ -52,6 +52,7 @@ interface ChatPanelProps {
   pendingQuestion?: (import('@/shared/types').ServerMessage & { type: 'ask_user' }) | null
   onSendAnswer?: (answer: string, selectedOptions?: string[]) => void
   onSkipAnswer?: () => void
+  recommendedQuestions?: string[]
 }
 
 export function ChatPanel({
@@ -60,6 +61,7 @@ export function ChatPanel({
   isGroup, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
   pendingQuestion, onSendAnswer, onSkipAnswer,
+  recommendedQuestions,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -74,6 +76,7 @@ export function ChatPanel({
 
   const hasMessages = messages.length > 0
   const hasAgents = agents && agents.length > 0
+  const noAgents = !isGroup && !agentsLoading && !hasAgents
   // 单聊气泡归属的 Agent：优先当前会话的 Agent（历史消息都来自它），否则回退到下拉选择
   const directAgent = isGroup
     ? undefined
@@ -195,8 +198,26 @@ export function ChatPanel({
                 infiniteMode={infiniteMode}
                 onInfiniteModeChange={onInfiniteModeChange || (() => {})}
                 supportAttachments={supportAttachments}
-                noAgents={!isGroup && !agentsLoading && !hasAgents}
+                noAgents={noAgents}
               />
+
+              {/* Recommended questions */}
+              {recommendedQuestions && recommendedQuestions.length > 0 && (
+                <div className="mt-4 px-4">
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {recommendedQuestions.map((q, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleSend(q)}
+                        disabled={loading || noAgents}
+                        className="inline-flex items-center px-4 py-2 rounded-full border border-border bg-background text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 hover:bg-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -236,7 +257,7 @@ export function ChatPanel({
             infiniteMode={infiniteMode}
             onInfiniteModeChange={onInfiniteModeChange || (() => {})}
             supportAttachments={supportAttachments}
-            noAgents={!isGroup && !agentsLoading && !hasAgents}
+            noAgents={noAgents}
           />
         </div>
       )}

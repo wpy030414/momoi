@@ -163,7 +163,10 @@
     "registrationOpen": "Open Registration",
     "registrationClose": "Close Registration",
     "registrationOpened": "Registration opened",
-    "registrationClosed": "Registration closed"
+    "registrationClosed": "Registration closed",
+    "recommendedQuestions": "Recommended Questions",
+    "recommendedQuestionsHint": "Up to 3 questions, max 20 characters each. Leave blank to hide.",
+    "questionPlaceholder": "Question {{n}}"
   },
   "server": {
     "bannerTitle": "Momoi Server",

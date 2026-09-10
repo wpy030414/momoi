@@ -52,6 +52,7 @@ export interface AppConfig {
   api_key: string
   support_attachments: boolean
   show_github: boolean
+  recommended_questions: string[]
 }
 
 // ---- Agent ----

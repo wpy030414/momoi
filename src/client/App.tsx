@@ -38,6 +38,7 @@ export function App() {
   const [backgroundImage, setBackgroundImage] = useState('')
   const [supportAttachments, setSupportAttachments] = useState(false)
   const [showGithub, setShowGithub] = useState(true)
+  const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>([])
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
   // Admin status of the logged-in user (ADMIN usernames from server .env)
   const [isAdminUser, setIsAdminUser] = useState(false)
@@ -199,6 +200,7 @@ export function App() {
       }
       setSupportAttachments(!!r.support_attachments)
       setShowGithub(r.show_github !== false)
+      setRecommendedQuestions(r.recommended_questions || [])
       if (r.agents?.length > 0) {
         setAgents(r.agents)
         setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
@@ -219,6 +221,7 @@ export function App() {
         setBackgroundImage(r.app_background || '')
         setSupportAttachments(!!r.support_attachments)
         setShowGithub(r.show_github !== false)
+        setRecommendedQuestions(r.recommended_questions || [])
         if (r.agents?.length > 0) {
           setAgents(r.agents)
           setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
@@ -470,6 +473,7 @@ export function App() {
               pendingQuestion={chat.pendingQuestion}
               onSendAnswer={(answer, selectedOptions) => chat.sendAnswer(chat.pendingQuestion?.question_id || '', answer, selectedOptions)}
               onSkipAnswer={() => chat.sendAnswer(chat.pendingQuestion?.question_id || '', '', [])}
+              recommendedQuestions={recommendedQuestions}
             />
           </div>
         )}

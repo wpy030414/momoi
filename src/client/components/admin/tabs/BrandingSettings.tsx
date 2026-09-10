@@ -11,21 +11,32 @@ export function BrandingSettings() {
   const { toast } = useToast()
   const [config, setConfig] = useState<any>(null)
   const [saving, setSaving] = useState(false)
+  const [question1, setQuestion1] = useState('')
+  const [question2, setQuestion2] = useState('')
+  const [question3, setQuestion3] = useState('')
   const faviconInputRef = useRef<HTMLInputElement>(null)
   const backgroundInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    api.getConfig().then(setConfig).catch(console.error)
+    api.getConfig().then((c) => {
+      setConfig(c)
+      const questions = c.recommended_questions || []
+      setQuestion1(questions[0] || '')
+      setQuestion2(questions[1] || '')
+      setQuestion3(questions[2] || '')
+    }).catch(console.error)
   }, [])
 
   const handleSave = async () => {
     setSaving(true)
     try {
+      const questions = [question1.trim(), question2.trim(), question3.trim()].filter(Boolean)
       await api.updateConfig({
         app_name: config.app_name,
         app_favicon: config.app_favicon,
         app_background: config.app_background,
         show_github: config.show_github,
+        recommended_questions: questions,
       })
       toast({ title: t('settings.toastSaved'), variant: 'success' })
     } catch (err) {
@@ -108,6 +119,31 @@ export function BrandingSettings() {
       <div className="flex items-center justify-between">
         <label className="text-sm font-medium">{t('settings.showGithub')}</label>
         <Switch checked={config.show_github !== false} onCheckedChange={(v) => setConfig({ ...config, show_github: v })} />
+      </div>
+      <div>
+        <label className="text-sm font-medium">{t('settings.recommendedQuestions')}</label>
+        <p className="text-xs text-muted-foreground mb-2">{t('settings.recommendedQuestionsHint')}</p>
+        <div className="space-y-2">
+          {([question1, question2, question3] as const).map((val, i) => (
+            <div className="relative" key={i}>
+              <Input
+                value={val}
+                onChange={(e) => {
+                  if (e.target.value.length <= 20) {
+                    const setter = [setQuestion1, setQuestion2, setQuestion3][i]
+                    setter(e.target.value)
+                  }
+                }}
+                maxLength={20}
+                placeholder={t('settings.questionPlaceholder', { n: i + 1 })}
+                className="pr-12"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                {val.length}/20
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
       <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>
