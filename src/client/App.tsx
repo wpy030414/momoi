@@ -15,7 +15,6 @@ import { SkillManager, type SkillManagerHandle } from './components/admin/tabs/S
 import { ReviewPanel } from './components/admin/tabs/ReviewPanel'
 import { UserManager, type UserManagerHandle } from './components/admin/tabs/UserManager'
 import { Button } from './components/ui/button'
-import { Switch } from './components/ui/switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
 import { PanelLeft, X, Check, Plus, RotateCcw, Upload, Server } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
@@ -37,19 +36,40 @@ export function App() {
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
   const [supportAttachments, setSupportAttachments] = useState(false)
+  const [supportInfiniteMode, setSupportInfiniteMode] = useState(true)
   const [showGithub, setShowGithub] = useState(true)
   const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>([])
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
   // Admin status of the logged-in user (ADMIN usernames from server .env)
   const [isAdminUser, setIsAdminUser] = useState(false)
-  const [registrationOpen, setRegistrationOpen] = useState(true)
+
+  // OAuth2 callback → sync localStorage from query params, then clean URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const oauthUser = params.get('oauth_user')
+    const oauthExpires = params.get('oauth_expires')
+    if (oauthUser) {
+      localStorage.setItem('user', oauthUser)
+      if (oauthExpires) {
+        const exp = Number(oauthExpires)
+        if (Number.isFinite(exp)) setSessionExpiry(exp)
+      }
+      setCurrentUser(oauthUser)
+      // Clean query params from URL without reload
+      const url = new URL(window.location.href)
+      url.searchParams.delete('oauth_user')
+      url.searchParams.delete('oauth_expires')
+      url.searchParams.delete('oauth_error')
+      history.replaceState(null, '', url.toString())
+    }
+  }, [])
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 768)
   const [agents, setAgents] = useState<Array<{ id: string; name: string; avatar: string }>>([])
   const [agentsLoading, setAgentsLoading] = useState(true)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   // 移动端判定走 JS（不依赖 CSS 媒体查询）——钉钉 Android 内置内核会丢弃
   // 响应式规则，导致侧边栏在那里永远展开、无法收起。
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
-  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 768)
 
   // Group chat: agent selection dialog
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
@@ -69,6 +89,16 @@ export function App() {
       api.setInfiniteMode(chat.activeId, enabled).catch(console.error)
     }
   }
+
+  // When admin disables support_infinite_mode, force-disable any active infinite loop
+  useEffect(() => {
+    if (!supportInfiniteMode && infiniteMode) {
+      setInfiniteMode(false)
+      if (chat.activeId) {
+        api.setInfiniteMode(chat.activeId, false).catch(console.error)
+      }
+    }
+  }, [supportInfiniteMode])
 
   // Open group agent management dialog
   const handleManageGroupAgents = async (convId: string) => {
@@ -199,6 +229,7 @@ export function App() {
         setBackgroundImage(r.app_background)
       }
       setSupportAttachments(!!r.support_attachments)
+      setSupportInfiniteMode(r.support_infinite_mode !== false)
       setShowGithub(r.show_github !== false)
       setRecommendedQuestions(r.recommended_questions || [])
       if (r.agents?.length > 0) {
@@ -206,7 +237,6 @@ export function App() {
         setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
       }
     }).catch(() => {}).finally(() => setAgentsLoading(false))
-    api.getRegistration().then((r) => setRegistrationOpen(r.registration_open)).catch(() => {})
   }, [])
 
   // Re-fetch appName + agents when admin view closes (user may have changed them)
@@ -220,6 +250,7 @@ export function App() {
         }
         setBackgroundImage(r.app_background || '')
         setSupportAttachments(!!r.support_attachments)
+        setSupportInfiniteMode(r.support_infinite_mode !== false)
         setShowGithub(r.show_github !== false)
         setRecommendedQuestions(r.recommended_questions || [])
         if (r.agents?.length > 0) {
@@ -277,15 +308,6 @@ export function App() {
     // Clear hash if currently on settings
     if (window.location.hash.startsWith('#/settings')) {
       history.replaceState(null, '', window.location.pathname + window.location.search)
-    }
-  }
-
-  const handleToggleRegistration = async (open: boolean) => {
-    setRegistrationOpen(open)
-    try {
-      await api.setRegistration(open)
-    } catch {
-      setRegistrationOpen(!open)
     }
   }
 
@@ -417,17 +439,6 @@ export function App() {
                     {t('settings.uploadSkill')}
                   </Button>
                 )}
-                {adminTab === 'users' && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {registrationOpen ? t('settings.registrationOpen') : t('settings.registrationClosed')}
-                    </span>
-                    <Switch
-                      checked={registrationOpen}
-                      onCheckedChange={handleToggleRegistration}
-                    />
-                  </div>
-                )}
             </div>
             </div>
             <div className="flex-1 overflow-y-auto min-h-0 px-6">
@@ -460,6 +471,7 @@ export function App() {
               onRevert={chat.revertMessage}
               backgroundImage={backgroundImage}
               supportAttachments={supportAttachments}
+              supportInfiniteMode={supportInfiniteMode}
               agents={agents}
               agentsLoading={agentsLoading}
               selectedAgentId={selectedAgentId}

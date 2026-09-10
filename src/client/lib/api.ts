@@ -106,7 +106,7 @@ export const api = {
   answerQuestion: (conversationId: string, questionId: string, answer: string, selectedOptions?: string[]) => request<{ success: boolean }>(`/api/chat/${conversationId}/answer`, { method: 'POST', body: JSON.stringify({ question_id: questionId, answer, selected_options: selectedOptions }) }),
 
   // App config
-  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; show_github: boolean; recommended_questions: string[]; agents: Array<{ id: string; name: string; avatar: string }> }>('/api/app-name'),
+  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; support_infinite_mode: boolean; show_github: boolean; recommended_questions: string[]; agents: Array<{ id: string; name: string; avatar: string }> }>('/api/app-name'),
 
   // Admin — the HttpOnly cookie authenticates every same-origin request
   // automatically; the server additionally checks ADMIN-list membership.
@@ -145,6 +145,10 @@ export const api = {
     request<{ registration_open: boolean }>('/api/admin/registration'),
   setRegistration: (open: boolean) =>
     request<{ registration_open: boolean }>('/api/admin/registration', { method: 'PUT', body: JSON.stringify({ open }) }),
+
+  // OAuth2 login
+  getOauthProviders: () =>
+    request<{ providers: Array<{ id: string; name: string }> }>('/api/oauth/providers'),
 
   // Upload (multipart/form-data — do NOT set Content-Type, let browser set boundary;
   // the HttpOnly cookie authenticates the request automatically)

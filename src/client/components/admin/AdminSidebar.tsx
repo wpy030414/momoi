@@ -10,9 +10,9 @@ interface AdminSidebarProps {
 }
 
 const TABS = [
-  { value: 'agent', labelKey: 'settings.tabAgent', Icon: Bot },
   { value: 'gateway', labelKey: 'settings.tabGateway', Icon: Globe },
   { value: 'branding', labelKey: 'settings.tabBranding', Icon: Palette },
+  { value: 'agent', labelKey: 'settings.tabAgent', Icon: Bot },
   { value: 'mcp', labelKey: 'settings.tabMcp', Icon: Server },
   { value: 'skills', labelKey: 'settings.tabSkills', Icon: Puzzle },
   { value: 'users', labelKey: 'settings.tabUsers', Icon: Users },

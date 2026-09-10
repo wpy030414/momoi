@@ -77,7 +77,14 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle>(function Gatewa
           </button>
         </div>
       </div>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-medium">{t('settings.supportInfiniteMode')}</label>
+        <Switch
+          checked={config.support_infinite_mode !== false}
+          onCheckedChange={(v) => setConfig({ ...config, support_infinite_mode: v })}
+        />
+      </div>
+      <div className="flex items-center gap-3">
         <label className="text-sm font-medium">{t('settings.supportAttachments')}</label>
         <Switch
           checked={!!config.support_attachments}

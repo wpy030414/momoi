@@ -44,6 +44,17 @@ export interface ToolCall {
 
 // ---- Config ----
 
+export interface OAuth2Provider {
+  id: string
+  name: string
+  client_id: string
+  client_secret: string
+  authorize_url: string
+  token_url: string
+  userinfo_url: string
+  scopes: string
+}
+
 export interface AppConfig {
   app_name: string
   app_favicon: string  // base64 data URL, empty = use default
@@ -51,8 +62,10 @@ export interface AppConfig {
   api_endpoint: string
   api_key: string
   support_attachments: boolean
+  support_infinite_mode: boolean
   show_github: boolean
   recommended_questions: string[]
+  oauth_providers: OAuth2Provider[]
 }
 
 // ---- Agent ----

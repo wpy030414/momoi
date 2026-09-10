@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 're
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
-import { Upload } from 'lucide-react'
+import { Upload, Trash2 } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 
@@ -70,15 +70,17 @@ export const SkillManager = forwardRef<SkillManagerHandle>(function SkillManager
         <div className="space-y-2">
           {skills.map((s) => (
           <div key={s.manifest?.name || s.name} className="flex items-center justify-between p-3 border rounded-md">
-            <div>
-              <p className="font-medium">{s.manifest?.name || s.name}</p>
-              <p className="text-sm text-muted-foreground">{s.manifest?.description || s.description}</p>
+            <div className="min-w-0 flex-1 mr-4">
+              <p className="font-medium text-sm truncate">{s.manifest?.name || s.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{s.manifest?.description || s.description}</p>
             </div>
-            <Button variant="destructive" size="sm" onClick={() => {
-              setDeleteSkillName(s.manifest?.name || s.name)
-            }}>
-              {t('common.remove')}
-            </Button>
+            <div className="flex gap-1 ml-2 shrink-0">
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => {
+                setDeleteSkillName(s.manifest?.name || s.name)
+              }} title={t('common.remove')}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
           ))}
         </div>

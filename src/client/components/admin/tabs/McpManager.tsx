@@ -2,9 +2,8 @@ import { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
-import { Switch } from '../../ui/switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
-import { Plus, Trash2, Edit3 } from 'lucide-react'
+import { Plus, Trash2, Pencil } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 import type { McpServerConfig } from '@/shared/types'
@@ -75,15 +74,6 @@ export const McpManager = forwardRef<McpManagerHandle>(function McpManager(_prop
     setSaving(false)
   }
 
-  const handleToggle = async (server: McpServerConfig) => {
-    try {
-      await api.updateMcpServer(server.id, { enabled: !server.enabled })
-      fetchServers()
-    } catch (err) {
-      console.error('Failed to toggle MCP server:', err)
-    }
-  }
-
   const confirmDelete = async () => {
     if (!deleteId) return
     try {
@@ -109,23 +99,15 @@ export const McpManager = forwardRef<McpManagerHandle>(function McpManager(_prop
           {servers.map((s) => (
             <div key={s.id} className="flex items-center justify-between p-3 border rounded-md">
               <div className="flex-1 min-w-0 mr-4">
-                <div className="flex items-center gap-2">
-                  <p className="font-medium truncate">{s.name}</p>
-                  {!s.enabled && (
-                    <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                      {t('settings.mcpDisabled') || 'Disabled'}
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground truncate">{s.url}</p>
+                <p className="font-medium text-sm truncate">{s.name}</p>
+                <p className="text-xs text-muted-foreground truncate">{s.url}</p>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <Switch checked={s.enabled} onCheckedChange={() => handleToggle(s)} />
-                <Button variant="ghost" size="icon" onClick={() => openEdit(s)} title={t('settings.mcpEditServer')}>
-                  <Edit3 className="h-4 w-4" />
+              <div className="flex gap-1 ml-2 shrink-0">
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEdit(s)} title={t('settings.mcpEditServer')}>
+                  <Pencil className="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" onClick={() => setDeleteId(s.id)} title={t('common.remove')}>
-                  <Trash2 className="h-4 w-4 text-destructive" />
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => setDeleteId(s.id)} title={t('common.remove')}>
+                  <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>

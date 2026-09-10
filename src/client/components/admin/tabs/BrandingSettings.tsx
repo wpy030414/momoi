@@ -31,6 +31,12 @@ export function BrandingSettings() {
     setSaving(true)
     try {
       const questions = [question1.trim(), question2.trim(), question3.trim()].filter(Boolean)
+      // Soft limit: each question must be ≤20 chars
+      if (questions.some((q) => q.length > 20)) {
+        toast({ title: t('settings.questionTooLong'), variant: 'error' })
+        setSaving(false)
+        return
+      }
       await api.updateConfig({
         app_name: config.app_name,
         app_favicon: config.app_favicon,
@@ -116,29 +122,25 @@ export function BrandingSettings() {
           )}
         </div>
       </div>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-3">
         <label className="text-sm font-medium">{t('settings.showGithub')}</label>
         <Switch checked={config.show_github !== false} onCheckedChange={(v) => setConfig({ ...config, show_github: v })} />
       </div>
       <div>
         <label className="text-sm font-medium">{t('settings.recommendedQuestions')}</label>
-        <p className="text-xs text-muted-foreground mb-2">{t('settings.recommendedQuestionsHint')}</p>
-        <div className="space-y-2">
+        <div className="space-y-2 mt-1">
           {([question1, question2, question3] as const).map((val, i) => (
             <div className="relative" key={i}>
               <Input
                 value={val}
                 onChange={(e) => {
-                  if (e.target.value.length <= 20) {
-                    const setter = [setQuestion1, setQuestion2, setQuestion3][i]
-                    setter(e.target.value)
-                  }
+                  const setter = [setQuestion1, setQuestion2, setQuestion3][i]
+                  setter(e.target.value)
                 }}
-                maxLength={20}
                 placeholder={t('settings.questionPlaceholder', { n: i + 1 })}
                 className="pr-12"
               />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+              <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs ${val.length > 20 ? 'text-destructive' : 'text-muted-foreground'}`}>
                 {val.length}/20
               </span>
             </div>

@@ -62,17 +62,19 @@ export async function getConfig(): Promise<AppConfig> {
     app_background: await getSetting('app_background', ''),
     api_endpoint: await getSetting('api_endpoint', env.OPENAI_BASE_URL),
     api_key: await getSetting('api_key', env.OPENAI_API_KEY),
-    support_attachments: (await getSetting('support_attachments', 'false')) === 'true',
+    support_attachments: (await getSetting('support_attachments', 'true')) === 'true',
+    support_infinite_mode: (await getSetting('support_infinite_mode', 'true')) === 'true',
     show_github: (await getSetting('show_github', 'true')) === 'true',
     recommended_questions: JSON.parse(await getSetting('recommended_questions', '[]')),
+    oauth_providers: JSON.parse(await getSetting('oauth_providers', '[]')),
   }
 }
 
 export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConfig> {
   for (const [key, value] of Object.entries(partial)) {
     if (value !== undefined) {
-      const boolKeys = ['support_attachments', 'show_github']
-      const jsonKeys = ['recommended_questions']
+      const boolKeys = ['support_attachments', 'support_infinite_mode', 'show_github']
+      const jsonKeys = ['recommended_questions', 'oauth_providers']
       let stored: string
       if (jsonKeys.includes(key)) {
         stored = JSON.stringify(value)

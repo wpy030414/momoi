@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
@@ -21,6 +21,11 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [registrationOpen, setRegistrationOpen] = useState(true)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [oauthProviders, setOauthProviders] = useState<Array<{ id: string; name: string }>>([])
+
+  useEffect(() => {
+    api.getOauthProviders().then((r) => setOauthProviders(r.providers)).catch(() => {})
+  }, [])
 
   const handleUsernameSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -92,7 +97,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     setError('')
   }
 
-  // Step 1: Username input
+  // Step 1: Username input + OAuth2 provider buttons
   if (hasPin === null) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
@@ -115,6 +120,32 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
               {loading ? t('common.loading') : t('login.submit')}
             </Button>
           </form>
+
+          {/* OAuth2 provider buttons */}
+          {oauthProviders.length > 0 && (
+            <div className="space-y-3">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">OAuth2</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {oauthProviders.map((p) => (
+                  <Button
+                    key={p.id}
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => { window.location.href = `/api/oauth/${p.id}/login` }}
+                  >
+                    {t('settings.oauthLoginWith', { provider: p.name })}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     )
