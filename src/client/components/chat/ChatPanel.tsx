@@ -35,6 +35,7 @@ interface ChatPanelProps {
   onRevert: (index: number) => Promise<string | null>
   backgroundImage?: string
   supportAttachments?: boolean
+  supportInfiniteMode?: boolean
   agents?: AgentBrief[]
   agentsLoading?: boolean
   selectedAgentId?: string | null
@@ -56,7 +57,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({
-  messages, loading, onSend, onCancel, onRevert, backgroundImage, supportAttachments,
+  messages, loading, onSend, onCancel, onRevert, backgroundImage, supportAttachments, supportInfiniteMode,
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
   isGroup, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
@@ -198,6 +199,7 @@ export function ChatPanel({
                 infiniteMode={infiniteMode}
                 onInfiniteModeChange={onInfiniteModeChange || (() => {})}
                 supportAttachments={supportAttachments}
+                supportInfiniteMode={supportInfiniteMode}
                 noAgents={noAgents}
                 agents={agents}
               />
@@ -258,6 +260,7 @@ export function ChatPanel({
             infiniteMode={infiniteMode}
             onInfiniteModeChange={onInfiniteModeChange || (() => {})}
             supportAttachments={supportAttachments}
+            supportInfiniteMode={supportInfiniteMode}
             noAgents={noAgents}
             agents={agents}
           />

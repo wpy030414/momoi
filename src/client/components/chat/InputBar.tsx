@@ -31,6 +31,8 @@ interface InputBarProps {
   infiniteMode: boolean
   onInfiniteModeChange: (enabled: boolean) => void
   supportAttachments?: boolean
+  /** Whether infinite mode button should be shown (controlled by admin config) */
+  supportInfiniteMode?: boolean
   /** Whether to show the "no agents" disabled state */
   noAgents?: boolean
   /** Available agents for @mention autocomplete */
@@ -53,7 +55,7 @@ function detectMention(text: string, cursorPos: number): { query: string; start:
   return null
 }
 
-export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, noAgents, agents }: InputBarProps) {
+export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, supportInfiniteMode, noAgents, agents }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -340,6 +342,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
               <Brain className="h-3.5 w-3.5" />
               <span>{t('chat.deepThinking')}</span>
             </button>
+            {supportInfiniteMode !== false && (
             <button
               onClick={() => onInfiniteModeChange(!infiniteMode)}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
@@ -350,6 +353,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
               <Infinity className="h-3.5 w-3.5" />
               <span>{t('chat.infiniteMode')}</span>
             </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {supportAttachments !== false && (
