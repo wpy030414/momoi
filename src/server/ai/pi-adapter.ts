@@ -143,19 +143,32 @@ ${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应�
 // ---- JSON Schema 属性 → TypeBox schema ----
 function schemaPropertyToTypeBox(prop: import('../../shared/types.js').ToolSchemaProperty): TSchema {
   const desc = prop.description
+  const constraints: Record<string, unknown> = {}
+  if (desc) constraints.description = desc
+  if (prop.default !== undefined) constraints.default = prop.default
+  if (prop.minimum !== undefined) constraints.minimum = prop.minimum
+  if (prop.maximum !== undefined) constraints.maximum = prop.maximum
+  if (prop.minLength !== undefined) constraints.minLength = prop.minLength
+  if (prop.maxLength !== undefined) constraints.maxLength = prop.maxLength
+  if (prop.pattern !== undefined) constraints.pattern = prop.pattern
+  if (prop.minItems !== undefined) constraints.minItems = prop.minItems
+  if (prop.maxItems !== undefined) constraints.maxItems = prop.maxItems
+  if (prop.enum) constraints.enum = prop.enum
+
   switch (prop.type) {
-    case 'string': return desc ? Type.String({ description: desc }) : Type.String()
-    case 'number': return desc ? Type.Number({ description: desc }) : Type.Number()
-    case 'boolean': return desc ? Type.Boolean({ description: desc }) : Type.Boolean()
+    case 'string': return Type.String(constraints)
+    case 'number': return Type.Number(constraints)
+    case 'integer': return Type.Integer(constraints)
+    case 'boolean': return Type.Boolean(constraints)
     case 'array': {
       const itemType = prop.items ? schemaPropertyToTypeBox(prop.items) : Type.Any()
-      return desc ? Type.Array(itemType, { description: desc }) : Type.Array(itemType)
+      return Type.Array(itemType, constraints)
     }
     case 'object': {
       const inner = prop.properties ? jsonSchemaToTypeBox(prop.properties, prop.required || []) : Type.Record(Type.String(), Type.Any())
-      return desc ? Type.Object(inner.properties, { description: desc }) : inner
+      return Type.Object(inner.properties, constraints)
     }
-    default: return desc ? Type.Any({ description: desc }) : Type.Any()
+    default: return Type.Any(constraints)
   }
 }
 
@@ -262,9 +275,11 @@ async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
   // 动态注入 MCP 工具（懒加载，首次或缓存过期时拉取）
   try {
     const mcpServers = await getMcpTools()
+    console.log(`[mcp] createToolAdapter: ${mcpServers.length} MCP server(s) with ${mcpServers.reduce((s,x) => s + x.tools.length, 0)} total tools`)
     for (const server of mcpServers) {
       for (const mcpTool of server.tools) {
         const prefixedName = `${server.serverName}/${mcpTool.name}`
+        console.log(`[mcp]   → ${prefixedName}`)
         const schema = mcpTool.inputSchema.properties
           ? jsonSchemaToTypeBox(mcpTool.inputSchema.properties, mcpTool.inputSchema.required || [])
           : Type.Object({})
@@ -373,15 +388,27 @@ function createStreamFn(agentModel: string, config: AppConfig, thinkingMode: boo
     ;(async () => {
       try {
         // Pi 工具定义 → 我们的 ToolDefinition[]
+        // t.parameters 是 TypeBox TObject，JSON.stringify 可干净输出 JSON Schema
+        // （TypeBox 内部属性为非枚举，不会泄露）。
         const piTools = context.tools || []
-        const ourTools: ToolDefinition[] = piTools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          input_schema: {
-            type: 'object' as const,
-            properties: {},
-          },
-        }))
+        const ourTools: ToolDefinition[] = piTools.map((t) => {
+          let input_schema: ToolDefinition['input_schema'] = { type: 'object' as const, properties: {} }
+          try {
+            const raw = JSON.parse(JSON.stringify(t.parameters)) as Record<string, unknown>
+            input_schema = {
+              type: (raw.type as 'object') || 'object',
+              properties: (raw.properties as ToolDefinition['input_schema']['properties']) || {},
+              required: raw.required as string[] | undefined,
+            }
+          } catch {
+            // schema 解析失败时退化为无参工具，不影响整体流程
+          }
+          return {
+            name: t.name,
+            description: t.description,
+            input_schema,
+          }
+        })
 
         let contentIndex = 0
         let hasStarted = false

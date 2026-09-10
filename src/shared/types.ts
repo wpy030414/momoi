@@ -85,6 +85,15 @@ export interface ToolSchemaProperty {
   items?: ToolSchemaProperty
   properties?: Record<string, ToolSchemaProperty>
   required?: string[]
+  enum?: string[]
+  default?: unknown
+  minimum?: number
+  maximum?: number
+  minLength?: number
+  maxLength?: number
+  minItems?: number
+  maxItems?: number
+  pattern?: string
 }
 
 export interface ToolDefinition {

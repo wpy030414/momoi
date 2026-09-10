@@ -4,10 +4,13 @@
 //
 // 设计原则：
 // 1. 通过 HTTP POST 发送 JSON-RPC 2.0 请求，不依赖 @modelcontextprotocol/sdk
-// 2. 从 DB 读取 enabled 的 MCP 服务器配置，逐个初始化并拉取工具列表
-// 3. 模块级缓存（5 分钟 TTL），工具列表按需刷新
-// 4. MCP 服务器不可用时优雅降级，跳过该服务器继续其他工具
-// 5. 工具名冲突处理：{serverName}/{toolName} 前缀
+// 2. 严格遵循 MCP Streamable HTTP Transport (2024-11-05) 规范
+// 3. 每次无 Mcp-Session-Id header 的请求即发起新会话
+// 4. 从 DB 读取 enabled 的 MCP 服务器配置，逐个初始化并拉取工具列表
+// 5. 模块级缓存持有持久会话（McpClient 实例 + 工具列表），按 TTL 刷新
+// 6. 工具调用复用已建立的会话
+// 7. MCP 服务器不可用时优雅降级，跳过该服务器继续其他工具
+// 8. 工具名冲突处理：{serverName}/{toolName} 前缀
 //
 // ============================================================
 
@@ -46,16 +49,6 @@ interface McpServerTools {
   tools: McpToolDefinition[]
 }
 
-// ---- Cache ----
-
-interface CacheEntry {
-  servers: McpServerTools[]
-  fetchedAt: number
-}
-
-let cache: CacheEntry | null = null
-const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
-
 // ---- McpClient ----
 
 class McpClient {
@@ -64,22 +57,16 @@ class McpClient {
   private requestId = 0
 
   constructor(url: string) {
-    // Normalize: ensure no trailing slash
     this.url = url.replace(/\/+$/, '')
   }
 
   private async send<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
     const id = ++this.requestId
-    const req: McpJsonRpcRequest = {
-      jsonrpc: '2.0',
-      id,
-      method,
-      params,
-    }
+    const req: McpJsonRpcRequest = { jsonrpc: '2.0', id, method, params }
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      Accept: 'application/json',
+      Accept: 'application/json, text/event-stream',
     }
     if (this.sessionId) {
       headers['Mcp-Session-Id'] = this.sessionId
@@ -106,7 +93,25 @@ class McpClient {
       this.sessionId = sid
     }
 
-    const body = (await response.json()) as McpJsonRpcResponse
+    const contentType = response.headers.get('Content-Type') || ''
+
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`MCP HTTP ${response.status}: ${text.slice(0, 500)}`)
+    }
+
+    let body: McpJsonRpcResponse
+
+    if (contentType.includes('text/event-stream')) {
+      const sseText = await response.text()
+      const dataMatch = sseText.match(/^data:\s*(.+)$/m)
+      if (!dataMatch) {
+        throw new Error(`MCP SSE parse error: no data field in response`)
+      }
+      body = JSON.parse(dataMatch[1]) as McpJsonRpcResponse
+    } else {
+      body = (await response.json()) as McpJsonRpcResponse
+    }
 
     if (body.error) {
       throw new Error(`MCP error ${body.error.code}: ${body.error.message}`)
@@ -126,7 +131,7 @@ class McpClient {
       clientInfo: { name: 'momoi', version: '1.0.0' },
     })
 
-    // Send initialized notification (no response expected)
+    // Send initialized notification (optional per spec)
     try {
       await this.send('notifications/initialized')
     } catch {
@@ -142,9 +147,28 @@ class McpClient {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-    const result = await this.send<{ content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>; isError?: boolean }>('tools/call', { name, arguments: args })
+    const result = await this.send<{
+      content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
+      isError?: boolean
+    }>('tools/call', { name, arguments: args })
     return result
   }
+}
+
+// ---- Persistent Session Cache ----
+
+interface SessionEntry {
+  client: McpClient
+  servers: McpServerTools
+  fetchedAt: number
+}
+
+/** key = `${serverId}:${serverUrl}` */
+const sessions = new Map<string, SessionEntry>()
+const CACHE_TTL_MS = 5 * 60 * 1000
+
+function sessionKey(serverId: string, url: string): string {
+  return `${serverId}:${url}`
 }
 
 // ---- Public API ----
@@ -153,13 +177,37 @@ async function connectToServer(
   serverId: string,
   serverName: string,
   url: string,
-): Promise<McpServerTools | null> {
+): Promise<SessionEntry | null> {
+  const key = sessionKey(serverId, url)
+
+  // 复用已有会话（未过期）
+  const existing = sessions.get(key)
+  if (existing && Date.now() - existing.fetchedAt <= CACHE_TTL_MS) {
+    try {
+      const tools = await existing.client.listTools()
+      existing.servers.tools = tools
+      existing.fetchedAt = Date.now()
+      console.log(`[mcp] Server "${serverName}" (reused session) → ${tools.length} tools`)
+      return existing
+    } catch {
+      console.warn(`[mcp] Server "${serverName}" session expired, reconnecting...`)
+      sessions.delete(key)
+    }
+  }
+
   try {
     const client = new McpClient(url)
     await client.initialize()
     const tools = await client.listTools()
     console.log(`[mcp] Server "${serverName}" → ${tools.length} tools: ${tools.map((t) => t.name).join(', ') || '(none)'}`)
-    return { serverId, serverName, serverUrl: url, tools }
+
+    const entry: SessionEntry = {
+      client,
+      servers: { serverId, serverName, serverUrl: url, tools },
+      fetchedAt: Date.now(),
+    }
+    sessions.set(key, entry)
+    return entry
   } catch (err) {
     console.warn(`[mcp] Failed to connect to "${serverName}" (${url}): ${(err as Error).message}`)
     return null
@@ -170,36 +218,47 @@ async function refreshCache(): Promise<void> {
   const servers = await listMcpServers()
   const enabled = servers.filter((s) => s.enabled)
 
-  if (enabled.length === 0) {
-    cache = { servers: [], fetchedAt: Date.now() }
-    return
+  for (const s of enabled) {
+    await connectToServer(s.id, s.name, s.url)
   }
 
-  console.log(`[mcp] Refreshing tool cache from ${enabled.length} server(s)...`)
-  const results = await Promise.all(
-    enabled.map((s) => connectToServer(s.id, s.name, s.url)),
-  )
-
-  cache = {
-    servers: results.filter((r): r is McpServerTools => r !== null),
-    fetchedAt: Date.now(),
+  // 清理已不在配置中的旧会话
+  for (const [key] of sessions) {
+    const stillEnabled = enabled.some((s) => key === sessionKey(s.id, s.url))
+    if (!stillEnabled) {
+      sessions.delete(key)
+    }
   }
 }
 
-/**
- * Get all MCP tools from enabled servers, refreshing cache if stale.
- * Each tool name is prefixed with the server name to avoid collisions.
- */
 export async function getMcpTools(): Promise<McpServerTools[]> {
-  if (!cache || Date.now() - cache.fetchedAt > CACHE_TTL_MS) {
-    await refreshCache()
+  const result: McpServerTools[] = []
+  for (const [, entry] of sessions) {
+    if (Date.now() - entry.fetchedAt <= CACHE_TTL_MS) {
+      result.push(entry.servers)
+    }
   }
-  return cache?.servers ?? []
+
+  if (result.length === 0) {
+    await refreshCache()
+    for (const [, entry] of sessions) {
+      result.push(entry.servers)
+    }
+  }
+
+  // 后台异步刷新过期条目
+  const needsRefresh = [...sessions.values()].some(
+    (e) => Date.now() - e.fetchedAt > CACHE_TTL_MS,
+  )
+  if (needsRefresh) {
+    refreshCache().catch((err) =>
+      console.warn('[mcp] Background refresh failed:', (err as Error).message),
+    )
+  }
+
+  return result
 }
 
-/**
- * Call an MCP tool by its prefixed name (serverName/toolName).
- */
 export async function callMcpTool(
   serverId: string,
   serverName: string,
@@ -207,14 +266,21 @@ export async function callMcpTool(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const client = new McpClient(serverUrl)
-  await client.initialize()
-  return client.callTool(toolName, args)
+  const key = sessionKey(serverId, serverUrl)
+  let entry = sessions.get(key)
+
+  if (!entry || Date.now() - entry.fetchedAt > CACHE_TTL_MS) {
+    const result = await connectToServer(serverId, serverName, serverUrl)
+    if (!result) {
+      throw new Error(`MCP server "${serverName}" is unavailable`)
+    }
+    entry = result
+  }
+
+  return entry.client.callTool(toolName, args)
 }
 
-/**
- * Force refresh the MCP tool cache (e.g., after admin changes).
- */
 export async function refreshMcpTools(): Promise<void> {
+  sessions.clear()
   await refreshCache()
 }
