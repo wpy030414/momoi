@@ -54,13 +54,20 @@
     @apply border-border;
     touch-action: manipulation;
   }
-  html, body {
-    height: 100dvh;
+  html { height: 100%; }
+  body { height: 100%; }
+  #root { height: 100%; }
+
+  html, body, #root {
     overflow: hidden;
   }
-  #root {
-    height: 100dvh;
-    overflow: hidden;
+
+  /* dvh 是 CSS 2022 新单位，老 WebView（如钉钉内置浏览器）不认识。
+     用 @supports 做渐进增强：支持的浏览器用 dvh（更准），不支持的走上面的 100% fallback */
+  @supports (height: 100dvh) {
+    html, body, #root {
+      height: 100dvh;
+    }
   }
   body {
     @apply bg-background text-foreground;

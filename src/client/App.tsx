@@ -45,12 +45,10 @@ export function App() {
   const [agents, setAgents] = useState<Array<{ id: string; name: string; avatar: string }>>([])
   const [agentsLoading, setAgentsLoading] = useState(true)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return window.innerWidth >= 768
-    }
-    return false
-  })
+  // 移动端判定走 JS（不依赖 CSS 媒体查询）——钉钉 Android 内置内核会丢弃
+  // 响应式规则，导致侧边栏在那里永远展开、无法收起。
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 768)
 
   // Group chat: agent selection dialog
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
@@ -237,15 +235,21 @@ export function App() {
     document.title = appName
   }, [appName])
 
+  // 监听视口宽度：切到移动端尺寸时自动收起侧边栏
   useEffect(() => {
-    const mediaQuery = window.matchMedia('(max-width: 767px)')
-    const handleChange = (e: MediaQueryListEvent) => {
-      if (e.matches) {
-        setSidebarOpen(false)
-      }
+    let wasMobile = window.innerWidth < 768
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768
+      setIsMobile(mobile)
+      if (mobile && !wasMobile) setSidebarOpen(false)
+      wasMobile = mobile
     }
-    mediaQuery.addEventListener('change', handleChange)
-    return () => mediaQuery.removeEventListener('change', handleChange)
+    window.addEventListener('resize', handleResize)
+    window.addEventListener('orientationchange', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      window.removeEventListener('orientationchange', handleResize)
+    }
   }, [])
 
   const handleLanguageChange = (lang: string) => {
@@ -319,13 +323,18 @@ export function App() {
   const activeAgentId = chat.conversations.find((c) => c.id === chat.activeId)?.agent_id || null
 
   return (
-    <div className="flex h-full overflow-hidden bg-background">
+    <div className="flex h-full overflow-hidden bg-background relative">
       {/* Sidebar */}
+      {/* 布局宽度由 JS（isMobile）驱动，不用 CSS 媒体查询 —— 钉钉 Android
+          内置内核会整条丢弃响应式规则，导致侧边栏永远展开又收不起来。
+          mobile：绝对定位浮层，translate-x 滑入/滑出；
+          desktop：普通 flex 子项，宽度 288px ↔ 0 切换。 */}
       <div className={`
-        w-72 flex-shrink-0 border-r
+        flex-shrink-0 border-r
         transition-all duration-300 overflow-hidden
-        max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50
-        ${sidebarOpen ? '' : 'max-md:w-0 md:w-0 md:border-r-0'}
+        ${isMobile
+          ? `absolute inset-y-0 left-0 z-50 w-72 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
+          : `relative ${sidebarOpen ? 'w-72' : 'w-0 border-r-0'}`}
       `}>
         {/* Sidebar — admin mode: management nav; otherwise: conversations */}
         {adminViewOpen ? (
@@ -359,10 +368,10 @@ export function App() {
         )}
       </div>
 
-      {/* Mobile backdrop */}
-      {sidebarOpen && (
+      {/* Mobile backdrop（同样由 JS 驱动，避免媒体查询失效） */}
+      {isMobile && sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          className="absolute inset-0 bg-black/50 z-40"
           onClick={() => setSidebarOpen(false)}
         />
       )}

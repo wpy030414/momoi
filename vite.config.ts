@@ -13,6 +13,11 @@ export default defineConfig({
   build: {
     outDir: '../../dist/client',
     emptyOutDir: true,
+    // 老内核兼容：钉钉 Android 内置浏览器 < Chrome 104，不认识 Media Queries L4
+    // 的范围语法（width>=768px）。默认目标会把 (min-width:768px) 压缩成范围语法，
+    // 老内核会丢弃整条 @media —— 侧边栏等所有响应式样式会静默失效。
+    // 锁定较老的 CSS 目标，强制输出 (min-width: 768px) 的传统写法。
+    cssTarget: 'chrome79',
   },
   resolve: {
     alias: {
