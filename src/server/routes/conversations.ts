@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
-import { db } from '../db.js'
-import { conversations, messages, groupConversationAgents, agents } from '../schema.js'
+import { db, conversations, messages, groupConversationAgents, agents } from '../db.js'
 import { eq, and, desc, gte, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'

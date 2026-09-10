@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
-import { db } from '../db.js'
-import { users } from '../schema.js'
+import { db, users } from '../db.js'
 import { eq } from 'drizzle-orm'
 import { hashPin, verifyPin, signUserToken, isAdmin, setAuthCookie, clearAuthCookie } from '../auth.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'

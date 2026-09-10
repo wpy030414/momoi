@@ -2,8 +2,7 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import path from 'path'
 import fs from 'fs'
-import { db } from '../db.js'
-import { conversations, messages, groupConversationAgents } from '../schema.js'
+import { db, conversations, messages, groupConversationAgents } from '../db.js'
 import { eq, and, count, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
@@ -271,7 +270,7 @@ chatRoute.post('/', async (c) => {
             url: a.downloadUrl, name: a.displayName, size: 0, type: a.mimeType,
           })))
         }
-        const res = await db.insert(messages).values({
+        const result = await db.insert(messages).values({
           conversation_id: convId,
           role: 'assistant',
           content,
@@ -280,8 +279,8 @@ chatRoute.post('/', async (c) => {
           attachments: msgAttachments,
           agent_id: agentId || null,
           created_at: replyNow,
-        }).run()
-        lastAssistantMsgId = Number(res.lastInsertRowid)
+        }).returning({ id: messages.id })
+        lastAssistantMsgId = Number(result[0]?.id ?? 0)
         lastAssistantAgentId = agentId || undefined
         lastAssistantHadSuggestions = suggestionsList.length > 0
       }

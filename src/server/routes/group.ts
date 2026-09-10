@@ -3,8 +3,7 @@
 // ============================================================
 
 import { Hono } from 'hono'
-import { db } from '../db.js'
-import { conversations, groupConversationAgents, agents } from '../schema.js'
+import { db, conversations, groupConversationAgents, agents } from '../db.js'
 import { eq, and, sql, ne } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'

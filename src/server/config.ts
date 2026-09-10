@@ -1,6 +1,5 @@
 import 'dotenv/config'
-import { db } from './db.js'
-import { settings, agents, mcpServers } from './schema.js'
+import { db, settings, agents, mcpServers } from './db.js'
 import { eq } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import type { AppConfig, Agent, McpServerConfig } from '../shared/types.js'

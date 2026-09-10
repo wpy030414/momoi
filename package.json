@@ -17,7 +17,6 @@
     "@earendil-works/pi-ai": "^0.85.1",
     "@hono/node-server": "^1.19.17",
     "@hono/node-ws": "^1.3.1",
-    "@libsql/client": "^0.14.0",
     "@radix-ui/react-collapsible": "^1.1.20",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-scroll-area": "^1.2.18",
@@ -36,7 +35,6 @@
     "hono": "^4.13.7",
     "i18next": "^26.4.2",
     "jose": "^6.2.12",
-    "libsql": "^0.4.7",
     "lucide-react": "^0.475.0",
     "mammoth": "^1.12.2",
     "mermaid": "^11.17.2",
@@ -48,6 +46,7 @@
     "react-markdown": "^9.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
+    "sql.js": "^1.14.2",
     "tailwind-merge": "^3.6.0",
     "word-extractor": "^1.0.4",
     "xlsx": "^0.18.5"
@@ -67,5 +66,9 @@
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vite": "^8.2.2"
+  },
+  "optionalDependencies": {
+    "pg": "^8.23.0",
+    "mysql2": "^3.24.4"
   }
 }

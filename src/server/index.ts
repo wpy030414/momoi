@@ -6,13 +6,11 @@ import { logger } from 'hono/logger'
 import path from 'path'
 import fs from 'fs'
 
-// Initialize database (side effect: creates tables)
-import './db.js'
+import { env, migrateDefaultAgent } from './config.js'
+
+// config.ts transitively imports db.ts which has top-level await for database initialization.
 // Auto-create Default agent from legacy global config if no agents exist
 await migrateDefaultAgent()
-
-import { env } from './config.js'
-import { migrateDefaultAgent } from './config.js'
 import { conversationsRoute } from './routes/conversations.js'
 import { adminRoute } from './routes/admin.js'
 import { appRoute } from './routes/app.js'
