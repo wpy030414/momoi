@@ -199,6 +199,7 @@ export function ChatPanel({
                 onInfiniteModeChange={onInfiniteModeChange || (() => {})}
                 supportAttachments={supportAttachments}
                 noAgents={noAgents}
+                agents={agents}
               />
 
               {/* Recommended questions */}
@@ -258,6 +259,7 @@ export function ChatPanel({
             onInfiniteModeChange={onInfiniteModeChange || (() => {})}
             supportAttachments={supportAttachments}
             noAgents={noAgents}
+            agents={agents}
           />
         </div>
       )}
