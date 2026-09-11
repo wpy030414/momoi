@@ -57,12 +57,12 @@ conversationsRoute.get('/:id', async (c) => {
       .where(eq(groupConversationAgents.conversation_id, id))
       .orderBy(groupConversationAgents.sort_order)
       .all()
-    groupAgents = rows.map((r) => ({ id: r.agent_id, name: r.name, avatar: r.avatar }))
+    groupAgents = rows.map((r: { agent_id: string; name: string; avatar: string }) => ({ id: r.agent_id, name: r.name, avatar: r.avatar }))
   }
 
   return c.json({
     conversation: conv,
-    messages: msgs.map((m) => ({
+    messages: msgs.map((m: typeof messages.$inferSelect) => ({
       ...m,
       tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : null,
       suggestions: m.suggestions ? JSON.parse(m.suggestions) : null,

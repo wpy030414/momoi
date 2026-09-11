@@ -54,8 +54,10 @@
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.20",
     "@types/adm-zip": "^0.5.8",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
+    "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^6.1.1",
     "autoprefixer": "^10.5.5",
     "concurrently": "^9.2.4",
@@ -68,7 +70,7 @@
     "vite": "^8.2.2"
   },
   "optionalDependencies": {
-    "pg": "^8.23.0",
-    "mysql2": "^3.24.4"
+    "mysql2": "^3.24.4",
+    "pg": "^8.23.0"
   }
 }

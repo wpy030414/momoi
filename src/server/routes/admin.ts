@@ -185,7 +185,7 @@ adminRoute.get('/stats/conversations/:id/messages', async (c) => {
 
   return c.json({
     conversation: conv,
-    messages: msgs.map((m) => ({
+    messages: msgs.map((m: typeof messages.$inferSelect) => ({
       ...m,
       tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : null,
       suggestions: m.suggestions ? JSON.parse(m.suggestions) : null,
@@ -212,7 +212,7 @@ adminRoute.get('/users', async (c) => {
     .all()
 
   // Fetch OAuth2 bindings for all listed users
-  const usernames = rows.map((r) => r.username)
+  const usernames = rows.map((r: typeof users.$inferSelect) => r.username)
   const allBindings = usernames.length > 0
     ? await db.select().from(userOauthBindings).all()
     : []
@@ -223,7 +223,7 @@ adminRoute.get('/users', async (c) => {
   }
 
   return c.json({
-    users: rows.map((r) => ({
+    users: rows.map((r: typeof users.$inferSelect) => ({
       username: r.username,
       first_login_at: r.first_login_at,
       last_login_at: r.last_login_at,

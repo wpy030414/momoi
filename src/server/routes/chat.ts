@@ -26,7 +26,7 @@ async function buildNeutralContext(convId: string): Promise<string> {
     .orderBy(messages.created_at).all()
   const agents = await listAgents()
   const agentNameById = new Map(agents.map((a) => [a.id, a.name]))
-  return allMsgs.slice(-20).map((m) =>
+  return allMsgs.slice(-20).map((m: typeof messages.$inferSelect) =>
     m.role === 'user' ? `用户: ${m.content}` : `[${m.agent_id ? (agentNameById.get(m.agent_id) || m.agent_id) : '助手'}]: ${m.content}`
   ).join('\n')
 }
@@ -173,7 +173,7 @@ chatRoute.post('/', async (c) => {
 
       const history: ChatMessage[] = historyMsgs
         .slice(0, -1) // remove current user message
-        .map((m) => ({
+        .map((m: typeof messages.$inferSelect) => ({
           role: m.role as ChatMessage['role'],
           content: m.content,
           tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
@@ -352,7 +352,7 @@ chatRoute.post('/', async (c) => {
         const allMsgs = await db.select().from(messages)
           .where(eq(messages.conversation_id, convId))
           .orderBy(messages.created_at).all()
-        return allMsgs.slice(0, -1).map((m) => ({
+        return allMsgs.slice(0, -1).map((m: typeof messages.$inferSelect) => ({
           role: m.role as ChatMessage['role'],
           content: m.content,
           tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,

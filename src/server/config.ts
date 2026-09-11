@@ -93,7 +93,7 @@ export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConf
 
 export async function listAgents(): Promise<Agent[]> {
   const rows = await db.select().from(agents).orderBy(agents.created_at).all()
-  return rows.map((r) => ({
+  return rows.map((r: typeof agents.$inferSelect) => ({
     id: r.id,
     name: r.name,
     model: r.model,
@@ -176,7 +176,7 @@ export async function migrateDefaultAgent(): Promise<void> {
 
 export async function listMcpServers(): Promise<McpServerConfig[]> {
   const rows = await db.select().from(mcpServers).orderBy(mcpServers.created_at).all()
-  return rows.map((r) => ({
+  return rows.map((r: typeof mcpServers.$inferSelect) => ({
     id: r.id,
     name: r.name,
     url: r.url,

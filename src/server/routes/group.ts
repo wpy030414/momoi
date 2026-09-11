@@ -45,7 +45,7 @@ groupRoute.get('/:id/agents', async (c) => {
     .all()
 
   return c.json({
-    agents: rows.map((r) => ({
+    agents: rows.map((r: { agent_id: string; sort_order: number; name: string; avatar: string }) => ({
       id: r.agent_id,
       name: r.name,
       avatar: r.avatar,
@@ -76,7 +76,7 @@ groupRoute.post('/:id/agents', async (c) => {
     .from(groupConversationAgents)
     .where(eq(groupConversationAgents.conversation_id, convId))
     .all()
-  const maxOrder = existing.reduce((max, r) => Math.max(max, r.sort_order), -1)
+  const maxOrder = existing.reduce((max: number, r: typeof groupConversationAgents.$inferSelect) => Math.max(max, r.sort_order), -1)
 
   await db.insert(groupConversationAgents).values({
     conversation_id: convId,
