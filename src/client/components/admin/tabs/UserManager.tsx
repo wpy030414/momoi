@@ -23,7 +23,8 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [deleteUsername, setDeleteUsername] = useState<string | null>(null)
-  const [registrationOpen, setRegistrationOpen] = useState(true)
+  const [directRegistrationOpen, setDirectRegistrationOpen] = useState(true)
+  const [oauthRegistrationOpen, setOauthRegistrationOpen] = useState(true)
   const [oauthProviders, setOauthProviders] = useState<OAuth2Provider[]>([])
   const [oauthDialogOpen, setOauthDialogOpen] = useState(false)
   const [oauthEditingId, setOauthEditingId] = useState<string | null>(null)
@@ -34,7 +35,8 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   const pageSize = 10
 
   useEffect(() => {
-    api.getRegistration().then((r) => setRegistrationOpen(r.registration_open)).catch(() => {})
+    api.getDirectRegistration().then((r) => setDirectRegistrationOpen(r.direct_registration_open)).catch(() => {})
+    api.getOauthRegistration().then((r) => setOauthRegistrationOpen(r.oauth_registration_open)).catch(() => {})
     fetchOauthProviders()
   }, [])
 
@@ -58,10 +60,16 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
     catch { fetchOauthProviders() }
   }
 
-  const handleToggleRegistration = async (open: boolean) => {
-    setRegistrationOpen(open)
-    try { await api.setRegistration(open) }
-    catch { setRegistrationOpen(!open) }
+  const handleToggleDirectRegistration = async (open: boolean) => {
+    setDirectRegistrationOpen(open)
+    try { await api.setDirectRegistration(open) }
+    catch { setDirectRegistrationOpen(!open) }
+  }
+
+  const handleToggleOauthRegistration = async (open: boolean) => {
+    setOauthRegistrationOpen(open)
+    try { await api.setOauthRegistration(open) }
+    catch { setOauthRegistrationOpen(!open) }
   }
 
   // ---- OAuth2 CRUD ----
@@ -131,10 +139,16 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
 
   return (
     <div className="space-y-4 pt-4">
-      {/* Registration toggle */}
+      {/* Direct registration toggle */}
       <div className="flex items-center gap-3">
-        <label className="text-sm font-medium">{t('settings.registrationLabel')}</label>
-        <Switch checked={registrationOpen} onCheckedChange={handleToggleRegistration} />
+        <label className="text-sm font-medium">{t('settings.directRegistrationLabel')}</label>
+        <Switch checked={directRegistrationOpen} onCheckedChange={handleToggleDirectRegistration} />
+      </div>
+
+      {/* OAuth registration toggle */}
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-medium">{t('settings.oauthRegistrationLabel')}</label>
+        <Switch checked={oauthRegistrationOpen} onCheckedChange={handleToggleOauthRegistration} />
       </div>
 
       {/* OAuth2 providers */}

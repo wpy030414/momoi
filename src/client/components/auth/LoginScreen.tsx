@@ -18,13 +18,22 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [newPin, setNewPin] = useState('')
   const [confirmPin, setConfirmPin] = useState('')
   const [hasPin, setHasPin] = useState<boolean | null>(null)
-  const [registrationOpen, setRegistrationOpen] = useState(true)
+  const [directRegistrationOpen, setDirectRegistrationOpen] = useState(true)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [oauthProviders, setOauthProviders] = useState<Array<{ id: string; name: string }>>([])
 
   useEffect(() => {
     api.getOauthProviders().then((r) => setOauthProviders(r.providers)).catch(() => {})
+    // Show OAuth callback errors (e.g. registration closed)
+    const params = new URLSearchParams(window.location.search)
+    const oauthError = params.get('oauth_error')
+    if (oauthError) {
+      setError(decodeURIComponent(oauthError))
+      const url = new URL(window.location.href)
+      url.searchParams.delete('oauth_error')
+      history.replaceState(null, '', url.toString())
+    }
   }, [])
 
   const handleUsernameSubmit = async (e: React.FormEvent) => {
@@ -36,7 +45,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     try {
       const status = await api.getUserStatus(username.trim())
       setHasPin(status.has_pin)
-      setRegistrationOpen(status.registration_open)
+      setDirectRegistrationOpen(status.direct_registration_open)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('login.error'))
     } finally {
@@ -153,7 +162,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
   // Step 2a: No PIN — register when open, refuse when closed
   if (!hasPin) {
-    if (!registrationOpen) {
+    if (!directRegistrationOpen) {
       return (
         <div className="flex items-center justify-center h-screen bg-background">
           <div className="w-full max-w-sm p-6 space-y-6">

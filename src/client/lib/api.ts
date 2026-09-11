@@ -59,7 +59,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   // User Auth
-  getUserStatus: (username: string) => request<{ has_pin: boolean; registration_open: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
+  getUserStatus: (username: string) => request<{ has_pin: boolean; direct_registration_open: boolean; oauth_registration_open: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
     headers: { 'X-User': encodeURIComponent(username) }
   }),
   // Token arrives via Set-Cookie (HttpOnly); the body only carries the expiry
@@ -156,10 +156,14 @@ export const api = {
     request<{ success: boolean; banned: boolean }>(`/api/admin/users/${encodeURIComponent(username)}/ban`, { method: 'PUT', body: JSON.stringify({ banned }) }),
   deleteUser: (username: string) =>
     request<{ success: boolean }>(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' }),
-  getRegistration: () =>
-    request<{ registration_open: boolean }>('/api/admin/registration'),
-  setRegistration: (open: boolean) =>
-    request<{ registration_open: boolean }>('/api/admin/registration', { method: 'PUT', body: JSON.stringify({ open }) }),
+  getDirectRegistration: () =>
+    request<{ direct_registration_open: boolean }>('/api/admin/direct-registration'),
+  setDirectRegistration: (open: boolean) =>
+    request<{ direct_registration_open: boolean }>('/api/admin/direct-registration', { method: 'PUT', body: JSON.stringify({ open }) }),
+  getOauthRegistration: () =>
+    request<{ oauth_registration_open: boolean }>('/api/admin/oauth-registration'),
+  setOauthRegistration: (open: boolean) =>
+    request<{ oauth_registration_open: boolean }>('/api/admin/oauth-registration', { method: 'PUT', body: JSON.stringify({ open }) }),
 
   // OAuth2 login
   getOauthProviders: () =>

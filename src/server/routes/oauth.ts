@@ -3,7 +3,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { randomBytes, randomUUID } from 'crypto'
 import { db, users, userOauthBindings } from '../db.js'
 import { eq, and } from 'drizzle-orm'
-import { getConfig } from '../config.js'
+import { getConfig, isOauthRegistrationOpen } from '../config.js'
 import { signUserToken, setAuthCookie, getAuthToken, verifyUserToken, verifyPin, hashPin } from '../auth.js'
 
 export const oauthRoute = new Hono()
@@ -128,9 +128,16 @@ oauthRoute.get('/callback', async (c) => {
       }
     }
 
-    // 3. Totally new OAuth user → redirect to registration page
+    // 3. Totally new OAuth user → registration page (if open) or error
     deleteCookie(c, STATE_COOKIE, { path: '/api/oauth' })
     deleteCookie(c, PROVIDER_COOKIE, { path: '/api/oauth' })
+
+    const oauthRegOpen = await isOauthRegistrationOpen()
+    if (!oauthRegOpen) {
+      const errorUrl = new URL('/', spaOrigin)
+      errorUrl.searchParams.set('oauth_error', 'OAuth registration is currently closed')
+      return c.redirect(errorUrl.toString())
+    }
 
     const spaUrl = new URL('/', spaOrigin)
     spaUrl.searchParams.set('oauth_register', '1')
@@ -189,6 +196,12 @@ oauthRoute.post('/register', async (c) => {
     const result = await signUserToken(username)
     setAuthCookie(c, result.token)
     return c.json({ username, expires_at: result.expires_at })
+  }
+
+  // Check OAuth registration gate for new account creation
+  const oauthOpen = await isOauthRegistrationOpen()
+  if (!oauthOpen) {
+    return c.json({ error: 'OAuth registration is currently closed' }, 403)
   }
 
   // Create: new account with PIN + OAuth binding

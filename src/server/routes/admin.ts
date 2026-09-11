@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
 import { adminAuthMiddleware } from '../auth.js'
-import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isRegistrationOpen, setRegistrationOpen } from '../config.js'
+import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen } from '../config.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '../../shared/constants.js'
 import fs from 'fs'
 import path from 'path'
@@ -29,7 +29,8 @@ adminRoute.use('/stats', adminAuthMiddleware)
 adminRoute.use('/stats/*', adminAuthMiddleware)
 adminRoute.use('/users', adminAuthMiddleware)
 adminRoute.use('/users/*', adminAuthMiddleware)
-adminRoute.use('/registration', adminAuthMiddleware)
+adminRoute.use('/direct-registration', adminAuthMiddleware)
+adminRoute.use('/oauth-registration', adminAuthMiddleware)
 
 // Get current config
 adminRoute.get('/config', async (c) => {
@@ -278,16 +279,28 @@ adminRoute.delete('/users/:username', async (c) => {
   return c.json({ success: true })
 })
 
-// Registration toggle
-adminRoute.get('/registration', async (c) => {
-  const open = await isRegistrationOpen()
-  return c.json({ registration_open: open })
+// Direct registration toggle
+adminRoute.get('/direct-registration', async (c) => {
+  const open = await isDirectRegistrationOpen()
+  return c.json({ direct_registration_open: open })
 })
 
-adminRoute.put('/registration', async (c) => {
+adminRoute.put('/direct-registration', async (c) => {
   const { open } = await c.req.json<{ open: boolean }>()
-  await setRegistrationOpen(open)
-  return c.json({ registration_open: open })
+  await setDirectRegistrationOpen(open)
+  return c.json({ direct_registration_open: open })
+})
+
+// OAuth registration toggle
+adminRoute.get('/oauth-registration', async (c) => {
+  const open = await isOauthRegistrationOpen()
+  return c.json({ oauth_registration_open: open })
+})
+
+adminRoute.put('/oauth-registration', async (c) => {
+  const { open } = await c.req.json<{ open: boolean }>()
+  await setOauthRegistrationOpen(open)
+  return c.json({ oauth_registration_open: open })
 })
 
 // List skills

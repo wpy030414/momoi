@@ -47,12 +47,20 @@ async function setSetting(key: string, value: string): Promise<void> {
   }
 }
 
-export async function isRegistrationOpen(): Promise<boolean> {
-  return (await getSetting('registration_open', 'true')) === 'true'
+export async function isDirectRegistrationOpen(): Promise<boolean> {
+  return (await getSetting('direct_registration_open', 'true')) === 'true'
 }
 
-export async function setRegistrationOpen(open: boolean): Promise<void> {
-  await setSetting('registration_open', open ? 'true' : 'false')
+export async function setDirectRegistrationOpen(open: boolean): Promise<void> {
+  await setSetting('direct_registration_open', open ? 'true' : 'false')
+}
+
+export async function isOauthRegistrationOpen(): Promise<boolean> {
+  return (await getSetting('oauth_registration_open', 'true')) === 'true'
+}
+
+export async function setOauthRegistrationOpen(open: boolean): Promise<void> {
+  await setSetting('oauth_registration_open', open ? 'true' : 'false')
 }
 
 export async function getConfig(): Promise<AppConfig> {

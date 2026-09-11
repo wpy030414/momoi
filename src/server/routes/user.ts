@@ -3,7 +3,7 @@ import { db, users, userOauthBindings, conversations } from '../db.js'
 import { eq, and } from 'drizzle-orm'
 import { hashPin, verifyPin, signUserToken, isAdmin, setAuthCookie, clearAuthCookie } from '../auth.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
-import { isRegistrationOpen } from '../config.js'
+import { isDirectRegistrationOpen, isOauthRegistrationOpen } from '../config.js'
 import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../rateLimiter.js'
 
 export const userRoute = new Hono()
@@ -54,8 +54,8 @@ userRoute.get('/status', async (c) => {
   const username = getUsername(c)
   if (!username) return c.json({ error: 'Username required' }, 400)
   const row = await db.select().from(users).where(eq(users.username, username)).get()
-  const registrationOpen = await isRegistrationOpen()
-  return c.json({ has_pin: !!(row?.pin_hash), registration_open: registrationOpen })
+  const [directOpen, oauthOpen] = await Promise.all([isDirectRegistrationOpen(), isOauthRegistrationOpen()])
+  return c.json({ has_pin: !!(row?.pin_hash), direct_registration_open: directOpen, oauth_registration_open: oauthOpen })
 })
 
 // Verify PIN and return JWT
@@ -107,7 +107,7 @@ userRoute.post('/set-pin', async (c) => {
   // Check registration gate — only new users (no PIN yet) are blocked when closed
   const existing = await db.select().from(users).where(eq(users.username, username)).get()
   if (!existing?.pin_hash) {
-    const registrationOpen = await isRegistrationOpen()
+    const registrationOpen = await isDirectRegistrationOpen()
     if (!registrationOpen) {
       return c.json({ error: 'Registration is currently closed' }, 403)
     }
