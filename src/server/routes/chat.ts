@@ -1,7 +1,6 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import path from 'path'
-import fs from 'fs'
 import { db, conversations, messages, groupConversationAgents } from '../db.js'
 import { eq, and, count, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
@@ -34,6 +33,19 @@ async function buildNeutralContext(convId: string): Promise<string> {
 // Global in-memory state for infinite mode control per conversation
 // Key: conversationId, Value: { enabled: boolean, messageCount: number }
 const infiniteState = new Map<string, { enabled: boolean; messageCount: number }>()
+
+/** Parse a workspace file URL: /api/workspace/{convId}/file/__uploads__/{filename} */
+function parseWorkspaceUrl(url: string): { workspaceId: string; wsPath: string } | null {
+  const parts = url.split('/')
+  const fileIdx = parts.indexOf('file')
+  if (fileIdx < 2) return null
+  if (parts[fileIdx - 1] !== '__uploads__') return null
+  const workspaceId = parts[fileIdx - 3]
+  if (!workspaceId) return null
+  const filename = parts.slice(fileIdx + 1).join('/')
+  if (!filename) return null
+  return { workspaceId, wsPath: `__uploads__/${filename}` }
+}
 
 // Apply user auth to all routes
 chatRoute.use('*', userAuthMiddleware)
@@ -195,13 +207,17 @@ chatRoute.post('/', async (c) => {
         // Copy document attachments to workspace for tool access
         const workspace = new SandboxFS(convId)
         for (const att of attachments) {
-          const filename = att.url.split('/').pop() || ''
-          const srcPath = path.join('uploads', filename)
+          // Parse URL: /api/workspace/{convId}/file/__uploads__/{filename}
+          const parsed = parseWorkspaceUrl(att.url)
+          if (!parsed) continue
           const ext = path.extname(att.name).toLowerCase()
 
-          if (DOC_EXTS.includes(ext) && fs.existsSync(srcPath)) {
+          if (DOC_EXTS.includes(ext)) {
+            const sourceWs = new SandboxFS(parsed.workspaceId)
             try {
-              await workspace.copyIn(srcPath, att.name)
+              if (await sourceWs.exists(parsed.wsPath)) {
+                await workspace.copyIn(sourceWs.resolve(parsed.wsPath), att.name)
+              }
             } catch (err) {
               console.warn(`Failed to copy ${att.name} to workspace:`, (err as Error).message)
             }
@@ -209,25 +225,31 @@ chatRoute.post('/', async (c) => {
         }
 
         for (const att of attachments) {
-          // Map URL to disk path: extract filename from URL
-          // Supports both /uploads/xxx and /api/upload/file/xxx
-          const filename = att.url.split('/').pop() || ''
-          const diskPath = path.join('uploads', filename)
-          if (!fs.existsSync(diskPath)) {
+          // Parse URL: extract workspaceId and __uploads__/filename
+          const parsed = parseWorkspaceUrl(att.url)
+          if (!parsed) {
+            textParts.push(`[附件 ${att.name}: 文件未找到]`)
+            continue
+          }
+
+          const sourceWs = new SandboxFS(parsed.workspaceId)
+          const exists = await sourceWs.exists(parsed.wsPath)
+          if (!exists) {
             textParts.push(`[附件 ${att.name}: 文件未找到]`)
             continue
           }
 
           try {
-            const parsed = await parseAttachment(diskPath, att.name, att.type)
+            const diskPath = sourceWs.resolve(parsed.wsPath)
+            const parsedResult = await parseAttachment(diskPath, att.name, att.type)
 
-            if (parsed.kind === 'image') {
-              imageParts.push({ type: 'image_url', image_url: { url: parsed.base64! } })
+            if (parsedResult.kind === 'image') {
+              imageParts.push({ type: 'image_url', image_url: { url: parsedResult.base64! } })
               textParts.push(`[图片: ${att.name}]`)
-            } else if (parsed.kind === 'text') {
-              textParts.push(`\n--- 附件: ${att.name} ---\n${parsed.content}\n---`)
+            } else if (parsedResult.kind === 'text') {
+              textParts.push(`\n--- 附件: ${att.name} ---\n${parsedResult.content}\n---`)
             } else {
-              textParts.push(parsed.content)
+              textParts.push(parsedResult.content)
             }
           } catch (err) {
             textParts.push(`[附件 ${att.name}: 解析失败 - ${(err as Error).message}]`)

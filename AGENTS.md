@@ -59,9 +59,7 @@
 | `src/server/middleware/` | 用户 JWT 认证中间件（`userAuth.ts`）+ IP 速率限制（`rateLimiter.ts`） |
 | `src/server/routes/` | API 路由：`chat.ts`、`group.ts`、`conversations.ts`、`admin.ts`、`upload.ts`、`user.ts`、`workspace.ts`、`app.ts` |
 | `skills/` | 已安装的技能目录 |
-| `data/` | SQLite 数据库文件（`momoi.db`）+ 对话工作区（`workspaces/`） |
-| `uploads/` | 用户上传的文件附件存储目录 |
-
+| `data/` | SQLite 数据库文件（`momoi.db`）+ 对话工作区（`workspaces/`，含 `__uploads__/` 上传附件） |
 ## 开发
 
 ```bash

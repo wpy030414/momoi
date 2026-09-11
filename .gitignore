@@ -21,7 +21,6 @@ Thumbs.db
 # 使用数据（仅忽略仓库根级的这些目录，避免误伤 src/server/skills 等同名代码目录）
 /data/
 /skills/
-/uploads/
 
 # IDE
 .vscode/

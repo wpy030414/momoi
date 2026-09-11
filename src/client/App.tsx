@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGroupChat } from './hooks/useGroupChat'
 import { useTheme } from './hooks/useTheme'
@@ -110,6 +110,14 @@ export function App() {
       api.setInfiniteMode(chat.activeId, enabled).catch(console.error)
     }
   }
+
+  // Ensure a conversation exists for file upload — create one lazily if needed
+  const ensureConversation = useCallback(async (): Promise<string> => {
+    if (chat.activeId) return chat.activeId
+    const { conversation } = await api.createConversation()
+    await chat.selectConversation(conversation.id)
+    return conversation.id
+  }, [chat.activeId, chat.selectConversation])
 
   // When admin disables support_infinite_mode, force-disable any active infinite loop
   useEffect(() => {
@@ -523,6 +531,8 @@ export function App() {
               onSendAnswer={(answer, selectedOptions) => chat.sendAnswer(chat.pendingQuestion?.question_id || '', answer, selectedOptions)}
               onSkipAnswer={() => chat.sendAnswer(chat.pendingQuestion?.question_id || '', '', [])}
               recommendedQuestions={recommendedQuestions}
+              conversationId={chat.activeId}
+              onEnsureConversation={ensureConversation}
             />
           </div>
         )}

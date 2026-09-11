@@ -252,7 +252,7 @@
 
 **背景**：需要让 AI 消费用户上传的图片、Excel、PDF、文本等文件。
 
-**决策**：附件先落盘 `uploads/`（UUID 重命名），再由 `files/parser.ts` 按类型转换 —— 图片转 base64 走 `image_url` 多模态通道，Excel/PDF/文本转纯文本内联进消息正文（`--- 附件: 名称 ---` 分隔），二进制仅存元信息摘要。整个能力由管理员开关 `support_attachments`，默认关闭。
+**决策**：附件先落盘 `data/workspaces/{convId}/__uploads__/`（UUID 重命名），再由 `files/parser.ts` 按类型转换 —— 图片转 base64 走 `image_url` 多模态通道，Excel/PDF/文本转纯文本内联进消息正文（`--- 附件: 名称 ---` 分隔），二进制仅存元信息摘要。整个能力由管理员开关 `support_attachments`，默认关闭。
 
 **原因**：
 - 只有图片真正需要多模态；表格/PDF/文本转成文本即可被任意 OpenAI 兼容模型消费，最大化兼容性
@@ -267,7 +267,7 @@
 
 **影响**：
 - `messages` 表新增 `attachments` 列（JSON 数组）
-- 新增 `uploads/` 目录与 `/api/upload` 路由
+- 新增 `data/workspaces/{convId}/__uploads__/` 目录与 `/api/workspace/{convId}/file/__uploads__/` 下载路由
 - 上传/下载端点均在用户 JWT 保护之下；URL 因此不能直接嵌入 `<img src>`，前端一律经带 JWT 的 fetch → Blob → ObjectURL（见 `specs/module-file-attachment.md`）
 - **曾存在阻断性缺陷**（上传/下载 fetch 未带 JWT 导致 401、失败无提示），已修复并实测验证，过程记录见 `specs/module-file-attachment.md` 的「已修复」章节
 

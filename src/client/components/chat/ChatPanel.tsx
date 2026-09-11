@@ -54,6 +54,10 @@ interface ChatPanelProps {
   onSendAnswer?: (answer: string, selectedOptions?: string[]) => void
   onSkipAnswer?: () => void
   recommendedQuestions?: string[]
+  /** Current conversation id for upload scoping */
+  conversationId?: string | null
+  /** Called when upload needs a conversation but none exists yet */
+  onEnsureConversation?: () => Promise<string>
 }
 
 export function ChatPanel({
@@ -63,6 +67,7 @@ export function ChatPanel({
   infiniteMode = false, onInfiniteModeChange,
   pendingQuestion, onSendAnswer, onSkipAnswer,
   recommendedQuestions,
+  conversationId, onEnsureConversation,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -202,6 +207,8 @@ export function ChatPanel({
                 supportInfiniteMode={supportInfiniteMode}
                 noAgents={noAgents}
                 agents={agents}
+                conversationId={conversationId}
+                onEnsureConversation={onEnsureConversation}
               />
 
               {/* Recommended questions */}
@@ -263,6 +270,8 @@ export function ChatPanel({
             supportInfiniteMode={supportInfiniteMode}
             noAgents={noAgents}
             agents={agents}
+            conversationId={conversationId}
+            onEnsureConversation={onEnsureConversation}
           />
         </div>
       )}

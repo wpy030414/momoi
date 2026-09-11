@@ -65,7 +65,9 @@ workspaceRoute.get('/:conversationId/file/*', async (c) => {
     const buffer = await workspace.readFileRaw(filePath)
     const ext = path.extname(filePath).toLowerCase()
     const mime = guessMime(ext)
-    const encodedName = encodeURIComponent(path.basename(filePath))
+    const queryName = c.req.query('name')
+    const downloadName = queryName ? decodeURIComponent(queryName) : path.basename(filePath)
+    const encodedName = encodeURIComponent(downloadName)
 
     return new Response(new Uint8Array(buffer), {
       headers: {

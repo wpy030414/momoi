@@ -37,6 +37,10 @@ interface InputBarProps {
   noAgents?: boolean
   /** Available agents for @mention autocomplete */
   agents?: AgentBrief[]
+  /** Current conversation id; null when no active conversation */
+  conversationId?: string | null
+  /** Called when upload needs a conversation but none exists yet */
+  onEnsureConversation?: () => Promise<string>
 }
 
 /** Scan backwards from cursorPos to find the last active @mention trigger */
@@ -55,7 +59,7 @@ function detectMention(text: string, cursorPos: number): { query: string; start:
   return null
 }
 
-export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, supportInfiniteMode, noAgents, agents }: InputBarProps) {
+export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, supportInfiniteMode, noAgents, agents, conversationId, onEnsureConversation }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -250,8 +254,17 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
     try {
       const newAttachments: Attachment[] = []
       for (const file of Array.from(files)) {
+        // Ensure we have a conversation — create one lazily if needed
+        let convId = conversationId
+        if (!convId && onEnsureConversation) {
+          convId = await onEnsureConversation()
+        }
+        if (!convId) {
+          throw new Error('No conversation available for upload')
+        }
         const formData = new FormData()
         formData.append('file', file)
+        formData.append('conversation_id', convId)
         // The HttpOnly cookie authenticates the upload automatically
         const res = await fetch('/api/upload', {
           method: 'POST',

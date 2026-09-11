@@ -18,7 +18,7 @@
 
 ```typescript
 interface Attachment {
-  url: string    // /api/upload/file/{uuid}{ext}
+  url: string    // /api/workspace/{convId}/file/__uploads__/{uuid}{ext}
   name: string   // 用户看到的原始文件名
   size: number   // 字节
   type: string   // MIME
@@ -26,36 +26,37 @@ interface Attachment {
 ```
 
 - 消息侧以 JSON 序列化存入 `messages.attachments`（可空）
-- 附件元数据入库，**文件本体存磁盘 `uploads/` 目录**，DB 只存 URL
+- 附件元数据入库，**文件本体存 `data/workspaces/{convId}/__uploads__/`**，DB 只存 URL
 
 ## 存储与命名
 
-- 目录：`uploads/`（启动时自动创建）
+- 目录：`data/workspaces/{convId}/__uploads__/`（上传时通过 SandboxFS 自动创建）
 - 文件名：`{randomUUID()}{原扩展名}` —— 扩展名保留，其余全部替换，杜绝路径穿越与文件名冲突
 - 上传限制：**20MB**，超出返回 `400 { "error": "File too large (max 20MB)" }`
+- **对话隔离**：文件按所属对话存入对应工作区，Agent 工具可直接搜索
 
 ## 接口契约
 
 ### POST /api/upload
 
-需用户 JWT（`middleware/userAuth.ts`，严格模式）。`multipart/form-data`，字段名固定为 `file`。
+需用户 JWT（`middleware/userAuth.ts`，严格模式）。`multipart/form-data`，字段名为 `file` + `conversation_id`（必填）。
 
 **响应**：
 ```json
-{ "url": "/api/upload/file/6f1a...c2.png", "name": "原文件名.png", "size": 20480, "type": "image/png" }
+{ "url": "/api/workspace/abc.../file/__uploads__/6f1a...c2.png", "name": "原文件名.png", "size": 20480, "type": "image/png" }
 ```
 
-**错误**：无文件 → 400 `No file provided`；超限 → 400；未认证 → 401
+**错误**：无文件 → 400 `No file provided`；无 conversation_id → 400；超限 → 400；无权限访问对话 → 403；未认证 → 401
 
-### GET /api/upload/file/:filename
+### GET /api/workspace/:conversationId/file/__uploads__/:filename
 
-**需用户 JWT**（`uploadRoute.use('/*', userAuthMiddleware)` 覆盖了本端点，实测无 token 返回 401）。
+**需用户 JWT**（`workspaceRoute` 全局应用 `userAuthMiddleware`）。
 
-- 文件名先经 `path.basename()` 处理，只取基名，防路径穿越
+- 复用 workspace 路由的文件服务逻辑（`GET /api/workspace/:conversationId/file/*`）
 - `Content-Disposition: attachment; filename*=UTF-8''{原始名}`（支持中文名，可用 `?name=` 覆盖下载名）
-- `Cache-Control: public, max-age=31536000, immutable`（UUID 命名故可永久缓存；注意此头仅对「已带 JWT 通过校验」的请求有意义）
-- MIME 由扩展名映射表推断，未知类型回退 `application/octet-stream`
-- 文件不存在 → `404 Not found`（纯文本响应）
+- `Cache-Control: private, max-age=3600`（对话工作区私有数据）
+- MIME 由 `guessMime` 扩展名映射表推断
+- 文件不存在 → `404 File not found`
 
 > **设计后果**：附件下载经 HttpOnly Cookie 认证（同源 fetch 自动携带），URL 不能直接塞进 `<img src>` / `<a href>`（浏览器子资源请求不带 Cookie → 401）。因此前端展示/下载附件一律走 `fetch(url)` → 转 `Blob` → `createObjectURL`，见 `AttachmentCard.downloadFile`。若将来需要在 `<img>` 中内联预览图片附件，须改为：登录态图片转 base64 内联，或引入短时效签名 URL。
 
@@ -78,9 +79,9 @@ interface Attachment {
 
 ```
 遍历 attachments:
-  1. 由 url 取最后一段作为文件名 → 拼磁盘路径 uploads/{filename}
-     （同时兼容 /uploads/xxx 与 /api/upload/file/xxx 两种形式）
-  2. 文件不存在 → textParts.push("[附件 {name}: 文件未找到]")，跳过
+  1. 从 url 解析 workspaceId 和 __uploads__/{filename}
+     （格式：/api/workspace/{convId}/file/__uploads__/{filename}）
+  2. 通过 SandboxFS.exists 检查文件存在性；不存在 → textParts.push("[附件 {name}: 文件未找到]")
   3. 解析：
      kind=image  → 收入 imageParts，并 textParts.push("[图片: {name}]")
      kind=text   → textParts.push("\n--- 附件: {name} ---\n{content}\n---")
@@ -98,6 +99,7 @@ interface Attachment {
 
 - 附件按钮仅在 `support_attachments === true` 时渲染（`App.tsx` 从 `GET /api/app-name` 读取）
 - 支持一次选择多个文件，串行上传
+- **上传需 `conversation_id`**：若无活跃对话，自动创建后再上传（`onEnsureConversation` 回调）
 - 上传中的文件以卡片预览，发送前可逐个移除
 - 发送后附件元数据随消息持久化，历史消息中的附件渲染为可下载卡片
 

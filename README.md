@@ -214,7 +214,6 @@ momoi/
 │       ├── middleware/   # 用户 JWT 认证中间件
 │       └── routes/      # API 路由（chat/group/conversations/admin/upload/user/workspace/app）
 ├── skills/              # 已安装的技能目录
-├── data/                # SQLite 数据库 + 对话工作区（workspaces/）
-├── uploads/             # 用户上传的文件附件
+├── data/                # SQLite 数据库 + 对话工作区（workspaces/，含上传附件）
 └── docs/                # 项目文档
 ```
