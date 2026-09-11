@@ -1,3 +1,5 @@
+import { st } from '../i18n'
+
 const BASE = ''
 
 // Auth transport: the JWT lives in an HttpOnly cookie the browser attaches to
@@ -52,7 +54,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       window.dispatchEvent(new CustomEvent('auth:expired'))
     }
     const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(err.error || `HTTP ${res.status}`)
+    throw new Error(st(err.error || `HTTP ${res.status}`))
   }
   return res.json()
 }
@@ -184,7 +186,7 @@ export const api = {
           window.dispatchEvent(new CustomEvent('auth:expired'))
         }
         const err = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(err.error || `HTTP ${res.status}`)
+        throw new Error(st(err.error || `HTTP ${res.status}`))
       }
       return res.json() as Promise<{ success: boolean; skills: import('@/shared/types').InstalledSkill[] }>
     })

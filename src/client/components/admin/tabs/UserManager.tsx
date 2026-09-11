@@ -266,7 +266,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               <Input
                 value={oauthForm.name}
                 onChange={(e) => setOauthForm({ ...oauthForm, name: e.target.value })}
-                placeholder="GitHub"
+                placeholder={t('settings.oauthProviderNamePlaceholder')}
                 className="mt-1.5"
               />
             </div>
@@ -275,7 +275,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               <Input
                 value={oauthForm.id}
                 onChange={(e) => setOauthForm({ ...oauthForm, id: e.target.value })}
-                placeholder="github"
+                placeholder={t('settings.oauthProviderIdPlaceholder')}
                 className="mt-1.5"
               />
             </div>
@@ -306,7 +306,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               <Input
                 value={oauthForm.authorize_url}
                 onChange={(e) => setOauthForm({ ...oauthForm, authorize_url: e.target.value })}
-                placeholder="https://github.com/login/oauth/authorize"
+                placeholder={t('settings.oauthProviderAuthorizeUrlPlaceholder')}
                 className="mt-1.5"
               />
             </div>
@@ -315,7 +315,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               <Input
                 value={oauthForm.token_url}
                 onChange={(e) => setOauthForm({ ...oauthForm, token_url: e.target.value })}
-                placeholder="https://github.com/login/oauth/access_token"
+                placeholder={t('settings.oauthProviderTokenUrlPlaceholder')}
                 className="mt-1.5"
               />
             </div>
@@ -324,7 +324,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               <Input
                 value={oauthForm.userinfo_url}
                 onChange={(e) => setOauthForm({ ...oauthForm, userinfo_url: e.target.value })}
-                placeholder="https://api.github.com/user"
+                placeholder={t('settings.oauthProviderUserinfoUrlPlaceholder')}
                 className="mt-1.5"
               />
             </div>
@@ -333,7 +333,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               <Input
                 value={oauthForm.scopes}
                 onChange={(e) => setOauthForm({ ...oauthForm, scopes: e.target.value })}
-                placeholder="openid profile email"
+                placeholder={t('settings.oauthProviderScopesPlaceholder')}
                 className="mt-1.5"
               />
             </div>

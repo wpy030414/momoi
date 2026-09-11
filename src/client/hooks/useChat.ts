@@ -484,11 +484,12 @@ export function useChat() {
         // Replace the placeholder user message with actual content
         setMessages((prev) => {
           const isGroupChat = prev.some((m) => m.agent_id)
+          const translatedText = msg.text === '（继续）' ? t('chat.followUpFallback') : msg.text
           // Find the last user message (the placeholder) and replace its content
           const updated = [...prev]
           for (let i = updated.length - 1; i >= 0; i--) {
             if (updated[i].role === 'user') {
-              updated[i] = { ...updated[i], content: msg.text, streaming: false }
+              updated[i] = { ...updated[i], content: translatedText, streaming: false }
               break
             }
           }
@@ -609,16 +610,16 @@ export function useChat() {
         ? agentMap.get(res.conversation.agent_id)
         : undefined
       const nameOf = (m: { role: string; agent_id?: string | null }): string => {
-        if (m.role === 'user') return 'User'
-        if (m.role === 'system') return 'System'
-        if (m.role === 'tool') return 'Tool'
-        return (m.agent_id ? agentMap.get(m.agent_id) : undefined) || conversationAgentName || 'Assistant'
+        if (m.role === 'user') return t('chat.roleUser')
+        if (m.role === 'system') return t('chat.roleSystem')
+        if (m.role === 'tool') return t('chat.roleTool')
+        return (m.agent_id ? agentMap.get(m.agent_id) : undefined) || conversationAgentName || t('chat.roleAssistant')
       }
       const lines = res.messages.map((m) => {
         const time = m.created_at ? new Date(m.created_at * 1000).toLocaleString() : ''
         return `### ${nameOf(m)}${time ? ` — ${time}` : ''}\n${m.content}`
       })
-      const title = res.conversation.title || 'conversation'
+      const title = res.conversation.title || t('chat.exportDefaultTitle')
       const body = `# ${title}\n\n${lines.join('\n\n---\n\n')}\n`
       const blob = new Blob([body], { type: 'text/plain;charset=utf-8' })
       const url = URL.createObjectURL(blob)

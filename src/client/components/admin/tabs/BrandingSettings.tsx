@@ -81,16 +81,16 @@ export function BrandingSettings() {
           value={config.app_name || ''}
           onChange={(e) => setConfig({ ...config, app_name: e.target.value })}
           className="mt-1"
-          placeholder="Momoi"
+          placeholder={t('settings.appNamePlaceholder')}
         />
       </div>
       <div>
         <label className="text-sm font-medium">{t('settings.appFavicon')}</label>
         <div className="flex items-center gap-4 mt-1">
           {config.app_favicon ? (
-            <img src={config.app_favicon} alt="favicon" className="h-8 w-8 rounded" />
+            <img src={config.app_favicon} alt={t('settings.altFaviconPreview')} className="h-8 w-8 rounded" />
           ) : (
-            <div className="h-8 w-8 rounded bg-muted flex items-center justify-center text-xs">默认</div>
+            <div className="h-8 w-8 rounded bg-muted flex items-center justify-center text-xs">{t('settings.placeholderDefaultFavicon')}</div>
           )}
           <input ref={faviconInputRef} type="file" accept="image/*" className="hidden" onChange={handleFaviconChange} />
           <Button variant="outline" size="sm" onClick={() => faviconInputRef.current?.click()}>
@@ -109,7 +109,7 @@ export function BrandingSettings() {
           {config.app_background ? (
             <div className="h-12 w-12 rounded border" style={{ backgroundImage: `url(${config.app_background})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
           ) : (
-            <div className="h-12 w-12 rounded bg-muted flex items-center justify-center text-xs">无</div>
+            <div className="h-12 w-12 rounded bg-muted flex items-center justify-center text-xs">{t('settings.placeholderNoBackground')}</div>
           )}
           <input ref={backgroundInputRef} type="file" accept="image/*" className="hidden" onChange={handleBackgroundChange} />
           <Button variant="outline" size="sm" onClick={() => backgroundInputRef.current?.click()}>

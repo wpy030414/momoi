@@ -45,7 +45,7 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
       })
       onLogin(result.username, result.expires_at)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('login.error'))
+      setError(err instanceof Error ? err.message : t('login.operationFailed'))
     } finally {
       setLoading(false)
     }
@@ -55,11 +55,11 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
     e.preventDefault()
     if (!newUsername.trim()) return
     if (newPin.length < PIN_MIN || newPin.length > PIN_MAX) {
-      setError(t('login.pinFormatError'))
+      setError(t('oauthRegister.pinFormatError'))
       return
     }
     if (newPin !== confirmPin) {
-      setError(t('login.pinMismatch'))
+      setError(t('oauthRegister.pinMismatch'))
       return
     }
 
@@ -75,7 +75,7 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
       })
       onLogin(result.username, result.expires_at)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('login.error'))
+      setError(err instanceof Error ? err.message : t('login.operationFailed'))
     } finally {
       setLoading(false)
     }
@@ -109,7 +109,7 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
           <form onSubmit={handleLink} className="space-y-4">
             <Input
               autoFocus
-              placeholder={t('login.usernamePlaceholder')}
+              placeholder={t('oauthRegister.usernamePlaceholder')}
               value={linkUsername}
               onChange={(e) => setLinkUsername(e.target.value)}
               disabled={loading}
@@ -131,14 +131,14 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
           <form onSubmit={handleCreate} className="space-y-4">
             <Input
               autoFocus
-              placeholder={t('login.usernamePlaceholder')}
+              placeholder={t('oauthRegister.usernamePlaceholder')}
               value={newUsername}
               onChange={(e) => setNewUsername(e.target.value)}
               disabled={loading}
             />
             <Input
               type="password"
-              placeholder={t('login.newPinPlaceholder')}
+              placeholder={t('oauthRegister.newPinPlaceholder')}
               value={newPin}
               onChange={(e) => { setNewPin(e.target.value.replace(/\D/g, '')) }}
               maxLength={PIN_MAX}
@@ -146,7 +146,7 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
             />
             <Input
               type="password"
-              placeholder={t('login.confirmPinPlaceholder')}
+              placeholder={t('oauthRegister.confirmPinPlaceholder')}
               value={confirmPin}
               onChange={(e) => { setConfirmPin(e.target.value.replace(/\D/g, '')) }}
               maxLength={PIN_MAX}

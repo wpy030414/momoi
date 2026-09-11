@@ -200,7 +200,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <span className="flex-1 text-sm truncate">{conv.title}</span>
+                <span className="flex-1 text-sm truncate">{conv.title === 'New Chat' ? t('sidebar.newChat') : conv.title}</span>
               )}
               {(conv as any).type === 'group' && (conv as any).agent_count > 0 && (
                 <span className="text-xs text-muted-foreground/60 flex-shrink-0">
@@ -371,7 +371,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
                 }`}
                 onClick={() => onLanguageChange?.('zh-CN')}
               >
-                中文
+                {t('menu.languageZhCN')}
               </button>
               <button
                 className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors ${
@@ -379,7 +379,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
                 }`}
                 onClick={() => onLanguageChange?.('en')}
               >
-                English
+                {t('menu.languageEn')}
               </button>
             </div>
           </div>

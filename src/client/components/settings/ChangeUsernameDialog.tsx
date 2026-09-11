@@ -62,7 +62,7 @@ export function ChangeUsernameDialog({ open, onOpenChange, username, onDone }: C
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('changeUsername.placeholder')}</label>
+              <label className="text-sm font-medium">{t('changeUsername.newUsernameLabel')}</label>
               <Input
                 autoFocus
                 placeholder={username}

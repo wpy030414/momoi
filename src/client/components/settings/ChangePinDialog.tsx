@@ -88,7 +88,7 @@ export function ChangePinDialog({ open, onOpenChange, username }: ChangePinDialo
               <label className="text-sm font-medium">{t('changePin.oldPin')}</label>
               <Input
                 type="password"
-                placeholder={t('login.pinPlaceholder')}
+                placeholder={t('changePin.pinPlaceholder')}
                 value={oldPin}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, '')
@@ -103,7 +103,7 @@ export function ChangePinDialog({ open, onOpenChange, username }: ChangePinDialo
               <label className="text-sm font-medium">{t('changePin.newPin')}</label>
               <Input
                 type="password"
-                placeholder={t('login.pinPlaceholder')}
+                placeholder={t('changePin.pinPlaceholder')}
                 value={newPin}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, '')
@@ -118,7 +118,7 @@ export function ChangePinDialog({ open, onOpenChange, username }: ChangePinDialo
               <label className="text-sm font-medium">{t('changePin.confirmPin')}</label>
               <Input
                 type="password"
-                placeholder={t('login.pinPlaceholder')}
+                placeholder={t('changePin.pinPlaceholder')}
                 value={confirmPin}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, '')

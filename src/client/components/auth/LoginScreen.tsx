@@ -47,7 +47,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       setHasPin(status.has_pin)
       setDirectRegistrationOpen(status.direct_registration_open)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('login.error'))
+      setError(err instanceof Error ? err.message : t('login.operationFailed'))
     } finally {
       setLoading(false)
     }
@@ -91,7 +91,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       const result = await api.setPin(username.trim(), newPin)
       onLogin(username.trim(), result.expires_at)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('login.error'))
+      setError(err instanceof Error ? err.message : t('login.operationFailed'))
     } finally {
       setLoading(false)
     }
@@ -138,7 +138,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                   <span className="w-full border-t" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-background px-2 text-muted-foreground">OAuth2</span>
+                  <span className="bg-background px-2 text-muted-foreground">{t('login.oauthDivider')}</span>
                 </div>
               </div>
               <div className="space-y-2">
@@ -149,7 +149,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                     className="w-full"
                     onClick={() => { window.location.href = `/api/oauth/${p.id}/login` }}
                   >
-                    {t('settings.oauthLoginWith', { provider: p.name })}
+                    {t('login.oauthLoginWith', { provider: p.name })}
                   </Button>
                 ))}
               </div>

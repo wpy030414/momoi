@@ -45,7 +45,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
         {isUser ? (
           <User className="h-4 w-4" />
         ) : agentAvatar ? (
-          <img src={agentAvatar} alt="agent" className="h-full w-full object-cover" />
+          <img src={agentAvatar} alt={t('common.altAgentAvatar')} className="h-full w-full object-cover" />
         ) : (
           <Bot className="h-4 w-4" />
         )}

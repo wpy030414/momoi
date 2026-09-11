@@ -121,7 +121,7 @@ function AgentRow({
           <label className="text-sm font-medium">{t('settings.agentAvatar')}</label>
           <div className="flex items-center gap-3 mt-1">
             {formAvatar ? (
-              <img src={formAvatar} alt="avatar" className="h-10 w-10 rounded-full object-cover" />
+              <img src={formAvatar} alt={t('settings.altAvatarPreview')} className="h-10 w-10 rounded-full object-cover" />
             ) : (
               <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
                 <Upload className="h-4 w-4 text-muted-foreground" />
@@ -246,7 +246,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
   const handleCopy = async (agent: Agent) => {
     try {
       await api.createAgent({
-        name: `${agent.name} ${t('settings.agentCopy')}`,
+        name: `${agent.name}${t('settings.agentCopySuffix')}`,
         model: agent.model,
         system_prompt: agent.system_prompt,
         avatar: agent.avatar,

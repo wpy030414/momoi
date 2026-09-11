@@ -24,20 +24,19 @@ export function ReviewPanel() {
   }, [])
 
   const formatTime = (ts: number) => {
-    if (!ts) return '-'
+    if (!ts) return t('common.notAvailable')
     return new Date(ts * 1000).toLocaleString()
   }
 
   const roleLabel = (msg: any) => {
-    if (msg.role === 'user') return 'User'
-    if (msg.role === 'system') return 'System'
-    if (msg.role === 'tool') return 'Tool'
+    if (msg.role === 'user') return t('settings.reviewRoleUser')
+    if (msg.role === 'system') return t('settings.reviewRoleSystem')
+    if (msg.role === 'tool') return t('settings.reviewRoleTool')
     if (msg.agent_id && agentNames.has(msg.agent_id)) return agentNames.get(msg.agent_id)!
-    // 单聊：历史消息可能没有 agent_id，回退到会话所属 Agent
     if (expandedConv?.type === 'direct' && expandedConv.agent_id && agentNames.has(expandedConv.agent_id)) {
       return agentNames.get(expandedConv.agent_id)!
     }
-    return 'Assistant'
+    return t('settings.reviewRoleAssistant')
   }
 
   const handleRowClick = async (convId: string) => {
@@ -89,7 +88,7 @@ export function ReviewPanel() {
                       className={`border-t cursor-pointer hover:bg-muted/30 transition-colors ${expandedConvId === conv.id ? 'bg-muted/50' : ''}`}
                       onClick={() => handleRowClick(conv.id)}
                     >
-                      <td className="px-3 py-2">{conv.user_id || '-'}</td>
+                      <td className="px-3 py-2">{conv.user_id || t('common.notAvailable')}</td>
                       <td className="px-3 py-2 truncate max-w-[200px]">{conv.title}</td>
                       <td className="px-3 py-2 text-right">{conv.message_count}</td>
                       <td className="px-3 py-2 text-muted-foreground">{formatTime(conv.updated_at)}</td>
@@ -100,7 +99,7 @@ export function ReviewPanel() {
                           {loadingMessages ? (
                             <div className="text-center text-muted-foreground py-4">{t('common.loading')}</div>
                           ) : expandedMessages.length === 0 ? (
-                            <p className="text-center text-muted-foreground py-4">No messages</p>
+                            <p className="text-center text-muted-foreground py-4">{t('settings.reviewNoMessages')}</p>
                           ) : (
                             <div className="space-y-3 max-h-[400px] overflow-y-auto">
                               {expandedMessages.map((msg) => (
@@ -109,10 +108,10 @@ export function ReviewPanel() {
                                     <span className="text-xs font-medium text-muted-foreground">{roleLabel(msg)}</span>
                                     <span className="text-xs text-muted-foreground">{formatTime(msg.created_at)}</span>
                                   </div>
-                                  <div className="text-sm whitespace-pre-wrap break-words">{msg.content || '(empty)'}</div>
+                                  <div className="text-sm whitespace-pre-wrap break-words">{msg.content || t('settings.reviewEmptyMessage')}</div>
                                   {msg.thinking && (
                                     <details className="mt-2">
-                                      <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">Thinking</summary>
+                                      <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">{t('chat.thinking')}</summary>
                                       <div className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap">{msg.thinking}</div>
                                     </details>
                                   )}

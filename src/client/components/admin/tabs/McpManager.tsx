@@ -54,7 +54,7 @@ export const McpManager = forwardRef<McpManagerHandle>(function McpManager(_prop
 
   const handleSave = async () => {
     if (!formName.trim() || !formUrl.trim()) {
-      setFormError(t('settings.mcpNameUrlRequired') || 'Name and URL are required')
+      setFormError(t('settings.mcpNameUrlRequired'))
       return
     }
     setSaving(true)
@@ -129,7 +129,7 @@ export const McpManager = forwardRef<McpManagerHandle>(function McpManager(_prop
               <Input
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
-                placeholder="e.g. DingTalk MCP"
+                placeholder={t('settings.mcpServerNamePlaceholder')}
                 className="mt-1.5"
               />
             </div>
@@ -138,7 +138,7 @@ export const McpManager = forwardRef<McpManagerHandle>(function McpManager(_prop
               <Input
                 value={formUrl}
                 onChange={(e) => setFormUrl(e.target.value)}
-                placeholder="http://localhost:8080"
+                placeholder={t('settings.mcpServerUrlPlaceholder')}
                 className="mt-1.5"
               />
             </div>
