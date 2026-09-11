@@ -168,6 +168,7 @@
     "oauthEditProvider": "编辑供应商",
     "oauthNoProviders": "暂无供应商",
     "oauthProviderName": "供应商名称",
+    "oauthProviderId": "供应商 ID",
     "oauthProviderClientId": "Client ID",
     "oauthProviderClientSecret": "Client Secret",
     "oauthProviderAuthorizeUrl": "授权地址",

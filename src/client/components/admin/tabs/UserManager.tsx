@@ -81,7 +81,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   }
 
   const handleOauthSave = async () => {
-    if (!oauthForm.name.trim()) return
+    if (!oauthForm.name.trim() || !oauthForm.id.trim()) return
     setOauthSaving(true)
     const updated = oauthEditingId
       ? oauthProviders.map((p) => p.id === oauthEditingId ? oauthForm : p)
@@ -263,6 +263,15 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               />
             </div>
             <div>
+              <label className="text-sm font-medium">{t('settings.oauthProviderId')}</label>
+              <Input
+                value={oauthForm.id}
+                onChange={(e) => setOauthForm({ ...oauthForm, id: e.target.value })}
+                placeholder="github"
+                className="mt-1.5"
+              />
+            </div>
+            <div>
               <label className="text-sm font-medium">{t('settings.oauthProviderClientId')}</label>
               <Input
                 value={oauthForm.client_id}
@@ -325,7 +334,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
             <Button variant="outline" onClick={() => setOauthDialogOpen(false)}>
               {t('common.cancel')}
             </Button>
-            <Button onClick={handleOauthSave} disabled={oauthSaving || !oauthForm.name.trim()}>
+            <Button onClick={handleOauthSave} disabled={oauthSaving || !oauthForm.name.trim() || !oauthForm.id.trim()}>
               {oauthSaving ? t('common.saving') : t('common.save')}
             </Button>
           </DialogFooter>

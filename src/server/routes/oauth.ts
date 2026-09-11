@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
-import { randomBytes } from 'crypto'
+import { randomBytes, randomUUID } from 'crypto'
 import { db, users } from '../db.js'
 import { eq } from 'drizzle-orm'
 import { getConfig } from '../config.js'
@@ -78,8 +78,7 @@ oauthRoute.get('/callback', async (c) => {
 
     const userRes = await fetch(provider.userinfo_url, { headers: { Authorization: `Bearer ${accessToken}` } })
     const userData = await userRes.json() as Record<string, unknown>
-    const remoteId = String(userData.sub || userData.id || userData.user_id || 'unknown')
-    const username = `oauth:${providerId}:${remoteId}`
+    const username = `${providerId}:${String(userData.name || userData.sub || userData.id || userData.user_id || randomUUID())}`
 
     const now = Math.floor(Date.now() / 1000)
     const existing = await db.select().from(users).where(eq(users.username, username)).get()

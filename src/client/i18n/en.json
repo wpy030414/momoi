@@ -168,6 +168,7 @@
     "oauthEditProvider": "Edit Provider",
     "oauthNoProviders": "No providers",
     "oauthProviderName": "Provider Name",
+    "oauthProviderId": "Provider ID",
     "oauthProviderClientId": "Client ID",
     "oauthProviderClientSecret": "Client Secret",
     "oauthProviderAuthorizeUrl": "Authorize URL",
