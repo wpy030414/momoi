@@ -99,6 +99,23 @@
   @apply mx-auto;
 }
 
+/* ---- Momo pink theme (Japanese language easter egg) ---- */
+.theme-momo {
+  --primary: 340 75% 52%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 340 75% 95%;
+  --accent-foreground: 340 75% 35%;
+  --ring: 340 75% 52%;
+}
+
+.dark.theme-momo {
+  --primary: 340 75% 65%;
+  --primary-foreground: 0 0% 8%;
+  --accent: 340 30% 18%;
+  --accent-foreground: 340 75% 75%;
+  --ring: 340 75% 65%;
+}
+
 /* Suggestion chips */
 .suggestion-chip {
   @apply inline-flex items-center rounded-full border px-3 py-1.5 text-sm

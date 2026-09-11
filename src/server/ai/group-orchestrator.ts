@@ -51,6 +51,7 @@ interface GroupOrchestratorOptions {
   conversationId: string
   userId: string
   agentIds: string[]
+  language?: string
   saveMessage: (
     agentId: string,
     agentName: string,
@@ -139,7 +140,7 @@ function formatDecisionContext(
 }
 
 export async function orchestrateGroupChat(options: GroupOrchestratorOptions): Promise<void> {
-  const { userMessage, history, send, signal, thinkingMode, conversationId, userId, agentIds, saveMessage } = options
+  const { userMessage, history, send, signal, thinkingMode, conversationId, userId, agentIds, language, saveMessage } = options
 
   // Preload agents (parallel, avoids repeated getAgent calls in the loop).
   // 必须早于 group_start：完整名册要供 @ 解析与本轮发言调度（中立 Agent 裁决）使用。
@@ -248,7 +249,7 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
   const repliedAgents = new Set<string>()
   let remaining = [...shuffled]
   let mentionDepth = 0
-  let mentionedBy: string | null = null
+  let mentionedBy: string | undefined = undefined
 
   // Insert user-mentioned agents at the front, preserving their order in the message
   if (userMentionedIds.length > 0) {
@@ -288,13 +289,13 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
 
     // Consume mention signal for this agent, then reset
     const currentMentionedBy = mentionedBy
-    mentionedBy = null
+    mentionedBy = undefined
 
     try {
-      const { reply, suggestions, thinking, artifacts } = await runPiAgentLoop(
+      const { reply, suggestions, thinking, artifacts } = await runPiAgentLoop({
         userMessage,
-        accumulatedHistory,
-        (msg: ServerMessage) => {
+        history: accumulatedHistory,
+        send: (msg: ServerMessage) => {
           send({ ...msg, agent_id: agentId, agent_name: agent.name } as ServerMessage)
         },
         signal,
@@ -303,12 +304,12 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         userId,
         agentId,
         mentionSignal,
-        true, // isGroup
-        false, // infiniteMode
-        agent.name,
-        Array.from(agentNameById.values()),
-        currentMentionedBy,
-      )
+        isGroup: true,
+        agentName: agent.name,
+        groupAgentNames: Array.from(agentNameById.values()),
+        mentionedBy: currentMentionedBy,
+        language,
+      })
 
       repliedAgents.add(agentId)
 

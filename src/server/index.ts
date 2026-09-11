@@ -53,10 +53,24 @@ serve({
   hostname: '0.0.0.0',
 })
 
+// Banner — use visual-width-aware padding so CJK characters align properly in terminal
+const visualWidth = (s: string): number => {
+  let w = 0
+  for (const ch of s) {
+    const cp = ch.codePointAt(0)!
+    // ASCII / Latin-1 / Box Drawing → 1 column; everything else (CJK, fullwidth, emoji, …) → 2 columns
+    w += (cp <= 0xFF || (cp >= 0x2500 && cp <= 0x257F)) ? 1 : 2
+  }
+  return w
+}
+const padVisual = (s: string, cols: number) => s + ' '.repeat(Math.max(0, cols - visualWidth(s)))
+const contentCols = 34
+
 console.log(`
 ╔══════════════════════════════════════╗
-║  智能体服务                          ║
-║  端口：${String(env.PORT).padEnd(28)}║
-║  管理员：${(env.ADMIN.length ? env.ADMIN.join('、') : '未配置（无管理员）').padEnd(24)}║
+║  ${padVisual("Momoi AGI", contentCols)}  ║
+║  ${padVisual(`http://localhost:${env.PORT}`, contentCols)}  ║
+║  ${padVisual("----------------------------------", contentCols)}  ║
+║  ${padVisual(`Admin: ${env.ADMIN.length ? env.ADMIN.join('、') : 'Not configured (no admin)'}`, contentCols)}  ║
 ╚══════════════════════════════════════╝
 `)

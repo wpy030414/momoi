@@ -325,7 +325,27 @@ export function App() {
 
   const handleLanguageChange = (lang: string) => {
     i18n.changeLanguage(lang)
+    localStorage.setItem('language', lang)
+    syncMomoTheme(lang)
   }
+
+  function syncMomoTheme(lang: string) {
+    const root = document.documentElement
+    if (lang === 'ja') {
+      root.classList.add('theme-momo')
+    } else {
+      root.classList.remove('theme-momo')
+    }
+  }
+
+  // Restore language + momo theme on first load
+  useEffect(() => {
+    const saved = localStorage.getItem('language')
+    if (saved && saved !== i18n.language) {
+      i18n.changeLanguage(saved)
+    }
+    syncMomoTheme(saved || i18n.language)
+  }, [])
 
   const handleAdminSettings = () => {
     // Radix Dialog 关闭时需要等待焦点管理完成，再打开新页面

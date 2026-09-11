@@ -90,8 +90,8 @@ chatRoute.post('/', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group'; agent_ids?: string[]; infinite_mode?: boolean }>()
-  const { message, conversation_id, agent_id, _retry, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode } = body
+  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group'; agent_ids?: string[]; infinite_mode?: boolean; language?: string }>()
+  const { message, conversation_id, agent_id, _retry, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language } = body
 
   if (!message?.trim()) {
     return c.json({ error: 'Empty message' }, 400)
@@ -408,17 +408,23 @@ chatRoute.post('/', async (c) => {
           conversationId: convId,
           userId,
           agentIds: groupAgentIds,
+          language,
           saveMessage: async (agentId, agentName, reply, thinking, suggestions, artifacts) => {
             await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId)
           },
         })
       } else {
-        const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId } = await runPiAgentLoop(
-          currentPrompt, currentHistory, send, undefined,
-          thinking_mode !== false, convId, userId,
-          agent_id || undefined,
-          undefined, false, isInfinite,
-        )
+        const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId } = await runPiAgentLoop({
+          userMessage: currentPrompt,
+          history: currentHistory,
+          send,
+          thinkingMode: thinking_mode !== false,
+          conversationId: convId,
+          userId,
+          agentId: agent_id || undefined,
+          infiniteMode: isInfinite,
+          language,
+        })
         if (reply) {
           await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId)
         }
@@ -453,17 +459,23 @@ chatRoute.post('/', async (c) => {
             conversationId: convId,
             userId,
             agentIds: groupAgentIds,
+            language,
             saveMessage: async (agentId, agentName, reply, thinking, suggestions, artifacts) => {
               await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId)
             },
           })
         } else {
-          const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId } = await runPiAgentLoop(
-            currentPrompt, currentHistory, send, undefined,
-            thinking_mode !== false, convId, userId,
-            agent_id || undefined,
-            undefined, false, isInfinite,
-          )
+          const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId } = await runPiAgentLoop({
+            userMessage: currentPrompt,
+            history: currentHistory,
+            send,
+            thinkingMode: thinking_mode !== false,
+            conversationId: convId,
+            userId,
+            agentId: agent_id || undefined,
+            infiniteMode: isInfinite,
+            language,
+          })
           if (reply) {
             await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId)
           } else {

@@ -366,7 +366,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
             </div>
             <div className="flex gap-1">
               <button
-                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors ${
+                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors whitespace-nowrap ${
                   language === 'zh-CN' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
                 }`}
                 onClick={() => onLanguageChange?.('zh-CN')}
@@ -374,12 +374,20 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
                 {t('menu.languageZhCN')}
               </button>
               <button
-                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors ${
+                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors whitespace-nowrap ${
                   language === 'en' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
                 }`}
                 onClick={() => onLanguageChange?.('en')}
               >
                 {t('menu.languageEn')}
+              </button>
+              <button
+                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors whitespace-nowrap ${
+                  language === 'ja' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
+                }`}
+                onClick={() => onLanguageChange?.('ja')}
+              >
+                {t('menu.languageJa')}
               </button>
             </div>
           </div>

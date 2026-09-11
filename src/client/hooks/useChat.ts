@@ -28,7 +28,7 @@ const MAX_RETRIES = 3
 const RETRY_BASE_MS = 2000
 
 export function useChat() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -165,6 +165,7 @@ export function useChat() {
             conversation_type: groupMode ? 'group' : undefined,
             agent_ids: groupMode && groupAgentIds ? groupAgentIds : undefined,
             infinite_mode: infiniteMode || undefined,
+            language: i18n.language,
           }),
           signal: abort.signal,
         })

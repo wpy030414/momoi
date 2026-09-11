@@ -66,54 +66,30 @@ const ZERO_USAGE: Usage = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 }
 
-// ---- 构建系统提示词（从 loop.ts 迁移，强化）----
-function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isGroup: boolean = false, infiniteMode: boolean = false, agentName?: string, groupAgentNames?: string[], mentionedBy?: string | null): string {
-  let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT
+// ---- 构建系统提示词选项 ----
+interface BuildSystemPromptOptions {
+  agentSystemPrompt: string
+  thinkingMode: boolean
+  isGroup?: boolean
+  infiniteMode?: boolean
+  agentName?: string
+  groupAgentNames?: string[]
+  mentionedBy?: string
+  language?: string
+}
 
-  // Append skill descriptions only
-  const skills = skillRegistry.getAll()
-  if (skills.length > 0) {
-    prompt += '\n\n## Available Skills\n'
-    prompt += '以下是已安装的技能摘要。技能库可能不完整：如果用户的请求没有与某个技能描述明显匹配，请直接如实告知用户当前技能库中是否有可用技能，不要强行加载技能试探。如需查看某个技能的完整内容，请调用 load_skill 工具。\n'
-    for (const skill of skills) {
-      prompt += `\n- **${skill.manifest.name}**: ${skill.manifest.description}\n`
-    }
+// ---- 构建系统提示词（从 loop.ts 迁移，强化）----
+function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
+  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, language } = opts
+  let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
+
+  // ---- Momo easter egg: inject vibrant personality when language is Japanese ----
+  if (language === 'ja') {
+    prompt = `你是一个充满活力的少女哦。无论什么对话，都要用明亮、活泼，还有一点调皮的语气来说话哦。结尾可以自然地混入“喵♪”“哟〜”“嘛！”之类的，用可爱又有活力的方式表现自己喵♪\n\n` + prompt
   }
 
   if (!thinkingMode) {
     prompt += '\n\n/no_think\n请直接回答问题，不要输出任何思考过程或推理步骤。'
-  }
-
-  prompt += `
-现在的日期时间是${new Date().toLocaleString()}。
-`
-
-  // 引导 Agent 使用 ask_user 工具
-  prompt += `
-## 使用 ask_user 工具
-你可以在任何时候调用 \`ask_user\` 工具向用户提问，提问期间你会暂停，直到用户回答。
-**应当在以下场景主动使用 ask_user：**
-- 需要用户做出选择时（如「用 SQLite 还是 PostgreSQL？」）——给出 2-4 个选项让用户一键选择
-- 需要用户补充缺失信息时（如「文件的命名是？」「目标端口号是多少？」）
-- 需要用户确认有风险的操作时（如「确定要删除这个文件吗？」）
-- 给出了几种可行方案，希望用户决定方向时
-**不要**在以下场景使用：
-- 用户已经明确告诉你了答案——直接执行，不要反复确认
-- 纯信息查询类问题（「今天天气如何？」）——直接调用搜索工具
-- 过小的琐事（如「我可以继续吗？」「你看这个对不对？」）——自己判断即可
-提供选项时尽量用具体的选择而不是宽泛的描述，让用户能一键点击而不是手动打字。
-`
-
-  if (infiniteMode) {
-    // 无限演算模式：追问由中立 Agent 接管，不生成 suggestions
-    prompt += `
-## 无限演算模式
-你正处于无限演算模式中。在此模式下：
-- 你只需要自然地回复用户，像在聊天一样——可以很简短，也可以很详细
-- 回复完毕后，会有一位中立观察者根据上下文自动生成追问
-- 你可以像真人聊天一样使用括号动作描述，如（笑了笑）、（托腮思考）
-- 保持对话自然流畅，不要每轮都长篇大论
-`
   }
 
   if (isGroup) {
@@ -134,7 +110,35 @@ function buildSystemPrompt(agentSystemPrompt: string, thinkingMode: boolean, isG
 - 被 @ 的 Agent 会在本轮内优先回复，但其他 Agent 仍然会照常发言，不会被打断。
 - 不要 @ 你自己。
 - 适度使用 @ 功能，让它成为你群聊互动的自然习惯，而不是只在需要专业知识时才呼叫。
-${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应对方的点名，但不必为此改变你的回复优先级或内容。\n` : ''}`
+${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应对方的点名，但不必为此改变你的回复优先级或内容。
+` : ''}`
+  }
+
+  if (infiniteMode) {
+    prompt += `
+## 无限演算模式
+你正处于无限演算模式中。在此模式下：
+- 你只需要自然地回复用户和其他 Agent（如果有的话），像在聊天一样——可以很简短，也可以很详细
+- 回复完毕后，会有一位中立观察者根据上下文自动生成追问
+- 你可以像真人聊天一样使用括号动作描述，如（笑了笑）、（托腮思考）
+- 保持对话自然流畅，不要每轮都长篇大论
+`
+  }
+
+  prompt += `
+## 环境信息
+现在的日期时间是${new Date().toLocaleString()}。
+`
+
+  const skills = skillRegistry.getAll()
+  if (skills.length > 0) {
+    prompt += `
+## 可用技能
+以下是已安装的技能摘要。技能库可能不完整：如果用户的请求没有与某个技能描述明显匹配，请直接如实告知用户当前技能库中是否有可用技能，不要强行加载技能试探。如需查看某个技能的完整内容，请调用 load_skill 工具。
+`
+    for (const skill of skills) {
+      prompt += `\n- **${skill.manifest.name}**: ${skill.manifest.description}`
+    }
   }
 
   return prompt
@@ -822,23 +826,33 @@ function buildLoopConfig(agentModel: string, config: AppConfig): AgentLoopConfig
   }
 }
 
+// ---- 入口函数选项 ----
+export interface RunPiAgentLoopOptions {
+  userMessage: string | ContentPart[]
+  history: ChatMessage[]
+  send: SendFn
+  signal?: AbortSignal
+  thinkingMode?: boolean
+  conversationId?: string
+  userId?: string
+  agentId?: string
+  mentionSignal?: MentionSignal
+  isGroup?: boolean
+  infiniteMode?: boolean
+  agentName?: string
+  groupAgentNames?: string[]
+  mentionedBy?: string
+  language?: string
+}
+
 // ---- 入口函数 ----
-export async function runPiAgentLoop(
-  userMessage: string | ContentPart[],
-  history: ChatMessage[],
-  send: SendFn,
-  signal?: AbortSignal,
-  thinkingMode = true,
-  conversationId?: string,
-  userId?: string,
-  agentId?: string,
-  mentionSignal?: MentionSignal,
-  isGroup = false,
-  infiniteMode = false,
-  agentName?: string,
-  groupAgentNames?: string[],
-  mentionedBy?: string | null,
-): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[]; agentId?: string }> {
+export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[]; agentId?: string }> {
+  const {
+    userMessage, history, send, signal,
+    thinkingMode = true, conversationId, userId, agentId,
+    mentionSignal, isGroup, infiniteMode,
+    agentName, groupAgentNames, mentionedBy, language,
+  } = opts
   const config = await getConfig()
 
   // Resolve agent: use specified agentId, or fall back to first available agent
@@ -869,7 +883,7 @@ export async function runPiAgentLoop(
   const convId = conversationId || 'default'
 
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt(agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy)
+  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, language })
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {
