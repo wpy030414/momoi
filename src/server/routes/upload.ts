@@ -4,6 +4,8 @@ import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { db, conversations } from '../db.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { SandboxFS } from '../tools/workspace.js'
+import { uploadToCdn } from '../cdn.js'
+import { isExternalImageHostingEnabled } from '../config.js'
 
 export const uploadRoute = new Hono()
 
@@ -49,9 +51,21 @@ uploadRoute.post('/', async (c) => {
     const ws = new SandboxFS(conversationId)
     await ws.writeFile(`__uploads__/${filename}`, buffer)
 
-    const url = `/api/workspace/${conversationId}/file/__uploads__/${filename}`
+    const workspaceUrl = `/api/workspace/${conversationId}/file/__uploads__/${filename}`
+
+    // If external image hosting is enabled, upload to CDN for user-facing URL
+    let cdnUrl: string | null = null
+    if (await isExternalImageHostingEnabled()) {
+      try {
+        cdnUrl = await uploadToCdn(buffer, file.name || filename, file.type || 'application/octet-stream')
+      } catch (err) {
+        console.warn('CDN upload failed, falling back to workspace URL:', (err as Error).message)
+      }
+    }
+
     return c.json({
-      url,
+      url: cdnUrl || workspaceUrl,
+      ...(cdnUrl ? { workspace_url: workspaceUrl } : {}),
       name: file.name,
       size: file.size,
       type: file.type,

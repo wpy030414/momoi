@@ -114,6 +114,7 @@
     "apiKey": "API キー",
     "supportAttachments": "添付ファイルを有効化",
     "supportInfiniteMode": "無限モードを有効化",
+    "useExternalImageHosting": "外部画像ホスティングを使用",
     "agentName": "エージェント名",
     "agentModel": "モデル",
     "agentAvatar": "アバター",

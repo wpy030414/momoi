@@ -15,6 +15,7 @@ appRoute.get('/', async (c) => {
     support_attachments: config.support_attachments,
     support_infinite_mode: config.support_infinite_mode,
     show_github: config.show_github,
+    use_external_image_hosting: config.use_external_image_hosting,
     recommended_questions: config.recommended_questions,
     agents: agents.filter((a) => a.id !== NEUTRAL_AGENT_ID).map((a) => ({ id: a.id, name: a.name, avatar: a.avatar })),
   })

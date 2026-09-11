@@ -114,6 +114,7 @@
     "apiKey": "API Key",
     "supportAttachments": "Support Attachments",
     "supportInfiniteMode": "Support Infinite Mode",
+    "useExternalImageHosting": "Use External Image Hosting",
     "agentName": "Agent Name",
     "agentModel": "Model",
     "agentAvatar": "Avatar",

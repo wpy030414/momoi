@@ -91,6 +91,13 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle>(function Gatewa
           onCheckedChange={(v) => setConfig({ ...config, support_attachments: v })}
         />
       </div>
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-medium">{t('settings.useExternalImageHosting')}</label>
+        <Switch
+          checked={!!config.use_external_image_hosting}
+          onCheckedChange={(v) => setConfig({ ...config, use_external_image_hosting: v })}
+        />
+      </div>
       <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>
   )

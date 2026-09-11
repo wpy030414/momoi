@@ -207,8 +207,8 @@ chatRoute.post('/', async (c) => {
         // Copy document attachments to workspace for tool access
         const workspace = new SandboxFS(convId)
         for (const att of attachments) {
-          // Parse URL: /api/workspace/{convId}/file/__uploads__/{filename}
-          const parsed = parseWorkspaceUrl(att.url)
+          const wsUrl = (att as any).workspace_url || att.url
+          const parsed = parseWorkspaceUrl(wsUrl)
           if (!parsed) continue
           const ext = path.extname(att.name).toLowerCase()
 
@@ -225,8 +225,9 @@ chatRoute.post('/', async (c) => {
         }
 
         for (const att of attachments) {
-          // Parse URL: extract workspaceId and __uploads__/filename
-          const parsed = parseWorkspaceUrl(att.url)
+          // Prefer workspace_url (CDN mode) for AI image reading, fall back to url
+          const wsUrl = (att as any).workspace_url || att.url
+          const parsed = parseWorkspaceUrl(wsUrl)
           if (!parsed) {
             textParts.push(`[附件 ${att.name}: 文件未找到]`)
             continue

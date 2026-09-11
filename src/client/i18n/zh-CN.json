@@ -114,6 +114,7 @@
     "apiKey": "API 密钥",
     "supportAttachments": "支持附件上传",
     "supportInfiniteMode": "支持无限演算",
+    "useExternalImageHosting": "使用外部图床服务",
     "agentName": "智能体名称",
     "agentModel": "模型",
     "agentAvatar": "头像",

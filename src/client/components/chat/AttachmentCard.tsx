@@ -29,11 +29,21 @@ function formatSize(bytes: number): string {
 }
 
 async function downloadFile(url: string, name: string) {
-  // Build download URL with original filename as query param
+  // External URLs (CDN, etc.): direct browser download via <a>
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.target = '_blank'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    return
+  }
+
+  // Workspace URL: fetch with cookie auth, then blob download
   const sep = url.includes('?') ? '&' : '?'
   const downloadUrl = `${url}${sep}name=${encodeURIComponent(name)}`
-  // /api/upload/file/* sits behind the same user auth as the upload endpoint;
-  // the HttpOnly cookie rides along automatically
   const res = await fetch(downloadUrl)
   if (!res.ok) throw new Error(`Download failed: ${res.status}`)
   const blob = await res.blob()

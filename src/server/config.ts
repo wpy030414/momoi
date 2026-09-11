@@ -63,6 +63,10 @@ export async function setOauthRegistrationOpen(open: boolean): Promise<void> {
   await setSetting('oauth_registration_open', open ? 'true' : 'false')
 }
 
+export async function isExternalImageHostingEnabled(): Promise<boolean> {
+  return (await getSetting('use_external_image_hosting', 'false')) === 'true'
+}
+
 export async function getConfig(): Promise<AppConfig> {
   return {
     app_name: await getSetting('app_name', DEFAULT_APP_NAME),
@@ -73,6 +77,7 @@ export async function getConfig(): Promise<AppConfig> {
     support_attachments: (await getSetting('support_attachments', 'true')) === 'true',
     support_infinite_mode: (await getSetting('support_infinite_mode', 'true')) === 'true',
     show_github: (await getSetting('show_github', 'true')) === 'true',
+    use_external_image_hosting: (await getSetting('use_external_image_hosting', 'false')) === 'true',
     recommended_questions: JSON.parse(await getSetting('recommended_questions', '[]')),
     oauth_providers: JSON.parse(await getSetting('oauth_providers', '[]')),
   }
@@ -81,7 +86,7 @@ export async function getConfig(): Promise<AppConfig> {
 export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConfig> {
   for (const [key, value] of Object.entries(partial)) {
     if (value !== undefined) {
-      const boolKeys = ['support_attachments', 'support_infinite_mode', 'show_github']
+      const boolKeys = ['support_attachments', 'support_infinite_mode', 'show_github', 'use_external_image_hosting']
       const jsonKeys = ['recommended_questions', 'oauth_providers']
       let stored: string
       if (jsonKeys.includes(key)) {

@@ -6,6 +6,7 @@
 
 export interface Attachment {
   url: string
+  workspace_url?: string  // 仅 CDN 模式下有，指向工作区原始路径供 AI 读取
   name: string
   size: number
   type: string
@@ -64,6 +65,7 @@ export interface AppConfig {
   support_attachments: boolean
   support_infinite_mode: boolean
   show_github: boolean
+  use_external_image_hosting: boolean
   recommended_questions: string[]
   oauth_providers: OAuth2Provider[]
 }

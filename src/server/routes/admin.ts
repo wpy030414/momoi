@@ -2,7 +2,8 @@ import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
 import { adminAuthMiddleware } from '../auth.js'
-import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen } from '../config.js'
+import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen, isExternalImageHostingEnabled } from '../config.js'
+import { base64ToBuffer, uploadToCdn } from '../cdn.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '../../shared/constants.js'
 import fs from 'fs'
 import path from 'path'
@@ -41,6 +42,22 @@ adminRoute.get('/config', async (c) => {
 // Update config
 adminRoute.put('/config', async (c) => {
   const body = await c.req.json()
+
+  // External image hosting: convert base64 images → CDN URLs before saving
+  if (await isExternalImageHostingEnabled()) {
+    for (const key of ['app_favicon', 'app_background'] as const) {
+      const val = body[key]
+      if (val && typeof val === 'string' && val.startsWith('data:')) {
+        try {
+          const { buffer, mimeType } = base64ToBuffer(val)
+          body[key] = await uploadToCdn(buffer, key === 'app_favicon' ? 'favicon.png' : 'background.png', mimeType)
+        } catch (err) {
+          console.warn(`Failed to upload ${key} to CDN, keeping base64:`, (err as Error).message)
+        }
+      }
+    }
+  }
+
   const config = await updateConfig(body)
   return c.json(config)
 })
@@ -83,6 +100,17 @@ adminRoute.post('/agents', async (c) => {
   if (!body.name?.trim()) {
     return c.json({ error: 'Agent name is required' }, 400)
   }
+
+  // External image hosting: convert base64 avatar → CDN URL
+  if (body.avatar && body.avatar.startsWith('data:') && await isExternalImageHostingEnabled()) {
+    try {
+      const { buffer, mimeType } = base64ToBuffer(body.avatar)
+      body.avatar = await uploadToCdn(buffer, 'avatar.png', mimeType)
+    } catch (err) {
+      console.warn('Failed to upload agent avatar to CDN, keeping base64:', (err as Error).message)
+    }
+  }
+
   const agent = await createAgent(body.name.trim(), body.model || '', body.system_prompt || '', body.avatar || '')
   return c.json({ agent })
 })
@@ -95,6 +123,16 @@ adminRoute.put('/agents/:id', async (c) => {
   if (id === NEUTRAL_AGENT_ID) {
     delete body.name
     delete body.avatar
+  }
+
+  // External image hosting: convert base64 avatar → CDN URL
+  if (body.avatar && body.avatar.startsWith('data:') && await isExternalImageHostingEnabled()) {
+    try {
+      const { buffer, mimeType } = base64ToBuffer(body.avatar)
+      body.avatar = await uploadToCdn(buffer, 'avatar.png', mimeType)
+    } catch (err) {
+      console.warn('Failed to upload agent avatar to CDN, keeping base64:', (err as Error).message)
+    }
   }
 
   const agent = await updateAgent(id, body)
