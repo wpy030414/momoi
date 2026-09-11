@@ -49,6 +49,10 @@ export function LinkedAccountsDialog({ open, onOpenChange }: LinkedAccountsDialo
     }
   }
 
+  const getProviderName = (providerId: string) => {
+    return providers.find((p) => p.id === providerId)?.name || providerId
+  }
+
   const handleLink = (providerId: string) => {
     // Full-page redirect to OAuth flow. Browser carries momoi_token cookie,
     // callback will auto-bind to current user.
@@ -71,7 +75,7 @@ export function LinkedAccountsDialog({ open, onOpenChange }: LinkedAccountsDialo
               bindings.map((b) => (
                 <div key={b.id} className="flex items-center justify-between rounded-md border px-3 py-2">
                   <div>
-                    <span className="text-sm font-medium">{b.provider_id}</span>
+                    <span className="text-sm font-medium">{getProviderName(b.provider_id)}</span>
                     <p className="text-xs text-muted-foreground">
                       {new Date(b.created_at * 1000).toLocaleDateString()}
                     </p>
@@ -104,7 +108,7 @@ export function LinkedAccountsDialog({ open, onOpenChange }: LinkedAccountsDialo
                       className="w-full justify-start"
                       onClick={() => handleLink(p.id)}
                     >
-                      {p.name} ({p.id})
+                      {p.name}
                     </Button>
                   ))}
                 {providers.filter((p) => !bindings.some((b) => b.provider_id === p.id)).length === 0 && (
