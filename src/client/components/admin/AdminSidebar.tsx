@@ -9,7 +9,7 @@ interface AdminSidebarProps {
   onBack: () => void
 }
 
-const TABS = [
+export const ADMIN_TABS = [
   { value: 'gateway', labelKey: 'settings.tabGateway', Icon: Globe },
   { value: 'branding', labelKey: 'settings.tabBranding', Icon: Palette },
   { value: 'agent', labelKey: 'settings.tabAgent', Icon: Bot },
@@ -38,7 +38,7 @@ export function AdminSidebar({ activeTab, onTabChange, onBack }: AdminSidebarPro
       {/* Tab list */}
       <ScrollArea className="flex-1">
         <div className="p-2 space-y-0.5">
-          {TABS.map(({ value, labelKey, Icon }) => (
+          {ADMIN_TABS.map(({ value, labelKey, Icon }) => (
             <Button
               key={value}
               variant="ghost"

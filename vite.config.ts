@@ -18,6 +18,17 @@ export default defineConfig({
     // 老内核会丢弃整条 @media —— 侧边栏等所有响应式样式会静默失效。
     // 锁定较老的 CSS 目标，强制输出 (min-width: 768px) 的传统写法。
     cssTarget: 'chrome79',
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          // React 核心：体积不大但缓存价值高，业务代码变动时不受影响
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
+            return 'vendor-react'
+          }
+          // 其余 node_modules 交给 Rolldown 默认拆分策略
+        },
+      },
+    },
   },
   resolve: {
     alias: {

@@ -10,6 +10,7 @@ export const oauthRoute = new Hono()
 
 const STATE_COOKIE = 'momoi_oauth_state'
 const PROVIDER_COOKIE = 'momoi_oauth_provider'
+const ORIGIN_COOKIE = 'momoi_oauth_origin'
 
 oauthRoute.get('/providers', async (c) => {
   const config = await getConfig()
@@ -27,9 +28,20 @@ oauthRoute.get('/:providerId/login', async (c) => {
   setCookie(c, STATE_COOKIE, state, cookieBase)
   setCookie(c, PROVIDER_COOKIE, providerId, cookieBase)
 
+  // Use Referer to determine the SPA origin — in dev mode the request arrives
+  // through the Vite proxy so c.req.url gives the backend port.  The Referer
+  // header carries the real browser-facing origin.
+  let spaOrigin = ''
+  try {
+    const referer = c.req.header('Referer')
+    if (referer) spaOrigin = new URL(referer).origin
+  } catch { /* keep empty */ }
+  if (spaOrigin) setCookie(c, ORIGIN_COOKIE, spaOrigin, cookieBase)
+  const baseOrigin = spaOrigin || new URL(c.req.url).origin
+
   const params = new URLSearchParams({
     client_id: provider.client_id,
-    redirect_uri: `${new URL(c.req.url).origin}/api/oauth/callback`,
+    redirect_uri: `${baseOrigin}/api/oauth/callback`,
     response_type: 'code',
     scope: provider.scopes,
     state,
@@ -43,11 +55,17 @@ oauthRoute.get('/callback', async (c) => {
   const error = c.req.query('error')
   const storedState = getCookie(c, STATE_COOKIE) || null
   const providerId = getCookie(c, PROVIDER_COOKIE) || null
-  const spaOrigin = new URL(c.req.url).origin
+  const savedOrigin = getCookie(c, ORIGIN_COOKIE) || null
+  const spaOrigin = savedOrigin || new URL(c.req.url).origin
 
-  const fail = (msg: string) => {
+  const cleanupCookies = () => {
     deleteCookie(c, STATE_COOKIE, { path: '/api/oauth' })
     deleteCookie(c, PROVIDER_COOKIE, { path: '/api/oauth' })
+    deleteCookie(c, ORIGIN_COOKIE, { path: '/api/oauth' })
+  }
+
+  const fail = (msg: string) => {
+    cleanupCookies()
     const url = new URL('/', spaOrigin)
     url.searchParams.set('oauth_error', msg)
     return c.redirect(url.toString())
@@ -96,8 +114,7 @@ oauthRoute.get('/callback', async (c) => {
 
       const result = await signUserToken(binding.user_id)
       setAuthCookie(c, result.token)
-      deleteCookie(c, STATE_COOKIE, { path: '/api/oauth' })
-      deleteCookie(c, PROVIDER_COOKIE, { path: '/api/oauth' })
+      cleanupCookies()
 
       const spaUrl = new URL('/', spaOrigin)
       spaUrl.searchParams.set('oauth_user', binding.user_id)
@@ -122,15 +139,13 @@ oauthRoute.get('/callback', async (c) => {
 
         await db.update(users).set({ last_login_at: now }).where(eq(users.username, jwtResult.username)).run()
 
-        deleteCookie(c, STATE_COOKIE, { path: '/api/oauth' })
-        deleteCookie(c, PROVIDER_COOKIE, { path: '/api/oauth' })
+        cleanupCookies()
         return c.redirect('/')
       }
     }
 
     // 3. Totally new OAuth user → registration page (if open) or error
-    deleteCookie(c, STATE_COOKIE, { path: '/api/oauth' })
-    deleteCookie(c, PROVIDER_COOKIE, { path: '/api/oauth' })
+    cleanupCookies()
 
     const oauthRegOpen = await isOauthRegistrationOpen()
     if (!oauthRegOpen) {

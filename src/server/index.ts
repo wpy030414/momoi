@@ -3,8 +3,6 @@ import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
-import path from 'path'
-import fs from 'fs'
 
 import { env, migrateDefaultAgent } from './config.js'
 
@@ -43,8 +41,8 @@ app.route('/api/workspace', workspaceRoute)
 app.route('/api/group', groupRoute)
 app.route('/api/oauth', oauthRoute)
 
-// Static files (production build only)
-if (fs.existsSync(path.join('dist/client', 'index.html'))) {
+// Static files — production only (dev mode uses Vite proxy)
+if (process.env.NODE_ENV === 'production') {
   app.use('*', serveClient)
 }
 

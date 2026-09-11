@@ -1,22 +1,30 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGroupChat } from './hooks/useGroupChat'
 import { useTheme } from './hooks/useTheme'
 import { Sidebar } from './components/sidebar/Sidebar'
-import { AdminSidebar } from './components/admin/AdminSidebar'
+import { AdminSidebar, ADMIN_TABS } from './components/admin/AdminSidebar'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
 import { LinkedAccountsDialog } from './components/settings/LinkedAccountsDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
-import { AgentManager, type AgentManagerHandle } from './components/admin/tabs/AgentManager'
-import { GatewaySettings, type GatewaySettingsHandle } from './components/admin/tabs/GatewaySettings'
-import { BrandingSettings } from './components/admin/tabs/BrandingSettings'
-import { McpManager, type McpManagerHandle } from './components/admin/tabs/McpManager'
-import { SkillManager, type SkillManagerHandle } from './components/admin/tabs/SkillManager'
-import { ReviewPanel } from './components/admin/tabs/ReviewPanel'
-import { UserManager, type UserManagerHandle } from './components/admin/tabs/UserManager'
+// Admin tab components — lazy loaded (only admins see them)
+const AgentManager = lazy(() => import('./components/admin/tabs/AgentManager').then(m => ({ default: m.AgentManager })))
+const GatewaySettings = lazy(() => import('./components/admin/tabs/GatewaySettings').then(m => ({ default: m.GatewaySettings })))
+const BrandingSettings = lazy(() => import('./components/admin/tabs/BrandingSettings').then(m => ({ default: m.BrandingSettings })))
+const McpManager = lazy(() => import('./components/admin/tabs/McpManager').then(m => ({ default: m.McpManager })))
+const SkillManager = lazy(() => import('./components/admin/tabs/SkillManager').then(m => ({ default: m.SkillManager })))
+const ReviewPanel = lazy(() => import('./components/admin/tabs/ReviewPanel').then(m => ({ default: m.ReviewPanel })))
+const UserManager = lazy(() => import('./components/admin/tabs/UserManager').then(m => ({ default: m.UserManager })))
+
+// Type-only imports for ref handles (not used at runtime, only for TS)
+import type { AgentManagerHandle } from './components/admin/tabs/AgentManager'
+import type { GatewaySettingsHandle } from './components/admin/tabs/GatewaySettings'
+import type { McpManagerHandle } from './components/admin/tabs/McpManager'
+import type { SkillManagerHandle } from './components/admin/tabs/SkillManager'
+import type { UserManagerHandle } from './components/admin/tabs/UserManager'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
 import { PanelLeft, X, Check, Plus, RotateCcw, Upload, Server } from 'lucide-react'
@@ -28,7 +36,7 @@ export function App() {
   const { theme, setTheme } = useTheme()
   const [adminViewOpen, setAdminViewOpen] = useState(false)
   // Active tab in the admin management sidebar
-  const [adminTab, setAdminTab] = useState('agent')
+  const [adminTab, setAdminTab] = useState<string>(ADMIN_TABS[0].value)
   // Refs to tab action-triggers (exposed via useImperativeHandle)
   const agentRef = useRef<AgentManagerHandle>(null)
   const gatewayRef = useRef<GatewaySettingsHandle>(null)
@@ -487,6 +495,7 @@ export function App() {
             </div>
             </div>
             <div className="flex-1 overflow-y-auto min-h-0 px-6">
+              <Suspense fallback={<div className="flex items-center justify-center h-32 text-muted-foreground text-sm">{t('common.loading')}</div>}>
               {adminTab === 'agent' && <AgentManager ref={agentRef} />}
               {adminTab === 'gateway' && <GatewaySettings ref={gatewayRef} />}
               {adminTab === 'branding' && <BrandingSettings />}
@@ -494,6 +503,7 @@ export function App() {
               {adminTab === 'skills' && <SkillManager ref={skillRef} />}
               {adminTab === 'users' && <UserManager ref={userRef} />}
               {adminTab === 'review' && <ReviewPanel />}
+              </Suspense>
             </div>
           </div>
         ) : (

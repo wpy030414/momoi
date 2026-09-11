@@ -4,13 +4,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "concurrently -k \"pnpm dev:server\" \"pnpm dev:client\"",
+    "dev": "concurrently -k \"pnpm dev:server\" \"wait-on tcp:11408 && pnpm dev:client\"",
     "dev:client": "vite",
-    "dev:server": "tsx watch src/server/index.ts",
+    "dev:server": "cross-env NODE_ENV=development tsx watch src/server/index.ts",
     "build": "pnpm build:server && pnpm build:client",
     "build:client": "vite build",
     "build:server": "tsup src/server/index.ts --format esm --clean --outDir dist",
-    "start": "node dist/index.js"
+    "start": "cross-env NODE_ENV=production node dist/index.js"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.85.1",
@@ -61,13 +61,15 @@
     "@vitejs/plugin-react": "^6.1.1",
     "autoprefixer": "^10.5.5",
     "concurrently": "^9.2.4",
+    "cross-env": "^10.1.0",
     "drizzle-kit": "^0.30.6",
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
     "tsup": "^8.5.1",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "wait-on": "^9.1.0"
   },
   "optionalDependencies": {
     "mysql2": "^3.24.4",
