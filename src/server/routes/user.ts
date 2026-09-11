@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
-import { db, users } from '../db.js'
-import { eq } from 'drizzle-orm'
+import { db, users, userOauthBindings, conversations } from '../db.js'
+import { eq, and } from 'drizzle-orm'
 import { hashPin, verifyPin, signUserToken, isAdmin, setAuthCookie, clearAuthCookie } from '../auth.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { isRegistrationOpen } from '../config.js'
@@ -166,5 +166,62 @@ userRoute.post('/change-pin', async (c) => {
   const hashed = hashPin(new_pin)
   await db.update(users).set({ pin_hash: hashed }).where(eq(users.username, username)).run()
 
+  return c.json({ success: true })
+})
+
+// ---- Rename user ----
+
+userRoute.post('/rename', userAuthMiddleware, async (c) => {
+  const oldUsername = (c as any).get('userId') as string
+  const { new_username } = await c.req.json<{ new_username: string }>()
+  if (!new_username || !new_username.trim()) {
+    return c.json({ error: 'New username is required' }, 400)
+  }
+  const newName = new_username.trim()
+  if (newName === oldUsername) return c.json({ error: 'Same as current username' }, 400)
+
+  const conflict = await db.select().from(users).where(eq(users.username, newName)).get()
+  if (conflict) return c.json({ error: 'Username already taken' }, 409)
+
+  const now = Math.floor(Date.now() / 1000)
+  await db.update(users).set({ username: newName, last_login_at: now }).where(eq(users.username, oldUsername)).run()
+  await db.update(conversations).set({ user_id: newName }).where(eq(conversations.user_id, oldUsername)).run()
+  await db.update(userOauthBindings).set({ user_id: newName }).where(eq(userOauthBindings.user_id, oldUsername)).run()
+
+  const result = await signUserToken(newName)
+  setAuthCookie(c, result.token)
+  return c.json({ username: newName, expires_at: result.expires_at })
+})
+
+// ---- OAuth2 bindings (linked accounts) ----
+
+userRoute.get('/oauth-bindings', userAuthMiddleware, async (c) => {
+  const username = (c as any).get('userId') as string
+  const bindings = await db.select({
+    id: userOauthBindings.id,
+    provider_id: userOauthBindings.provider_id,
+    created_at: userOauthBindings.created_at,
+  }).from(userOauthBindings).where(eq(userOauthBindings.user_id, username)).all()
+  return c.json({ bindings })
+})
+
+userRoute.delete('/oauth-bindings/:id', userAuthMiddleware, async (c) => {
+  const username = (c as any).get('userId') as string
+  const bindingId = c.req.param('id')
+
+  const binding = await db.select().from(userOauthBindings).where(eq(userOauthBindings.id, bindingId)).get()
+  if (!binding) return c.json({ error: 'Binding not found' }, 404)
+  if (binding.user_id !== username) return c.json({ error: 'Not your binding' }, 403)
+
+  // Ensure at least one login method remains (PIN or other binding)
+  const userRow = await db.select().from(users).where(eq(users.username, username)).get()
+  const allBindings = await db.select().from(userOauthBindings)
+    .where(eq(userOauthBindings.user_id, username)).all()
+  const otherBindings = allBindings.filter((b: { id: string }) => b.id !== bindingId)
+  if (!userRow?.pin_hash && otherBindings.length === 0) {
+    return c.json({ error: 'Cannot remove your only login method. Set a PIN or link another account first.' }, 400)
+  }
+
+  await db.delete(userOauthBindings).where(eq(userOauthBindings.id, bindingId)).run()
   return c.json({ success: true })
 })

@@ -68,6 +68,8 @@
   "menu": {
     "logout": "退出登录",
     "changePin": "更改 PIN",
+    "changeUsername": "更改登录名",
+    "linkAccount": "关联账户",
     "language": "语言",
     "theme": "主题",
     "themeLight": "浅色",
@@ -148,13 +150,12 @@
     "toastMcpDeleted": "MCP 服务器已删除",
     "tabUsers": "用户",
     "userUsername": "用户名",
+    "userOauthBindings": "已绑定 OAuth2",
     "userFirstLogin": "首次登录",
     "userLastLogin": "最后登录",
-    "userStatus": "状态",
-    "userActive": "正常",
-    "userBanned": "已禁用",
-    "userBan": "禁用",
-    "userUnban": "启用",
+    "userBan": "封禁",
+    "userRestore": "恢复",
+    "userRemove": "注销",
     "userActions": "操作",
     "userDeleteConfirm": "确定要删除用户「{{username}}」吗？这将同时删除其所有会话和消息，此操作不可撤销。",
     "noUsers": "暂无用户",
@@ -221,5 +222,30 @@
     "confirmPinError": "两次输入的新 PIN 不一致",
     "oldPinWrong": "当前 PIN 错误",
     "success": "PIN 已更新"
+  },
+  "changeUsername": {
+    "title": "更改登录名",
+    "description": "输入新的登录名",
+    "placeholder": "新登录名",
+    "conflict": "该名称已被占用",
+    "success": "登录名已更新"
+  },
+  "linkedAccounts": {
+    "title": "关联账户",
+    "description": "管理 OAuth2 关联账户",
+    "add": "添加关联",
+    "unbind": "解除",
+    "unbindConfirm": "确定要解除此关联吗？",
+    "noBindings": "暂无关联账户",
+    "chooseProvider": "选择供应商",
+    "cannotRemoveLast": "无法移除唯一的登录方式，请先设置 PIN 或关联其他账户"
+  },
+  "oauthRegister": {
+    "title": "完成注册",
+    "subtitle": "通过 OAuth2 登录，请选择继续方式",
+    "linkTab": "关联已有账户",
+    "createTab": "创建新账户",
+    "linkExisting": "关联并登录",
+    "createNew": "创建并登录"
   }
 }

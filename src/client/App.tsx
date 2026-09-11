@@ -6,7 +6,10 @@ import { Sidebar } from './components/sidebar/Sidebar'
 import { AdminSidebar } from './components/admin/AdminSidebar'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
+import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
+import { LinkedAccountsDialog } from './components/settings/LinkedAccountsDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
+import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
 import { AgentManager, type AgentManagerHandle } from './components/admin/tabs/AgentManager'
 import { GatewaySettings, type GatewaySettingsHandle } from './components/admin/tabs/GatewaySettings'
 import { BrandingSettings } from './components/admin/tabs/BrandingSettings'
@@ -33,6 +36,9 @@ export function App() {
   const skillRef = useRef<SkillManagerHandle>(null)
   const userRef = useRef<UserManagerHandle>(null)
   const [changePinOpen, setChangePinOpen] = useState(false)
+  const [changeUsernameOpen, setChangeUsernameOpen] = useState(false)
+  const [linkedAccountsOpen, setLinkedAccountsOpen] = useState(false)
+  const [oauthRegisterInfo, setOauthRegisterInfo] = useState<{ providerId: string; providerUserId: string } | null>(null)
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
   const [supportAttachments, setSupportAttachments] = useState(false)
@@ -48,6 +54,21 @@ export function App() {
     const params = new URLSearchParams(window.location.search)
     const oauthUser = params.get('oauth_user')
     const oauthExpires = params.get('oauth_expires')
+    const oauthRegister = params.get('oauth_register')
+    const providerId = params.get('provider_id')
+    const providerUserId = params.get('provider_user_id')
+
+    if (oauthRegister === '1' && providerId && providerUserId) {
+      setOauthRegisterInfo({ providerId, providerUserId })
+      // Clean query params from URL without reload
+      const url = new URL(window.location.href)
+      url.searchParams.delete('oauth_register')
+      url.searchParams.delete('provider_id')
+      url.searchParams.delete('provider_user_id')
+      history.replaceState(null, '', url.toString())
+      return
+    }
+
     if (oauthUser) {
       localStorage.setItem('user', oauthUser)
       if (oauthExpires) {
@@ -339,6 +360,20 @@ export function App() {
     return () => window.removeEventListener('hashchange', syncAdminRoute)
   }, [isAdminUser])
 
+  // Show OAuth2 registration screen for new OAuth users
+  if (oauthRegisterInfo) {
+    return (
+      <OAuthRegisterScreen
+        providerId={oauthRegisterInfo.providerId}
+        providerUserId={oauthRegisterInfo.providerUserId}
+        onLogin={(username, expiresAt) => {
+          setOauthRegisterInfo(null)
+          handleLogin(username, expiresAt)
+        }}
+      />
+    )
+  }
+
   // Show login screen if not logged in
   if (!currentUser) {
     return <LoginScreen onLogin={handleLogin} />
@@ -383,6 +418,8 @@ export function App() {
             currentUser={currentUser}
             showGithub={showGithub}
             onChangePin={() => setChangePinOpen(true)}
+            onChangeUsername={() => setChangeUsernameOpen(true)}
+            onLinkAccount={() => setLinkedAccountsOpen(true)}
             onLogout={handleLogout}
             language={i18n.language}
             onLanguageChange={handleLanguageChange}
@@ -495,6 +532,24 @@ export function App() {
         open={changePinOpen}
         onOpenChange={setChangePinOpen}
         username={currentUser}
+      />
+
+      {/* Change Username Dialog */}
+      <ChangeUsernameDialog
+        open={changeUsernameOpen}
+        onOpenChange={setChangeUsernameOpen}
+        username={currentUser}
+        onDone={(newUsername, expiresAt) => {
+          localStorage.setItem('user', newUsername)
+          setSessionExpiry(expiresAt)
+          setCurrentUser(newUsername)
+        }}
+      />
+
+      {/* Linked Accounts Dialog */}
+      <LinkedAccountsDialog
+        open={linkedAccountsOpen}
+        onOpenChange={setLinkedAccountsOpen}
       />
 
       {/* Group Chat Agent Selection Dialog */}

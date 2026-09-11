@@ -84,6 +84,21 @@ export const api = {
   refreshToken: () => request<{ expires_at: number }>('/api/user/refresh', { method: 'POST' }),
   // Clear the HttpOnly cookie server-side (JS cannot delete it itself)
   logout: () => request<{ success: boolean }>('/api/user/logout', { method: 'POST' }),
+  renameUser: (newUsername: string) => request<{ username: string; expires_at: number }>(
+    '/api/user/rename',
+    { method: 'POST', body: JSON.stringify({ new_username: newUsername }) }
+  ),
+  getOauthBindings: () => request<{ bindings: Array<{ id: string; provider_id: string; created_at: number }> }>(
+    '/api/user/oauth-bindings'
+  ),
+  unbindOauth: (bindingId: string) => request<{ success: boolean }>(
+    `/api/user/oauth-bindings/${bindingId}`,
+    { method: 'DELETE' }
+  ),
+  oauthRegister: (data: { provider_id: string; provider_user_id: string; action: 'link' | 'create'; username: string; pin: string }) => request<{ username: string; expires_at: number }>(
+    '/api/oauth/register',
+    { method: 'POST', body: JSON.stringify(data) }
+  ),
 
   // Conversations
   listConversations: () => request<{ conversations: import('@/shared/types').Conversation[] }>('/api/conversations'),

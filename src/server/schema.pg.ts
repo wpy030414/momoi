@@ -63,3 +63,11 @@ export const users = pgTable('users', {
   last_login_at: integer('last_login_at').notNull(),
   banned: boolean('banned').notNull().default(false),
 })
+
+export const userOauthBindings = pgTable('user_oauth_bindings', {
+  id: text('id').primaryKey(),
+  user_id: text('user_id').notNull(),
+  provider_id: text('provider_id').notNull(),
+  provider_user_id: text('provider_user_id').notNull(),
+  created_at: integer('created_at').notNull(),
+})

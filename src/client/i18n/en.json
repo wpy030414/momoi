@@ -68,6 +68,8 @@
   "menu": {
     "logout": "Logout",
     "changePin": "Change PIN",
+    "changeUsername": "Change Username",
+    "linkAccount": "Link Account",
     "language": "Language",
     "theme": "Theme",
     "themeLight": "Light",
@@ -148,13 +150,12 @@
     "toastMcpDeleted": "MCP server deleted",
     "tabUsers": "Users",
     "userUsername": "Username",
+    "userOauthBindings": "OAuth2 Linked",
     "userFirstLogin": "First Login",
     "userLastLogin": "Last Login",
-    "userStatus": "Status",
-    "userActive": "Active",
-    "userBanned": "Banned",
     "userBan": "Ban",
-    "userUnban": "Unban",
+    "userRestore": "Restore",
+    "userRemove": "Remove",
     "userActions": "Actions",
     "userDeleteConfirm": "Delete user \"{{username}}\"? All their conversations and messages will also be deleted. This action cannot be undone.",
     "noUsers": "No users",
@@ -221,5 +222,30 @@
     "confirmPinError": "New PINs do not match",
     "oldPinWrong": "Current PIN is incorrect",
     "success": "PIN updated"
+  },
+  "changeUsername": {
+    "title": "Change Username",
+    "description": "Enter a new username",
+    "placeholder": "New username",
+    "conflict": "Username is already taken",
+    "success": "Username updated"
+  },
+  "linkedAccounts": {
+    "title": "Linked Accounts",
+    "description": "Manage OAuth2 linked accounts",
+    "add": "Link Account",
+    "unbind": "Unlink",
+    "unbindConfirm": "Are you sure you want to unlink this account?",
+    "noBindings": "No linked accounts",
+    "chooseProvider": "Choose Provider",
+    "cannotRemoveLast": "Cannot remove your only login method. Set a PIN or link another account first."
+  },
+  "oauthRegister": {
+    "title": "Complete Registration",
+    "subtitle": "Signed in via OAuth2. Choose how to continue:",
+    "linkTab": "Link Existing Account",
+    "createTab": "Create New Account",
+    "linkExisting": "Link & Login",
+    "createNew": "Create & Login"
   }
 }

@@ -63,3 +63,11 @@ export const users = mysqlTable('users', {
   last_login_at: int('last_login_at').notNull(),
   banned: boolean('banned').notNull().default(false),
 })
+
+export const userOauthBindings = mysqlTable('user_oauth_bindings', {
+  id: varchar('id', { length: 255 }).primaryKey(),
+  user_id: varchar('user_id', { length: 255 }).notNull(),
+  provider_id: varchar('provider_id', { length: 255 }).notNull(),
+  provider_user_id: varchar('provider_user_id', { length: 255 }).notNull(),
+  created_at: int('created_at').notNull(),
+})

@@ -91,6 +91,15 @@ const MIGRATION_SQL = `
     last_login_at INTEGER NOT NULL,
     banned INTEGER NOT NULL DEFAULT 0
   );
+
+  CREATE TABLE IF NOT EXISTS user_oauth_bindings (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    provider_user_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(provider_id, provider_user_id)
+  );
 `
 
 // ---- SQLite (sql.js) local mode ----
@@ -227,6 +236,15 @@ async function initPg(dbUrl: string, user: string, password: string) {
       banned BOOLEAN NOT NULL DEFAULT FALSE
     );
 
+    CREATE TABLE IF NOT EXISTS user_oauth_bindings (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      provider_user_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(provider_id, provider_user_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
     CREATE INDEX IF NOT EXISTS idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
@@ -317,6 +335,15 @@ async function initMysql(dbUrl: string, user: string, password: string) {
         last_login_at INT NOT NULL,
         banned BOOLEAN NOT NULL DEFAULT FALSE
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+      CREATE TABLE IF NOT EXISTS user_oauth_bindings (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        provider_id VARCHAR(255) NOT NULL,
+        provider_user_id VARCHAR(255) NOT NULL,
+        created_at INT NOT NULL,
+        UNIQUE KEY uq_provider_user (provider_id, provider_user_id)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     `)
   } finally {
     conn.release()
@@ -345,4 +372,5 @@ export const {
   groupConversationAgents,
   mcpServers,
   users,
+  userOauthBindings,
 } = result.schema

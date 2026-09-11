@@ -7,7 +7,7 @@ import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '../../shared/constants.js'
 import fs from 'fs'
 import path from 'path'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
-import { db, conversations, messages, settings, users } from '../db.js'
+import { db, conversations, messages, settings, users, userOauthBindings } from '../db.js'
 import { skillRegistry } from '../skills/loader.js'
 import AdmZip from 'adm-zip'
 
@@ -211,12 +211,24 @@ adminRoute.get('/users', async (c) => {
     .offset(offset)
     .all()
 
+  // Fetch OAuth2 bindings for all listed users
+  const usernames = rows.map((r) => r.username)
+  const allBindings = usernames.length > 0
+    ? await db.select().from(userOauthBindings).all()
+    : []
+  const bindingsByUser = new Map<string, string[]>()
+  for (const b of allBindings) {
+    if (!bindingsByUser.has(b.user_id)) bindingsByUser.set(b.user_id, [])
+    bindingsByUser.get(b.user_id)!.push(b.provider_id)
+  }
+
   return c.json({
     users: rows.map((r) => ({
       username: r.username,
       first_login_at: r.first_login_at,
       last_login_at: r.last_login_at,
       banned: r.banned,
+      oauth_providers: bindingsByUser.get(r.username) ?? [],
     })),
     total: total?.count ?? 0,
     page,

@@ -186,8 +186,8 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userUsername')}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t('settings.userOauthBindings')}</th>
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userLastLogin')}</th>
-                  <th className="text-left px-3 py-2 font-medium">{t('settings.userStatus')}</th>
                   <th className="text-right px-3 py-2 font-medium">{t('settings.userActions')}</th>
                 </tr>
               </thead>
@@ -195,25 +195,19 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
                 {users.map((u) => (
                   <tr key={u.username} className="border-t">
                     <td className="px-3 py-2 font-medium">{u.username}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{formatTime(u.last_login_at)}</td>
-                    <td className="px-3 py-2">
-                      {u.banned ? (
-                        <span className="text-xs text-destructive bg-destructive/10 px-1.5 py-0.5 rounded">
-                          {t('settings.userBanned')}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">
-                          {t('settings.userActive')}
-                        </span>
-                      )}
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {u.oauth_providers.length > 0
+                        ? u.oauth_providers.map((pid) => oauthProviders.find((p) => p.id === pid)?.name || pid).join(', ')
+                        : '-'}
                     </td>
+                    <td className="px-3 py-2 text-muted-foreground">{formatTime(u.last_login_at)}</td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <Button variant="ghost" size="sm" onClick={() => handleToggleBan(u.username, !u.banned)}>
-                          {u.banned ? t('settings.userUnban') : t('settings.userBan')}
+                          {u.banned ? t('settings.userRestore') : t('settings.userBan')}
                         </Button>
                         <Button variant="destructive" size="sm" onClick={() => setDeleteUsername(u.username)}>
-                          {t('common.remove')}
+                          {t('settings.userRemove')}
                         </Button>
                       </div>
                     </td>
@@ -363,7 +357,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
       <Dialog open={!!deleteUsername} onOpenChange={(open) => { if (!open) setDeleteUsername(null) }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t('common.remove')}</DialogTitle>
+            <DialogTitle>{t('settings.userRemove')}</DialogTitle>
             <DialogDescription>
               {t('settings.userDeleteConfirm', { username: deleteUsername ?? '' })}
             </DialogDescription>
@@ -373,7 +367,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={confirmDelete}>
-              {t('common.remove')}
+              {t('settings.userRemove')}
             </Button>
           </DialogFooter>
         </DialogContent>
