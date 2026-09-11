@@ -293,7 +293,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
 
   return (
     <div ref={containerRef} className="max-w-3xl mx-auto w-full px-4 pb-4">
-      <div className="rounded-xl border bg-background px-4 py-3 focus-within:ring-2 focus-within:ring-ring transition-shadow">
+      <div className="rounded-xl border bg-background/[.66] px-4 py-3 focus-within:ring-2 focus-within:ring-ring transition-shadow">
         {/* Attachment chips */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-3">

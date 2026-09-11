@@ -116,8 +116,9 @@
   --ring: 340 75% 65%;
 }
 
-/* Suggestion chips */
+/* Suggestion chips — match assistant message bubble style */
 .suggestion-chip {
-  @apply inline-flex items-center rounded-full border px-3 py-1.5 text-sm
+  @apply inline-flex items-center rounded-lg border px-4 py-1 text-xs text-card-foreground
          transition-colors hover:bg-accent hover:text-accent-foreground cursor-pointer;
+  background-color: hsl(var(--background) / 0.66);
 }

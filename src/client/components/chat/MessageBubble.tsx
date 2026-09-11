@@ -107,7 +107,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
 
           {/* Message content */}
           <div className={`inline-block rounded-lg px-4 py-1 ${
-            isUser ? 'bg-primary text-primary-foreground text-left' : 'bg-card border'
+            isUser ? 'bg-primary/75 text-primary-foreground text-left' : 'bg-card/75 border'
           }`}>
             {message.streaming && !message.content ? (
               <div className="flex gap-1">
