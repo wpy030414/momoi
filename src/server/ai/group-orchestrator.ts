@@ -72,18 +72,31 @@ function shuffleArray<T>(arr: T[]): T[] {
 }
 
 /**
- * 群聊上下文格式化：
+ * 群聊上下文格式化（支持 per-agent 视角）：
  * 把历史中「其他 Agent 产生的 assistant 消息」重写为
  * `[Agent名字]: 内容` 的 user 角色消息。
  *
  * 原因：模型会把 assistant 角色消息当作「自己说过的话」，
  * 导致后续 Agent 复述/延续他人内容（群聊回复雷同）。
  * 以 user 角色 + 名字前缀注入后，模型能明确区分「他人发言」与「用户提问」，
- * 从而给出自己视角的独立回答。无 agent_id 的旧消息保持原样。
+ * 从而给出自己视角的独立回答。
+ *
+ * 当指定 currentAgentId 时，该 Agent 自己的历史发言保持 assistant 角色
+ * （不转换），让它能正确识别自己说过的话、维持身份连续性。
+ * 无 agent_id 的旧消息保持原样。
  */
-function prepareGroupHistory(history: ChatMessage[], agentNameById: Map<string, string>): ChatMessage[] {
+function prepareGroupHistory(
+  history: ChatMessage[],
+  agentNameById: Map<string, string>,
+  currentAgentId?: string,
+): ChatMessage[] {
   return history.map((msg) => {
     if (msg.role === 'assistant' && msg.agent_id) {
+      // 当前 Agent 自己的历史发言保持 assistant 角色，维持身份认同
+      if (currentAgentId && msg.agent_id === currentAgentId) {
+        return msg
+      }
+      // 其他 Agent 的发言转为 user 角色 + 名字前缀
       const name = agentNameById.get(msg.agent_id)
       if (name) {
         return {
@@ -260,10 +273,12 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
     mentionedBy = '用户'
   }
 
-  // Accumulate history so each agent sees previous agents' replies.
-  // 其他 Agent 的发言统一转为 `[名字]: 内容` 的 user 消息，
-  // 避免模型将其误认为「自己说过的话」而复述/照抄。
-  const accumulatedHistory: ChatMessage[] = prepareGroupHistory(history, agentNameById)
+  // 本轮发言的原始 DB 历史（不转换——每个 Agent 发言前按自身视角构建
+  // per-agent history）。同一轮内已发言 Agent 的回复存在 turnReplies 中，
+  // 同样按 per-agent 视角注入（自己的回复保持 assistant 角色，别人的转为
+  // user 角色 + 名字前缀）。
+  const baseHistory: ChatMessage[] = history
+  const turnReplies: Array<{ agent_id: string; name: string; content: string }> = []
 
   while (remaining.length > 0) {
     if (signal?.aborted) break
@@ -291,10 +306,33 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
     const currentMentionedBy = mentionedBy
     mentionedBy = undefined
 
+    // ---- Build per-agent history ----
+    // 自己的发言保持 assistant 角色，别人的转为 user 角色 + 名字前缀。
+    // 这样模型能正确区分「自己说过的话」与「别人说过的话」，
+    // 解决多轮群聊中 Agent 身份认同混乱的问题。
+    const perAgentHistory: ChatMessage[] = [
+      // DB 历史：按当前 Agent 视角转换
+      ...prepareGroupHistory(baseHistory, agentNameById, agentId),
+      // 本轮其他 Agent 的发言：自己的保持 assistant，别人的转 user + [Name]:
+      ...turnReplies.map((r) => {
+        if (r.agent_id === agentId) {
+          return {
+            role: 'assistant' as const,
+            content: r.content,
+            agent_id: r.agent_id,
+          }
+        }
+        return {
+          role: 'user' as const,
+          content: `[${r.name}]: ${r.content}`,
+        }
+      }),
+    ]
+
     try {
       const { reply, suggestions, thinking, artifacts } = await runPiAgentLoop({
         userMessage,
-        history: accumulatedHistory,
+        history: perAgentHistory,
         send: (msg: ServerMessage) => {
           send({ ...msg, agent_id: agentId, agent_name: agent.name } as ServerMessage)
         },
@@ -318,14 +356,11 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         await saveMessage(agentId, agent.name, reply, thinking, suggestions, artifacts)
       }
 
-      // Append this agent's reply to the accumulated history
-      // so subsequent agents can see what was said before them.
-      // NOTE: use user role + `[名字]: ` prefix — assistant role would make
-      // the model treat it as its own words and repeat/parrot it.
-      accumulatedHistory.push({
-        role: 'user',
-        content: `[${agent.name}]: ${reply}`,
-      })
+      // Record this agent's reply so subsequent agents see it
+      // in their per-agent history (as [Name]: content in user role)
+      if (reply) {
+        turnReplies.push({ agent_id: agentId, name: agent.name, content: reply })
+      }
 
       // Send agent_done event
       send({
