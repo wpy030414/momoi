@@ -433,9 +433,26 @@
     }
   },
   "voice": {
+    "label": "声线模拟 (Voice / TTS)",
+    "enable": "启用声线合成",
+    "enableDesc": "开启后，AI 回复将自动合成为语音，消息气泡顶部可播放",
+    "uploadSample": "上传参考音频",
+    "uploadSampleHint": "上传 5-60 秒清晰人声（WAV / MP3 / OGG）",
+    "sampleUploaded": "已上传",
+    "changeSample": "更换音频",
+    "clone": "克隆声线",
+    "cloning": "克隆中…",
+    "cloned": "已克隆",
+    "reclone": "重新克隆",
+    "noSample": "请先上传参考音频再克隆声线",
+    "speed": "语速",
+    "pitch": "音调",
+    "emotionStrength": "情感强度",
+    "deleteVoice": "清除声线数据",
+    "deleteVoiceConfirm": "确定要清除此智能体的声线数据吗？包括参考音频和已克隆的说话人。",
     "play": "播放语音",
     "replay": "重新播放",
-    "loading": "加载中...",
+    "loading": "加载中…",
     "pause": "暂停",
     "resume": "继续"
   }

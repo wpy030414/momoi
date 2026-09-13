@@ -4,6 +4,8 @@ import { api } from '../../../lib/api'
 import type { Agent } from '@/shared/types'
 import { Input } from '../../ui/input'
 import { Button } from '../../ui/button'
+import { Switch } from '../../ui/switch'
+import { Slider } from '../../ui/slider'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
 import { Pencil, Trash2, Plus, Upload, Copy, Shield, Mic, Volume2 } from 'lucide-react'
 import { useToast } from '../../ui/toast'
@@ -12,13 +14,50 @@ export interface AgentManagerHandle {
   triggerCreate: () => void
 }
 
+// ---- Voice sub-form state ----
+interface VoiceFormState {
+  enabled: boolean
+  sampleUrl: string
+  speakerId: string
+  speed: number
+  pitch: number
+  emotionStrength: number
+}
+
+const DEFAULT_VOICE_FORM: VoiceFormState = {
+  enabled: false,
+  sampleUrl: '',
+  speakerId: '',
+  speed: 1.0,
+  pitch: 0,
+  emotionStrength: 0.8,
+}
+
+function voiceFormFromAgent(agent: Agent): VoiceFormState {
+  try {
+    const vs = JSON.parse((agent as any).voice_settings || '{}')
+    return {
+      enabled: (agent as any).voice_enabled ?? false,
+      sampleUrl: (agent as any).voice_sample_url || '',
+      speakerId: vs.speakerId || '',
+      speed: vs.speed ?? 1.0,
+      pitch: vs.pitch ?? 0,
+      emotionStrength: vs.emotionStrength ?? 0.8,
+    }
+  } catch {
+    return DEFAULT_VOICE_FORM
+  }
+}
+
 /** A single agent row — card in view mode, expands into edit form in edit mode */
 function AgentRow({
   agent, isNeutral, isEditing, onEdit, onCancel, onSave, onCopy, onDelete,
   formName, setFormName, formModel, setFormModel, formSystemPrompt, setFormSystemPrompt,
-  formAvatar, setFormAvatar, avatarInputRef, handleAvatarChange, loading, t,
+  formAvatar, setFormAvatar, avatarInputRef, handleAvatarChange,
+  voice, onVoiceChange, voiceAudioRef, handleVoiceUpload, handleVoiceClone, handleVoiceDelete,
+  voiceCloning, loading, t,
 }: {
-  agent?: Agent  // undefined when creating new
+  agent?: Agent
   isNeutral?: boolean
   isEditing: boolean
   onEdit?: () => void
@@ -32,6 +71,14 @@ function AgentRow({
   formAvatar: string; setFormAvatar: (v: string) => void
   avatarInputRef: React.RefObject<HTMLInputElement | null>
   handleAvatarChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  // Voice
+  voice: VoiceFormState
+  onVoiceChange: (partial: Partial<VoiceFormState>) => void
+  voiceAudioRef: React.RefObject<HTMLInputElement | null>
+  handleVoiceUpload: (e: React.ChangeEvent<HTMLInputElement>) => void
+  handleVoiceClone: () => void
+  handleVoiceDelete: () => void
+  voiceCloning: boolean
   loading: boolean
   t: (key: string) => string
 }) {
@@ -92,16 +139,12 @@ function AgentRow({
 
   // --- Edit mode ---
   return (
-    <div className="border rounded-md p-4 space-y-3">
+    <div className="border rounded-md p-4 space-y-4">
       {/* Name */}
       {isNeutral ? (
         <div>
           <label className="text-sm font-medium">{t('settings.agentName')}</label>
-          <Input
-            value={formName}
-            disabled
-            className="mt-1 opacity-60"
-          />
+          <Input value={formName} disabled className="mt-1 opacity-60" />
         </div>
       ) : (
         <div>
@@ -160,7 +203,125 @@ function AgentRow({
         />
       </div>
 
-      <div className="flex gap-2">
+      {/* ═══════ Voice / TTS — hidden for neutral agent ═══════ */}
+      {!isNeutral && (
+        <div className="border-t pt-4 space-y-4">
+          {/* Header with switch */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold">{t('voice.label')}</span>
+            <Switch
+              checked={voice.enabled}
+              onCheckedChange={(checked) => onVoiceChange({ enabled: checked })}
+            />
+          </div>
+          
+          {voice.enabled && (
+            <>
+              {/* Audio sample upload */}
+              <div>
+                <label className="text-sm font-medium">{t('voice.uploadSample')}</label>
+                <p className="text-xs text-muted-foreground mt-0.5 mb-2">{t('voice.uploadSampleHint')}</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={voiceAudioRef}
+                    type="file"
+                    accept="audio/*"
+                    className="hidden"
+                    onChange={handleVoiceUpload}
+                  />
+                  <Button variant="outline" size="sm" onClick={() => voiceAudioRef.current?.click()}>
+                    <Upload className="h-3.5 w-3.5 mr-1.5" />
+                    {voice.sampleUrl ? t('voice.changeSample') : t('voice.uploadSample')}
+                  </Button>
+                  {voice.sampleUrl && (
+                    <span className="text-xs text-green-600 font-medium">{t('voice.sampleUploaded')}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Clone button */}
+              {voice.sampleUrl && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleVoiceClone}
+                    disabled={voiceCloning}
+                  >
+                    <Mic className="h-3.5 w-3.5 mr-1.5" />
+                    {voiceCloning
+                      ? t('voice.cloning')
+                      : voice.speakerId
+                        ? t('voice.reclone')
+                        : t('voice.clone')}
+                  </Button>
+                  {voice.speakerId && !voiceCloning && (
+                    <span className="text-xs text-green-600 font-medium">{t('voice.cloned')}</span>
+                  )}
+                </div>
+              )}
+
+              {/* Parameters */}
+              <div className="space-y-3">
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span>{t('voice.speed')}</span>
+                    <span className="text-muted-foreground tabular-nums">{voice.speed.toFixed(1)}</span>
+                  </div>
+                  <Slider
+                    min={0.5}
+                    max={2.0}
+                    step={0.1}
+                    value={voice.speed}
+                    onValueChange={(v) => onVoiceChange({ speed: v })}
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span>{t('voice.pitch')}</span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {voice.pitch > 0 ? '+' : ''}{voice.pitch}
+                    </span>
+                  </div>
+                  <Slider
+                    min={-12}
+                    max={12}
+                    step={1}
+                    value={voice.pitch}
+                    onValueChange={(v) => onVoiceChange({ pitch: v })}
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span>{t('voice.emotionStrength')}</span>
+                    <span className="text-muted-foreground tabular-nums">{voice.emotionStrength.toFixed(1)}</span>
+                  </div>
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={voice.emotionStrength}
+                    onValueChange={(v) => onVoiceChange({ emotionStrength: v })}
+                  />
+                </div>
+              </div>
+
+              {/* Delete voice */}
+              {voice.sampleUrl && (
+                <div className="pt-1">
+                  <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleVoiceDelete}>
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                    {t('voice.deleteVoice')}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Save / Cancel */}
+      <div className="flex gap-2 pt-1">
         <Button onClick={onSave} disabled={loading || (!isNeutral && !agent && !formName.trim())}>
           {loading ? t('common.saving') : t('common.save')}
         </Button>
@@ -183,23 +344,15 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
   const [loading, setLoading] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null)
   const avatarInputRef = useRef<HTMLInputElement>(null)
+  const voiceAudioRef = useRef<HTMLInputElement>(null)
+  const [voiceCloning, setVoiceCloning] = useState(false)
 
   // Form state
   const [formName, setFormName] = useState('')
   const [formModel, setFormModel] = useState('')
   const [formSystemPrompt, setFormSystemPrompt] = useState('')
   const [formAvatar, setFormAvatar] = useState('')
-  const [formVoiceEnabled, setFormVoiceEnabled] = useState(false)
-  const [formVoiceSpeed, setFormVoiceSpeed] = useState(1.0)
-  const [formVoicePitch, setFormVoicePitch] = useState(0)
-  const [formVoiceEmotion, setFormVoiceEmotion] = useState(0.8)
-  const [voiceSampleUrl, setVoiceSampleUrl] = useState('')
-  const [voiceSpeakerId, setVoiceSpeakerId] = useState('')
-  const [voiceCloning, setVoiceCloning] = useState(false)
-  const voiceAudioRef = useRef<HTMLInputElement>(null)
-  const [testText, setTestText] = useState('')
-  const [testPlaying, setTestPlaying] = useState(false)
-  const testAudioRef = useRef<HTMLAudioElement | null>(null)
+  const [voice, setVoice] = useState<VoiceFormState>(DEFAULT_VOICE_FORM)
 
   const fetchAgents = async () => {
     try {
@@ -214,19 +367,75 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     }
   }
 
-  useEffect(() => {
-    fetchAgents()
-  }, [])
+  useEffect(() => { fetchAgents() }, [])
+
+  // ── Voice helpers ──
+
+  const editingAgent = editingId
+    ? (neutralAgent?.id === editingId ? neutralAgent : agents.find((a) => a.id === editingId))
+    : null
+
+  const handleVoiceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !editingAgent) return
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await fetch(`/api/admin/agents/${editingAgent.id}/voice/upload`, { method: 'POST', body: formData })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Upload failed' }))
+        toast({ title: err.error || 'Voice sample upload failed', variant: 'error' })
+        return
+      }
+      const data = await res.json()
+      setVoice((prev) => ({ ...prev, sampleUrl: data.sample_url }))
+      toast({ title: t('voice.sampleUploaded'), variant: 'success' })
+    } catch (err) {
+      console.error('Voice sample upload failed:', err)
+      toast({ title: String(err), variant: 'error' })
+    }
+  }
+
+  const handleVoiceClone = async () => {
+    if (!editingAgent) return
+    setVoiceCloning(true)
+    try {
+      const res = await fetch(`/api/admin/agents/${editingAgent.id}/voice/clone`, { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Clone failed' }))
+        toast({ title: err.error || 'Voice clone failed', variant: 'error' })
+        setVoiceCloning(false)
+        return
+      }
+      const data = await res.json()
+      setVoice((prev) => ({ ...prev, speakerId: data.speaker_id }))
+      toast({ title: t('voice.cloned'), variant: 'success' })
+    } catch (err) {
+      console.error('Voice clone failed:', err)
+      toast({ title: String(err), variant: 'error' })
+    }
+    setVoiceCloning(false)
+  }
+
+  const handleVoiceDelete = async () => {
+    if (!editingAgent) return
+    try {
+      await fetch(`/api/admin/agents/${editingAgent.id}/voice`, { method: 'DELETE' })
+      setVoice(DEFAULT_VOICE_FORM)
+      toast({ title: t('voice.deleteVoice'), variant: 'success' })
+    } catch (err) {
+      console.error('Voice delete failed:', err)
+    }
+  }
+
+  // ── Save ──
 
   const handleSave = async () => {
-    const editingAgent = editingId
-      ? (neutralAgent?.id === editingId ? neutralAgent : agents.find((a) => a.id === editingId))
-      : null
     if (!formName.trim() && !editingAgent) return
     setLoading(true)
     try {
       if (editingAgent) {
-        const body: Record<string, string> = {}
+        const body: Record<string, any> = {}
         if (editingAgent.role === 'neutral') {
           body.model = formModel.trim()
           body.system_prompt = formSystemPrompt
@@ -235,13 +444,13 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
           body.model = formModel.trim()
           body.system_prompt = formSystemPrompt
           body.avatar = formAvatar
-          ;(body as any).voice_enabled = formVoiceEnabled
-          ;(body as any).voice_sample_url = voiceSampleUrl
-          ;(body as any).voice_settings = JSON.stringify({
-            speed: formVoiceSpeed,
-            pitch: formVoicePitch,
-            emotionStrength: formVoiceEmotion,
-            speakerId: voiceSpeakerId,
+          body.voice_enabled = voice.enabled
+          body.voice_sample_url = voice.sampleUrl
+          body.voice_settings = JSON.stringify({
+            speed: voice.speed,
+            pitch: voice.pitch,
+            emotionStrength: voice.emotionStrength,
+            speakerId: voice.speakerId,
             provider: 'gpt-sovits',
           })
         }
@@ -252,7 +461,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
           model: formModel.trim(),
           system_prompt: formSystemPrompt,
           avatar: formAvatar,
-        })
+        } as any)
       }
       await fetchAgents()
       resetForm()
@@ -301,20 +510,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     setFormModel(agent.model)
     setFormSystemPrompt(agent.system_prompt)
     setFormAvatar(agent.avatar || '')
-    setFormVoiceEnabled((agent as any).voice_enabled ?? false)
-    setVoiceSampleUrl((agent as any).voice_sample_url || '')
-    try {
-      const vs = JSON.parse((agent as any).voice_settings || '{}')
-      setFormVoiceSpeed(vs.speed ?? 1.0)
-      setFormVoicePitch(vs.pitch ?? 0)
-      setFormVoiceEmotion(vs.emotionStrength ?? 0.8)
-      setVoiceSpeakerId(vs.speakerId || '')
-    } catch {
-      setFormVoiceSpeed(1.0)
-      setFormVoicePitch(0)
-      setFormVoiceEmotion(0.8)
-      setVoiceSpeakerId('')
-    }
+    setVoice(voiceFormFromAgent(agent))
   }
 
   const startCreate = () => {
@@ -324,12 +520,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     setFormModel('')
     setFormSystemPrompt('')
     setFormAvatar('')
-    setFormVoiceEnabled(false)
-    setFormVoiceSpeed(1.0)
-    setFormVoicePitch(0)
-    setFormVoiceEmotion(0.8)
-    setVoiceSampleUrl('')
-    setVoiceSpeakerId('')
+    setVoice(DEFAULT_VOICE_FORM)
   }
 
   const resetForm = () => {
@@ -339,12 +530,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     setFormModel('')
     setFormSystemPrompt('')
     setFormAvatar('')
-    setFormVoiceEnabled(false)
-    setFormVoiceSpeed(1.0)
-    setFormVoicePitch(0)
-    setFormVoiceEmotion(0.8)
-    setVoiceSampleUrl('')
-    setVoiceSpeakerId('')
+    setVoice(DEFAULT_VOICE_FORM)
   }
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -353,104 +539,6 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     const reader = new FileReader()
     reader.onload = () => setFormAvatar(reader.result as string)
     reader.readAsDataURL(file)
-  }
-
-  const handleVoiceSampleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const editingAgent = editingId ? (neutralAgent?.id === editingId ? neutralAgent : agents.find((a) => a.id === editingId)) : null
-    if (!editingAgent) return
-
-    const formData = new FormData()
-    formData.append('file', file)
-    try {
-      const res = await fetch(`/api/admin/agents/${editingAgent.id}/voice/upload`, {
-        method: 'POST',
-        body: formData,
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Upload failed' }))
-        toast({ title: err.error || 'Voice sample upload failed', variant: 'error' })
-        return
-      }
-      const data = await res.json()
-      setVoiceSampleUrl(data.sample_url)
-      toast({ title: 'Voice sample uploaded', variant: 'success' })
-    } catch (err) {
-      console.error('Voice sample upload failed:', err)
-      toast({ title: 'Voice sample upload failed', variant: 'error' })
-    }
-  }
-
-  const handleVoiceClone = async () => {
-    const editingAgent = editingId ? (neutralAgent?.id === editingId ? neutralAgent : agents.find((a) => a.id === editingId)) : null
-    if (!editingAgent) return
-    setVoiceCloning(true)
-    try {
-      const res = await fetch(`/api/admin/agents/${editingAgent.id}/voice/clone`, { method: 'POST' })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Clone failed' }))
-        toast({ title: err.error || 'Voice clone failed', variant: 'error' })
-        setVoiceCloning(false)
-        return
-      }
-      const data = await res.json()
-      setVoiceSpeakerId(data.speaker_id)
-      toast({ title: 'Voice cloned successfully!', variant: 'success' })
-    } catch (err) {
-      console.error('Voice clone failed:', err)
-      toast({ title: 'Voice clone failed', variant: 'error' })
-    }
-    setVoiceCloning(false)
-  }
-
-  const handleVoiceDelete = async () => {
-    const editingAgent = editingId ? (neutralAgent?.id === editingId ? neutralAgent : agents.find((a) => a.id === editingId)) : null
-    if (!editingAgent) return
-    try {
-      await fetch(`/api/admin/agents/${editingAgent.id}/voice`, { method: 'DELETE' })
-      setVoiceSampleUrl('')
-      setVoiceSpeakerId('')
-      setFormVoiceEnabled(false)
-      toast({ title: 'Voice data deleted', variant: 'success' })
-    } catch (err) {
-      console.error('Voice delete failed:', err)
-    }
-  }
-
-  const handleVoiceTest = async () => {
-    const editingAgent = editingId ? (neutralAgent?.id === editingId ? neutralAgent : agents.find((a) => a.id === editingId)) : null
-    if (!editingAgent || !testText.trim()) return
-    setTestPlaying(true)
-    try {
-      // First ensure voice settings are saved
-      const body: Record<string, any> = {
-        voice_settings: JSON.stringify({
-          speed: formVoiceSpeed,
-          pitch: formVoicePitch,
-          emotionStrength: formVoiceEmotion,
-          speakerId: voiceSpeakerId,
-          provider: 'gpt-sovits',
-        }),
-        voice_sample_url: voiceSampleUrl,
-        voice_enabled: true,
-      }
-      await api.updateAgent(editingAgent.id, body)
-
-      // Create a temporary message ID for testing
-      const testMsgId = Date.now()
-      const res = await fetch('/api/voice/segments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent_id: editingAgent.id, message_id: testMsgId }),
-      })
-      // We need a different approach — just fetch the TTS directly isn't exposed as an API.
-      // For now, show a toast that test requires the agent to respond in chat
-      toast({ title: 'Voice preview: have the agent respond in chat to hear it!', variant: 'success' })
-    } catch (err) {
-      console.error('Voice test failed:', err)
-    }
-    setTestPlaying(false)
   }
 
   const isEditing = !!(isCreating || editingId)
@@ -475,6 +563,13 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
               formAvatar={formAvatar} setFormAvatar={setFormAvatar}
               avatarInputRef={avatarInputRef}
               handleAvatarChange={handleAvatarChange}
+              voice={voice}
+              onVoiceChange={(p) => setVoice((prev) => ({ ...prev, ...p }))}
+              voiceAudioRef={voiceAudioRef}
+              handleVoiceUpload={handleVoiceUpload}
+              handleVoiceClone={handleVoiceClone}
+              handleVoiceDelete={handleVoiceDelete}
+              voiceCloning={voiceCloning}
               loading={loading}
               t={t}
             />
@@ -499,125 +594,19 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
                   formAvatar={formAvatar} setFormAvatar={setFormAvatar}
                   avatarInputRef={avatarInputRef}
                   handleAvatarChange={handleAvatarChange}
+                  voice={voice}
+                  onVoiceChange={(p) => setVoice((prev) => ({ ...prev, ...p }))}
+                  voiceAudioRef={voiceAudioRef}
+                  handleVoiceUpload={handleVoiceUpload}
+                  handleVoiceClone={handleVoiceClone}
+                  handleVoiceDelete={handleVoiceDelete}
+                  voiceCloning={voiceCloning}
                   loading={loading}
                   t={t}
                 />
               )}
 
-              {/* Voice Configuration — shown when editing/creating a non-neutral agent */}
-      {isEditing && editingId && (
-        <div className="border rounded-md p-4 space-y-3 mt-4">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Volume2 className="h-4 w-4" />
-            Voice / TTS
-          </h3>
-
-          {/* Voice enabled toggle */}
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={formVoiceEnabled}
-              onChange={(e) => setFormVoiceEnabled(e.target.checked)}
-              className="rounded"
-            />
-            Enable voice synthesis
-          </label>
-
-          {formVoiceEnabled && (
-            <>
-              {/* Audio sample upload */}
-              <div>
-                <label className="text-sm font-medium">Reference audio sample</label>
-                <p className="text-xs text-muted-foreground mb-1">Upload 5-60s clear speech (WAV/MP3)</p>
-                <div className="flex items-center gap-2">
-                  <input
-                    ref={voiceAudioRef}
-                    type="file"
-                    accept="audio/*"
-                    className="hidden"
-                    onChange={handleVoiceSampleUpload}
-                  />
-                  <Button variant="outline" size="sm" onClick={() => voiceAudioRef.current?.click()}>
-                    <Upload className="h-3.5 w-3.5 mr-1" />
-                    {voiceSampleUrl ? 'Change sample' : 'Upload sample'}
-                  </Button>
-                  {voiceSampleUrl && (
-                    <span className="text-xs text-green-600">✓ Uploaded</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Clone button */}
-              {voiceSampleUrl && (
-                <div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleVoiceClone}
-                    disabled={voiceCloning}
-                  >
-                    <Mic className="h-3.5 w-3.5 mr-1" />
-                    {voiceCloning ? 'Cloning...' : voiceSpeakerId ? 'Re-clone voice' : 'Clone voice'}
-                  </Button>
-                  {voiceSpeakerId && (
-                    <span className="ml-2 text-xs text-green-600">✓ Cloned (speaker: {voiceSpeakerId})</span>
-                  )}
-                </div>
-              )}
-
-              {/* Voice parameters */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs">Speed: {formVoiceSpeed.toFixed(1)}</label>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="2.0"
-                    step="0.1"
-                    value={formVoiceSpeed}
-                    onChange={(e) => setFormVoiceSpeed(parseFloat(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs">Pitch: {formVoicePitch > 0 ? '+' : ''}{formVoicePitch}</label>
-                  <input
-                    type="range"
-                    min="-12"
-                    max="12"
-                    step="1"
-                    value={formVoicePitch}
-                    onChange={(e) => setFormVoicePitch(parseInt(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="text-xs">Emotion strength: {formVoiceEmotion.toFixed(1)}</label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={formVoiceEmotion}
-                    onChange={(e) => setFormVoiceEmotion(parseFloat(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-              </div>
-
-              {/* Delete voice */}
-              {voiceSampleUrl && (
-                <div>
-                  <Button variant="ghost" size="sm" className="text-destructive" onClick={handleVoiceDelete}>
-                    <Trash2 className="h-3.5 w-3.5 mr-1" />
-                    Delete voice data
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+              {/* Regular agents */}
               {agents.map((agent) => (
                 <AgentRow
                   key={agent.id}
@@ -634,6 +623,13 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
                   formAvatar={formAvatar} setFormAvatar={setFormAvatar}
                   avatarInputRef={avatarInputRef}
                   handleAvatarChange={handleAvatarChange}
+                  voice={voice}
+                  onVoiceChange={(p) => setVoice((prev) => ({ ...prev, ...p }))}
+                  voiceAudioRef={voiceAudioRef}
+                  handleVoiceUpload={handleVoiceUpload}
+                  handleVoiceClone={handleVoiceClone}
+                  handleVoiceDelete={handleVoiceDelete}
+                  voiceCloning={voiceCloning}
                   loading={loading}
                   t={t}
                 />

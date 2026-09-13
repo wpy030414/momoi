@@ -433,9 +433,26 @@
     }
   },
   "voice": {
+    "label": "Voice / TTS",
+    "enable": "Enable voice synthesis",
+    "enableDesc": "When enabled, AI replies will be synthesized to speech, playable from the message bubble",
+    "uploadSample": "Upload reference audio",
+    "uploadSampleHint": "Upload 5-60s clear speech (WAV / MP3 / OGG)",
+    "sampleUploaded": "Uploaded",
+    "changeSample": "Change audio",
+    "clone": "Clone voice",
+    "cloning": "Cloning…",
+    "cloned": "Cloned",
+    "reclone": "Re-clone",
+    "noSample": "Please upload a reference audio before cloning",
+    "speed": "Speed",
+    "pitch": "Pitch",
+    "emotionStrength": "Emotion intensity",
+    "deleteVoice": "Delete voice data",
+    "deleteVoiceConfirm": "Delete all voice data for this agent including reference audio and cloned speaker?",
     "play": "Play voice",
     "replay": "Replay",
-    "loading": "Loading...",
+    "loading": "Loading…",
     "pause": "Pause",
     "resume": "Resume"
   }

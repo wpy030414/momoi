@@ -433,9 +433,26 @@
     }
   },
   "voice": {
+    "label": "音声合成 (Voice / TTS)",
+    "enable": "音声合成を有効にする",
+    "enableDesc": "有効にすると、AI の返信が自動的に音声合成され、メッセージバブルから再生できます",
+    "uploadSample": "参照音声をアップロード",
+    "uploadSampleHint": "5～60秒のクリアな音声をアップロード（WAV / MP3 / OGG）",
+    "sampleUploaded": "アップロード済み",
+    "changeSample": "音声を変更",
+    "clone": "声をクローン",
+    "cloning": "クローン中…",
+    "cloned": "クローン済み",
+    "reclone": "再クローン",
+    "noSample": "クローン前に参照音声をアップロードしてください",
+    "speed": "速度",
+    "pitch": "ピッチ",
+    "emotionStrength": "感情の強さ",
+    "deleteVoice": "音声データを削除",
+    "deleteVoiceConfirm": "このエージェントの音声データ（参照音声とクローンされた声）をすべて削除しますか？",
     "play": "音声再生",
     "replay": "再再生",
-    "loading": "読み込み中...",
+    "loading": "読み込み中…",
     "pause": "一時停止",
     "resume": "再開"
   }
