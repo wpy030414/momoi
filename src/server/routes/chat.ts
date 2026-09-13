@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import path from 'path'
+import fs from 'fs'
 import { db, conversations, messages, groupConversationAgents } from '../db.js'
 import { eq, and, count, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
@@ -9,12 +10,13 @@ import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutr
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage, Attachment } from '../../shared/types.js'
 import { randomUUID } from 'crypto'
-import { getConfig, listAgents } from '../config.js'
+import { getConfig, listAgents, getAgent } from '../config.js'
 import { resolveQuestion, getPendingQuestion } from '../tools/ask-user-tool.js'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { SandboxFS } from '../tools/workspace.js'
+import { synthesizeAndSave, markVoiceComplete, createTtsProvider } from '../ai/tts.js'
 
 export const chatRoute = new Hono()
 
@@ -272,6 +274,76 @@ chatRoute.post('/', async (c) => {
       const isInfinite = infinite_mode === true
       const MAX_INFINITE_MESSAGES = 500
 
+      // --- Voice: check if agent has voice enabled ---
+      const voiceAgent = agent_id ? await getAgent(agent_id) : null
+      const voiceEnabled = voiceAgent?.voice_enabled === true
+      const voiceSettingsRaw = voiceEnabled ? (() => {
+        try { return JSON.parse(voiceAgent!.voice_settings) } catch { return {} }
+      })() : null
+      const voiceSpeakerId: string | undefined = voiceSettingsRaw?.speakerId
+
+      // Sentence boundary detection for voice
+      const SENTENCE_BOUNDARY_RE = /[。！？.!?\n]/
+
+      /** Split a full reply text into sentences for TTS. */
+      function splitSentences(text: string): string[] {
+        const result: string[] = []
+        let buf = ''
+        for (const ch of text) {
+          buf += ch
+          if (SENTENCE_BOUNDARY_RE.test(ch) || buf.length >= 40) {
+            result.push(buf.trim())
+            buf = ''
+          }
+        }
+        if (buf.trim()) result.push(buf.trim())
+        return result.filter(s => s.length > 0)
+      }
+
+      /** Fire async TTS for each sentence of a reply, sending voice_segment events. */
+      async function synthesizeReplyVoice(agentIdForVoice: string, messageId: number, replyText: string) {
+        if (!voiceEnabled || !voiceSpeakerId) return
+        const sentences = splitSentences(replyText)
+        if (sentences.length === 0) return
+
+        let ttsConfig: { endpoint: string; provider: string }
+        try {
+          const { getTtsConfig } = await import('../config.js')
+          ttsConfig = await getTtsConfig()
+        } catch {
+          ttsConfig = { endpoint: 'http://localhost:9880', provider: 'gpt-sovits' }
+        }
+
+        const settings = {
+          speed: voiceSettingsRaw?.speed ?? 1.0,
+          pitch: voiceSettingsRaw?.pitch ?? 0,
+        }
+        const provider = createTtsProvider({ endpoint: ttsConfig.endpoint, type: ttsConfig.provider })
+
+        const pending: Promise<void>[] = []
+        for (let i = 0; i < sentences.length; i++) {
+          const idx = i
+          const text = sentences[i]
+          const p = synthesizeAndSave(agentIdForVoice, messageId, idx, text, settings, voiceSpeakerId, provider)
+            .then(result => {
+              send({ type: 'voice_segment', message_id: messageId, index: idx, audio_url: result.url, text, duration_seconds: result.duration })
+            })
+            .catch(err => {
+              console.warn(`[voice] segment ${idx} failed:`, (err as Error).message)
+            })
+          pending.push(p)
+        }
+
+        await Promise.race([
+          Promise.all(pending),
+          new Promise<void>(r => setTimeout(r, 30_000)),
+        ])
+        markVoiceComplete(agentIdForVoice, messageId)
+        send({ type: 'voice_done', message_id: messageId, total_segments: sentences.length })
+      }
+
+      // --- End voice setup ---
+
       // Initialize infinite state if enabled
       if (isInfinite) {
         const existing = await db.select({ value: count() }).from(messages)
@@ -306,6 +378,10 @@ chatRoute.post('/', async (c) => {
         lastAssistantMsgId = Number(result[0]?.id ?? 0)
         lastAssistantAgentId = agentId || undefined
         lastAssistantHadSuggestions = suggestionsList.length > 0
+        // Voice: fire async synthesis after each assistant reply
+        if (voiceEnabled && voiceSpeakerId && lastAssistantMsgId > 0 && content) {
+          synthesizeReplyVoice(voiceAgent!.id, lastAssistantMsgId, content)
+        }
       }
 
       // Helper: generate follow-up and save as user message
