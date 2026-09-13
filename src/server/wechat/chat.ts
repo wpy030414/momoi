@@ -16,10 +16,27 @@ export interface WechatChatOptions {
   botToken: string
   contextToken?: string
   language?: string
+  /** iLink message_id for dedup — same msg may be delivered multiple times */
+  messageId?: number
 }
 
 /** Per-user concurrency lock — 防止同一用户的多次 AI 调用交叉执行 */
 const locks = new Map<string, Promise<void>>()
+
+/** Dedup cache: message_id → timestamp, evicted after 5 minutes */
+const dedupCache = new Map<number, number>()
+const DEDUP_WINDOW_MS = 5 * 60_000
+
+function isDuplicate(messageId: number | undefined, now: number): boolean {
+  if (messageId === undefined) return false // legacy or non-id messages pass through
+  // Evict stale entries
+  for (const [id, ts] of dedupCache) {
+    if (now - ts > DEDUP_WINDOW_MS) dedupCache.delete(id)
+  }
+  if (dedupCache.has(messageId)) return true
+  dedupCache.set(messageId, now)
+  return false
+}
 
 async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   while (locks.has(key)) {
@@ -34,6 +51,11 @@ async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 }
 
 export async function handleWechatMessage(opts: WechatChatOptions): Promise<void> {
+  // Dedup before acquiring lock — avoid queuing behind a long AI call for a duplicate
+  if (isDuplicate(opts.messageId, Date.now())) {
+    console.log(`[wechat-chat] Duplicate message_id=${opts.messageId}, skipping`)
+    return
+  }
   await withLock(opts.userId, () => handleWechatMessageInner(opts))
 }
 
@@ -41,17 +63,16 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
   const { userId, senderId, text, botToken, contextToken, language } = opts
   const creds: WechatCredentials = { baseUrl: WECHAT_BASE_URL, token: botToken }
 
-  // Resolve bot's own WeChat user ID for from_user_id in outbound messages
+  // Resolve bot's own binding record for conversation anchoring and diagnostics
   const binding = await db.select().from(userWechatBindings)
     .where(eq(userWechatBindings.user_id, userId)).get()
-  const fromUserId = binding?.ilink_user_id || ''
 
   // ---- Built-in commands ----
   if (text === '/clear' || text === '/new' || text === '/reset' || text === '／clear') {
     await db.delete(wechatSessions).where(
       and(eq(wechatSessions.user_id, userId), eq(wechatSessions.wechat_sender_id, senderId)),
     ).run()
-    await sendMessage(creds, senderId, '会话已重置。', fromUserId)
+    await sendMessage(creds, senderId, '会话已重置。')
     return
   }
 
@@ -152,10 +173,67 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
     }).run()
   }
 
-  // ---- Send reply via iLink ----
-  try {
-    await sendMessage(creds, senderId, replyText, fromUserId, contextToken)
-  } catch (e) {
-    console.error(`[wechat-chat] Failed to send reply to ${senderId}:`, (e as Error).message)
+  // ---- Send reply via iLink with retry ----
+  console.log('[wechat-chat] Sending reply: toUserId=', senderId,
+    'hasContextToken=', !!contextToken,
+    'textLen=', replyText.length)
+
+  let sendOk = false
+  const MAX_RETRIES = 3
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      await sendMessage(creds, senderId, replyText, contextToken)
+      sendOk = true
+      break
+    } catch (e) {
+      const err = e as Error
+      const isSessionExpired = err.message.includes('errcode=-14') || err.message.includes('session timeout')
+      const isTransient = err.message.includes('HTTP 5') ||
+        err.message.includes('fetch failed') ||
+        err.message.includes('timeout') ||
+        err.message.includes('ETIMEDOUT') ||
+        err.message.includes('ECONNRESET')
+
+      // Session expired — mark in DB, don't retry
+      if (isSessionExpired) {
+        console.error(`[wechat-chat] Session expired for user ${userId}, marking SESSION_EXPIRED`)
+        try {
+          await db.update(userWechatBindings)
+            .set({ updates_buf: 'SESSION_EXPIRED' })
+            .where(eq(userWechatBindings.user_id, userId)).run()
+        } catch (_) { /* best-effort */ }
+        break
+      }
+
+      if (attempt < MAX_RETRIES - 1 && isTransient) {
+        const delay = Math.pow(2, attempt) * 1000 // 1s, 2s, 4s
+        console.warn(`[wechat-chat] sendMessage attempt ${attempt + 1} failed, retrying in ${delay}ms:`, err.message)
+        await new Promise(r => setTimeout(r, delay))
+      } else {
+        console.error(`[wechat-chat] sendMessage failed after ${attempt + 1} attempt(s):`, {
+          message: err.message,
+          toUserId: senderId,
+          hasContextToken: !!contextToken,
+          textPreview: replyText.slice(0, 100),
+        })
+        break
+      }
+    }
+  }
+
+  if (!sendOk) {
+    // Insert a visible system message so the user knows WeChat delivery failed
+    try {
+      const failNow = Math.floor(Date.now() / 1000)
+      await db.insert(messages).values({
+        conversation_id: convId,
+        role: 'system',
+        content: `[WeChat推送失败] 回复已生成但未能发送到微信。请尝试重新绑定微信。`,
+        agent_id: agentId || null,
+        created_at: failNow,
+      }).run()
+    } catch (dbErr) {
+      console.error('[wechat-chat] Failed to write delivery-failure marker:', (dbErr as Error).message)
+    }
   }
 }

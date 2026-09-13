@@ -39,6 +39,8 @@ export interface InboundMessage {
 export interface ParsedIncoming {
   inbound: InboundMessage
   contextToken?: string
+  /** iLink message_id for dedup — same msg may be delivered multiple times */
+  messageId?: number
 }
 
 export const WECHAT_BASE_URL = 'https://ilinkai.weixin.qq.com'
@@ -47,14 +49,6 @@ export const DEFAULT_POLL_TIMEOUT_MS = 35_000
 function randomWechatUin(): string {
   const uint32 = randomBytes(4).readUInt32BE(0)
   return Buffer.from(String(uint32)).toString('base64')
-}
-
-/** 构建所有 iLink POST 请求的通用请求体（协议要求 base_info） */
-function buildBody(extra: Record<string, unknown>): string {
-  return JSON.stringify({
-    base_info: { channel_version: '2.0.0' },
-    ...extra,
-  })
 }
 
 export function buildHeaders(token?: string): Record<string, string> {
@@ -77,7 +71,7 @@ export async function getUpdates(
   const res = await fetch(`${creds.baseUrl}/ilink/bot/getupdates`, {
     method: 'POST',
     headers: buildHeaders(creds.token),
-    body: buildBody({ get_updates_buf: updatesBuf }),
+    body: JSON.stringify({ get_updates_buf: updatesBuf }),
     signal: AbortSignal.timeout(timeoutMs),
   })
   if (!res.ok) return { ret: res.status, msgs: [] }
@@ -101,34 +95,31 @@ export async function sendMessage(
   creds: WechatCredentials,
   toUserId: string,
   text: string,
-  fromUserId: string,
   contextToken?: string,
 ): Promise<void> {
-  const clientId = Array.from(
-    Buffer.from(randomUUID().replace(/-/g, '').slice(0, 16), 'hex'),
-    (b) => b.toString(16).padStart(2, '0'),
-  ).join('')
-
   const msg: WeixinMessage = {
-    from_user_id: fromUserId,
+    from_user_id: '', // 必须为空——bot 身份由 Authorization header 确定
     message_type: 2,
     message_state: 2, // FINISH — 缺失会导致服务端不投递
     to_user_id: toUserId,
     item_list: [{ type: 1, text_item: { text } }],
     context_token: contextToken,
-    client_id: clientId,
+    client_id: Array.from(
+      Buffer.from(randomUUID().replace(/-/g, '').slice(0, 16), 'hex'),
+      (b) => b.toString(16).padStart(2, '0'),
+    ).join(''),
   }
 
   const res = await fetch(`${creds.baseUrl}/ilink/bot/sendmessage`, {
     method: 'POST',
     headers: buildHeaders(creds.token),
-    body: buildBody({ msg }),
+    body: JSON.stringify({ msg }), // 不使用 base_info 包裹——与 my-vanilla 参考实现一致
     signal: AbortSignal.timeout(15_000),
   })
   const raw = await res.text()
   const data = (() => { try { return JSON.parse(raw) } catch { return {} } })()
 
-  if (!res.ok || (data.ret !== undefined && data.ret !== 0)) {
+  if (!res.ok || data.ret !== undefined && data.ret !== 0 || data.errcode !== undefined && data.errcode !== 0) {
     throw new Error(
       `[wechat] sendmessage failed: HTTP ${res.status} ret=${data.ret ?? '?'} errcode=${data.errcode ?? '?'} body=${raw.slice(0, 300)}`,
     )
@@ -150,5 +141,6 @@ export function parseIncoming(msg: WeixinMessage): ParsedIncoming | null {
       channel: 'wechat',
     },
     contextToken: msg.context_token,
+    messageId: msg.message_id,
   }
 }

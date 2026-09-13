@@ -121,6 +121,10 @@ wechatRoute.get('/bind/status', userAuthMiddleware, async (c) => {
 
   const data = await res.json() as { status: string; bot_token?: string; ilink_user_id?: string }
 
+  console.log('[wechat-bind] QR scan status:', data.status,
+    'ilink_user_id:', data.ilink_user_id || '(missing)',
+    'has_bot_token:', !!data.bot_token)
+
   if (data.status === 'confirmed' && data.bot_token) {
     const existing = await db.select().from(userWechatBindings)
       .where(eq(userWechatBindings.user_id, userId)).get()
