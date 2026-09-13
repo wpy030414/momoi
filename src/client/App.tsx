@@ -306,6 +306,18 @@ export function App() {
     document.title = appName
   }, [appName])
 
+  // 会话归属同步：切进已有会话（侧栏点击 / F5 hash 恢复 / 前进后退）时，把 Agent
+  // 下拉选择同步为该会话归属的 Agent。selectedAgentId 是与「当前会话」无关的全局
+  // 状态——后台增删 Agent 触发列表刷新后会被重置为 agents[0]，若不同步，继续
+  // 聊天时请求携带的 agent_id 会与会话归属错位（Agent 漂移的客户端一半；另一半
+  // 由服务端按 conversations.agent_id 锚定兜底）。
+  useEffect(() => {
+    const convAgent = chat.conversations.find((c) => c.id === chat.activeId)?.agent_id
+    if (convAgent && agents.some((a) => a.id === convAgent)) {
+      setSelectedAgentId((prev) => (prev === convAgent ? prev : convAgent))
+    }
+  }, [chat.activeId, chat.conversations, agents])
+
   // 监听视口宽度：切到移动端尺寸时自动收起侧边栏
   useEffect(() => {
     let wasMobile = window.innerWidth < 768

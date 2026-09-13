@@ -37,7 +37,7 @@ import type {
 import { Type } from '@sinclair/typebox'
 import type { TSchema } from '@sinclair/typebox'
 
-import type { AppConfig, ServerMessage, ToolDefinition } from '../../shared/types.js'
+import type { AppConfig, Agent, ServerMessage, ToolDefinition } from '../../shared/types.js'
 import {
   SUGGESTIONS_FENCE,
   THINKING_SEGMENT_OPEN,
@@ -884,31 +884,21 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
   } = opts
   const config = await getConfig()
 
-  // Resolve agent: use specified agentId, or fall back to first available agent
-  let agentModel = config.api_endpoint ? 'gpt-4o' : '' // fallback
-  let agentSystemPrompt = DEFAULT_SYSTEM_PROMPT
-  // 实际采用的 Agent：供调用方落库 messages.agent_id（单聊也记录发言者，历史/导出/气泡标签一致）
-  let resolvedAgentId: string | undefined
-
+  // Resolve agent: use specified agentId, or fall back to first available agent.
+  // 注意查找失败（Agent 已被后台删除）也必须走回退——否则 agentModel 会停留在
+  // 初始占位值 'gpt-4o'（真值），把会话钉死在不存在的模型上。
+  let resolvedAgent: Agent | undefined
   if (agentId) {
-    const agent = await getAgent(agentId)
-    if (agent) {
-      agentModel = agent.model
-      agentSystemPrompt = agent.system_prompt
-      resolvedAgentId = agent.id
-    }
+    resolvedAgent = (await getAgent(agentId)) ?? undefined
   }
-
-  if (!agentId || !agentModel) {
-    // Fallback to first available non-neutral agent
+  if (!resolvedAgent) {
     const allAgents = await listAgents()
-    const fallbackAgent = allAgents.find((a) => a.id !== NEUTRAL_AGENT_ID)
-    if (fallbackAgent) {
-      agentModel = fallbackAgent.model
-      agentSystemPrompt = fallbackAgent.system_prompt
-      resolvedAgentId = fallbackAgent.id
-    }
+    resolvedAgent = allAgents.find((a) => a.id !== NEUTRAL_AGENT_ID)
   }
+  const agentModel = resolvedAgent?.model || (config.api_endpoint ? 'gpt-4o' : '')
+  const agentSystemPrompt = resolvedAgent?.system_prompt || DEFAULT_SYSTEM_PROMPT
+  // 实际采用的 Agent：供调用方落库 messages.agent_id（单聊也记录发言者，历史/导出/气泡标签一致）
+  const resolvedAgentId = resolvedAgent?.id
   const convId = conversationId || 'default'
 
   // 1. 构建系统提示词

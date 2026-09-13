@@ -95,7 +95,7 @@
 
 1. **对话归属校验**：传入 `conversation_id` 时校验 `user_id` 是否为当前用户，不匹配则发送 `error` 事件并终止
 2. **新建对话**：未传 ID 时以 `randomUUID()` 创建，标题取消息前 40 字符（空则 `New Chat`）。群聊默认标题为 `群组对话`
-3. **Agent 选择**：新建对话时记录 `agent_id` 和 `type`（`direct` / `group`）
+3. **Agent 选择与锚定**：新建对话时记录 `agent_id` 和 `type`（`direct` / `group`）。已有单聊会话的发言 Agent 以 `conversations.agent_id` 为准，**请求携带的 `agent_id` 被忽略**（客户端下拉状态与当前会话脱钩，后台增删 Agent 后会被重置，不锚定会导致"换人回答"的身份漂移）；会话尚无归属记录（legacy / 附件预创建会话）时采纳请求 `agent_id` 并回写 `conversations.agent_id` 完成锚定。锚定后的 Agent 同样作用于 voice 查找与无限演算的后续轮次。群聊成员由 `group_conversation_agents` 管理，不在此锚定
 4. **群聊初始化**：群聊创建时写入 `group_conversation_agents` 关联表
 5. **重试去重**：`_retry === true` 时**跳过**保存用户消息，避免重复入库
 6. **更新时间**：每次收到用户消息都刷新 `conversations.updated_at`
@@ -109,7 +109,7 @@
 
 Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 Agent 循环框架。
 
-1. **Agent 选择**：`agent_id` 参数 → `getAgent()`，不存在则回退到第一个非中立 Agent
+1. **Agent 选择**：`agent_id` 参数 → `getAgent()`；Agent 记录不存在（含已被后台删除）则回退到第一个非中立 Agent——避免残留 ID 把模型钉死在占位值 `gpt-4o` 上
 2. **系统提示词构建**（`buildSystemPrompt`）：
    - 基础内容 = Agent 的 `system_prompt`
    - 若存在技能，追加 `## Available Skills` + 每个技能的名称和描述摘要
@@ -159,6 +159,7 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 10. **导出**：客户端拼接 `# 标题` + 每条 `### User` / `### <Agent 名称>`，以 `---` 分隔，生成 `.md` 下载；Agent 名称解析 = 消息 `agent_id`（群聊成员 + 全局 Agent 列表）→ 单聊回退会话所属 Agent
 11. **多轮思考分段渲染**：SSE `thinking` 事件带 `round` 字段时，前端按轮聚合为 `thinkingSegments`；历史消息通过 `decodeThinkingToSegments` 切分
 12. **消息渲染**：群聊按 `msg.agent_id` 显示各 Agent 头像和名称；单聊同样显示 Agent 名称（优先消息的 `agent_id`，回退当前会话的 Agent，再回退下拉选择）
+13. **会话归属同步**（App.tsx）：切进已有会话时把 Agent 下拉选择（`selectedAgentId`）同步为该会话归属的 Agent，防止全局下拉状态（后台增删 Agent 后列表刷新会重置为 `agents[0]`）与当前会话错位；服务端按 `conversations.agent_id` 的锚定为最终兜底
 
 ### 客户端（useGroupChat.ts）
 

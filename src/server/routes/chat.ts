@@ -93,7 +93,11 @@ chatRoute.post('/', async (c) => {
   }
 
   const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group'; agent_ids?: string[]; infinite_mode?: boolean; language?: string }>()
-  const { message, conversation_id, agent_id, _retry, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language } = body
+  const { message, conversation_id, _retry, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language } = body
+  const requestedAgentId = body.agent_id
+  // 本轮实际采用的 Agent：新建会话取请求 agent_id；已有单聊会话锚定到
+  // conversations.agent_id（见下方归属校验分支）。
+  let agentId: string | undefined = requestedAgentId
 
   if (!message?.trim()) {
     return c.json({ error: 'Empty message' }, 400)
@@ -140,7 +144,7 @@ chatRoute.post('/', async (c) => {
         const title = message.slice(0, 40) || 'New Chat'
         await db.insert(conversations).values({
           id: convId, user_id: userId, title,
-          agent_id: agent_id || '',
+          agent_id: agentId || '',
           type: isGroup ? 'group' : 'direct',
           created_at: now, updated_at: now,
         }).run()
@@ -161,6 +165,19 @@ chatRoute.post('/', async (c) => {
         if (!conv || conv.user_id !== userId) {
           send({ type: 'error', message: 'Conversation not found or access denied' })
           return
+        }
+        // 单聊 Agent 锚定：已有会话的发言 Agent 以 conversations.agent_id 为准，
+        // 不信任请求携带的 agent_id——客户端下拉状态与当前会话脱钩，后台增删
+        // Agent 触发列表刷新后会被重置（如 agents[0]），导致"换人回答"的身份
+        // 漂移。请求 agent_id 仅在会话尚无归属记录（legacy / 附件预创建会话）时
+        // 采纳，并回写 conversations.agent_id 完成锚定。群聊成员由
+        // group_conversation_agents 管理，不在此处理。
+        if (!isGroup) {
+          if (conv.agent_id) {
+            agentId = conv.agent_id
+          } else if (agentId) {
+            await db.update(conversations).set({ agent_id: agentId }).where(eq(conversations.id, convId)).run()
+          }
         }
       }
 
@@ -279,7 +296,7 @@ chatRoute.post('/', async (c) => {
       const MAX_INFINITE_MESSAGES = 500
 
       // --- Voice: check if agent has voice enabled ---
-      const voiceAgent = agent_id ? await getAgent(agent_id) : null
+      const voiceAgent = agentId ? await getAgent(agentId) : null
       const voiceEnabled = voiceAgent?.voice_enabled === true
       const voiceSettingsRaw = voiceEnabled ? (() => {
         try { return JSON.parse(voiceAgent!.voice_settings) } catch { return {} }
@@ -502,7 +519,7 @@ chatRoute.post('/', async (c) => {
           thinkingMode: thinking_mode !== false,
           conversationId: convId,
           userId,
-          agentId: agent_id || undefined,
+          agentId: agentId || undefined,
           infiniteMode: isInfinite,
           language,
         })
@@ -553,7 +570,7 @@ chatRoute.post('/', async (c) => {
             thinkingMode: thinking_mode !== false,
             conversationId: convId,
             userId,
-            agentId: agent_id || undefined,
+            agentId: agentId || undefined,
             infiniteMode: isInfinite,
             language,
           })
