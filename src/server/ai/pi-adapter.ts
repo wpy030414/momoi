@@ -75,12 +75,16 @@ interface BuildSystemPromptOptions {
   agentName?: string
   groupAgentNames?: string[]
   mentionedBy?: string
+  /** 本轮发言角色：主角 / 配角 */
+  speakingRole?: 'protagonist' | 'supporting'
+  /** 主角的名字（当 speakingRole 为 supporting 时） */
+  protagonistName?: string
   language?: string
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
 function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
-  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, language } = opts
+  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language } = opts
   let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
 
   // ---- Momo easter egg: inject vibrant personality when language is Japanese ----
@@ -113,6 +117,25 @@ function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
 - 适度使用 @ 功能，让它成为你群聊互动的自然习惯，而不是只在需要专业知识时才呼叫。
 ${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应对方的点名，但不必为此改变你的回复优先级或内容。
 ` : ''}`
+  }
+
+  if (speakingRole === 'protagonist') {
+    prompt += `
+## 本轮发言角色：主角
+你是本轮讨论的主要发言人。用户的问题主要面向你，或者你的专业领域与当前话题最相关。
+- 请给出详细、全面、有深度的回答
+- 充分发挥你的专业知识和人设特色
+- 可以适当引导讨论方向，提出新的观点或问题
+`
+  } else if (speakingRole === 'supporting' && protagonistName) {
+    prompt += `
+## 本轮发言角色：配角
+本轮讨论的主角是 ${protagonistName}，用户的问题主要面向主角。你作为配角参与讨论。
+- 请给出简短、补充性的回复，1-3 句话即可
+- 只需补充主角未覆盖的角度，或简短表达赞同/不同意见
+- 不要长篇大论或重复主角已经说过的内容
+- 保持你的人设特色，用自然的口吻参与讨论
+`
   }
 
   if (infiniteMode) {
@@ -843,6 +866,10 @@ export interface RunPiAgentLoopOptions {
   agentName?: string
   groupAgentNames?: string[]
   mentionedBy?: string
+  /** 本轮发言角色：主角 / 配角 */
+  speakingRole?: 'protagonist' | 'supporting'
+  /** 主角的名字（当 speakingRole 为 supporting 时） */
+  protagonistName?: string
   language?: string
 }
 
@@ -852,7 +879,8 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     userMessage, history, send, signal,
     thinkingMode = true, conversationId, userId, agentId,
     mentionSignal, isGroup, infiniteMode,
-    agentName, groupAgentNames, mentionedBy, language,
+    agentName, groupAgentNames, mentionedBy,
+    speakingRole, protagonistName, language,
   } = opts
   const config = await getConfig()
 
@@ -884,7 +912,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
   const convId = conversationId || 'default'
 
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, language })
+  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language })
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {

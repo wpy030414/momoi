@@ -8,39 +8,13 @@ import type { ServerMessage, Agent } from '../../shared/types.js'
 import type { ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
 import { getAgent, getConfig } from '../config.js'
-import { decideGroupParticipants, type GroupSkipHint } from './neutral-agent.js'
+import { decideGroupSpeakerOrder, type SpeakerOrder } from './neutral-agent.js'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 
 const MAX_MENTION_REDIRECTS = 5
 
 // ---- 本轮发言调度（中立 Agent 裁决）----
 const DECISION_TIMEOUT_MS = 10_000
-const SKIP_HINT_TTL_MS = 10 * 60_000
-const MAX_TRACKED_CONVERSATIONS = 200
-
-/** 上一轮未参与的成员（内存态，重启失效；带 TTL，仅作下一轮裁决的提示） */
-const previousSkipsByConversation = new Map<string, { at: number; skips: GroupSkipHint[] }>()
-
-function rememberSkips(conversationId: string, skips: GroupSkipHint[]): void {
-  previousSkipsByConversation.delete(conversationId)
-  if (skips.length === 0) return
-  previousSkipsByConversation.set(conversationId, { at: Date.now(), skips })
-  while (previousSkipsByConversation.size > MAX_TRACKED_CONVERSATIONS) {
-    const oldest = previousSkipsByConversation.keys().next().value
-    if (oldest === undefined) break
-    previousSkipsByConversation.delete(oldest)
-  }
-}
-
-function recallSkips(conversationId: string): GroupSkipHint[] | undefined {
-  const entry = previousSkipsByConversation.get(conversationId)
-  if (!entry) return undefined
-  if (Date.now() - entry.at > SKIP_HINT_TTL_MS) {
-    previousSkipsByConversation.delete(conversationId)
-    return undefined
-  }
-  return entry.skips
-}
 
 interface GroupOrchestratorOptions {
   userMessage: string | ContentPart[]
@@ -175,13 +149,11 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
     ? parseUserMentions(userMessage, agentNameById)
     : []
 
-  // ---- 本轮发言调度：中立 Agent 裁决哪些成员不需要参与 ----
-  // 失败开放：任何异常 / 超时 / 空结果都退回「全员参与」（本功能引入前的行为）。
-  const skippedIds = new Set<string>()
-  const skippedHints: GroupSkipHint[] = []
+  // ---- 本轮发言调度：中立 Agent 裁决发言顺序 ----
+  // 失败开放：任何异常 / 超时 / 空结果都退回 shuffle + 全员参与。
+  let speakerOrder: SpeakerOrder | null = null
   const shouldDecide =
     agentNameById.size > 1 &&
-    history.length > 0 &&
     userMentionedIds.length < agentIds.length
 
   if (shouldDecide) {
@@ -193,22 +165,19 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
       ])
       const model = neutralAgent?.model || agentsById.get(agentIds[0])?.model || 'gpt-4o'
 
-      // 超时保护：裁决位于首个 agent_start 之前，必须给等待设上限
       let timer: ReturnType<typeof setTimeout> | undefined
       let timedOut = false
-      let skips: GroupSkipHint[] | null = null
       try {
         const timeout = new Promise<null>((resolve) => {
           timer = setTimeout(() => { timedOut = true; resolve(null) }, DECISION_TIMEOUT_MS)
         })
-        skips = await Promise.race([
-          decideGroupParticipants(
+        speakerOrder = await Promise.race([
+          decideGroupSpeakerOrder(
             config,
             model,
             {
               conversationContext: formatDecisionContext(history, userMessage, agentNameById),
               memberNames: Array.from(agentNameById.values()),
-              previousSkips: recallSkips(conversationId),
             },
             neutralAgent?.system_prompt?.trim() || undefined,
           ),
@@ -218,58 +187,63 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         if (timer) clearTimeout(timer)
       }
 
-      if (skips === null) {
-        // 瞬时故障不清上一轮记忆，下一轮仍可拿到提示
-        console.warn(`Group chat: orchestration ${timedOut ? 'timed out' : 'failed'} after ${Date.now() - startedAt}ms, all agents will reply`)
+      if (speakerOrder === null) {
+        console.warn(`Group chat: orchestration ${timedOut ? 'timed out' : 'failed'} after ${Date.now() - startedAt}ms, fallback to shuffle`)
       } else {
-        for (const hint of skips) {
-          const id = await resolveAgentByName(hint.name, agentNameById)
-          if (!id || skippedIds.has(id)) continue
-          if (userMentionedIds.includes(id)) continue // 用户点名者强制参与
-          skippedIds.add(id)
-          skippedHints.push({ name: agentNameById.get(id)!, reason: hint.reason })
+        // 全部跳过也算失败：回退到全员参与
+        if (speakerOrder.order.length === 0) {
+          console.warn('Group chat: orchestration returned empty order, fallback to shuffle')
+          speakerOrder = null
+        } else {
+          console.log(`Group chat: speaker order ${speakerOrder.order.join(' → ')}${speakerOrder.protagonist ? ` (主角: ${speakerOrder.protagonist})` : ''} (${Date.now() - startedAt}ms)`)
         }
-
-        // 弱模型可能回显整个名册：全跳过一律作废，失败开放
-        if (skippedIds.size > 0 && skippedIds.size >= agentNameById.size) {
-          console.warn('Group chat: orchestration skipped every member, falling back to all')
-          skippedIds.clear()
-          skippedHints.length = 0
-        }
-
-        rememberSkips(conversationId, skippedHints)
-        console.log(skippedHints.length > 0
-          ? `Group chat: orchestration skipped ${skippedHints.map((s) => (s.reason ? `${s.name}(${s.reason})` : s.name)).join(', ')} (${Date.now() - startedAt}ms)`
-          : `Group chat: orchestration skipped none (${Date.now() - startedAt}ms)`)
       }
     } catch (err) {
-      // 裁决失败不影响本轮：全员参与
-      console.error('Group chat: orchestration failed, all agents will reply:', (err as Error).message)
+      console.error('Group chat: orchestration failed, fallback to shuffle:', (err as Error).message)
     }
   }
 
-  const participants = skippedIds.size > 0
-    ? agentIds.filter((id) => !skippedIds.has(id))
-    : [...agentIds]
+  // Build ordered participant list from speaker order, or fall back to shuffle
+  let orderedParticipants: string[]
+  const protagonistAgentId: string | undefined = speakerOrder?.protagonist
+    ? await resolveAgentByName(speakerOrder.protagonist, agentNameById) ?? undefined
+    : undefined
 
-  // Shuffle agent order for natural conversation feel
-  const shuffled = participants.length > 1
-    ? [participants[0], ...shuffleArray(participants.slice(1))]
-    : [...participants]
+  if (speakerOrder && speakerOrder.order.length > 0) {
+    // Resolve names to IDs in the given order
+    const resolved: string[] = []
+    for (const name of speakerOrder.order) {
+      const id = await resolveAgentByName(name, agentNameById)
+      if (id && !resolved.includes(id)) resolved.push(id)
+    }
+    // Safety net: append any agent IDs that were missed by name resolution
+    for (const id of agentIds) {
+      if (!resolved.includes(id)) resolved.push(id)
+    }
+    orderedParticipants = resolved
+  } else {
+    // Fallback: shuffle (original behavior)
+    orderedParticipants = agentIds.length > 1
+      ? [agentIds[0], ...shuffleArray(agentIds.slice(1))]
+      : [...agentIds]
+  }
 
-  send({ type: 'group_start', agent_ids: shuffled })
+  // User @mentions always get front priority, overriding any orchestration order
+  if (userMentionedIds.length > 0) {
+    for (const mid of [...userMentionedIds].reverse()) {
+      orderedParticipants = [mid, ...orderedParticipants.filter(id => id !== mid)]
+    }
+  }
+
+  send({ type: 'group_start', agent_ids: orderedParticipants })
 
   const repliedAgents = new Set<string>()
-  let remaining = [...shuffled]
+  let remaining = [...orderedParticipants]
   let mentionDepth = 0
   let mentionedBy: string | undefined = undefined
 
-  // Insert user-mentioned agents at the front, preserving their order in the message
+  // Set mentionedBy to "user" so the system prompt can acknowledge it
   if (userMentionedIds.length > 0) {
-    for (const mid of [...userMentionedIds].reverse()) {
-      remaining = [mid, ...remaining.filter(id => id !== mid)]
-    }
-    // Set mentionedBy to "user" so the system prompt can acknowledge it
     mentionedBy = '用户'
   }
 
@@ -330,6 +304,14 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
     ]
 
     try {
+      // Determine speaking role for this agent
+      const speakingRole = agentId === protagonistAgentId ? 'protagonist' as const
+        : protagonistAgentId ? 'supporting' as const
+        : undefined
+      const protagonistName = protagonistAgentId
+        ? agentNameById.get(protagonistAgentId)
+        : undefined
+
       const { reply, suggestions, thinking, artifacts } = await runPiAgentLoop({
         userMessage,
         history: perAgentHistory,
@@ -346,6 +328,8 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         agentName: agent.name,
         groupAgentNames: Array.from(agentNameById.values()),
         mentionedBy: currentMentionedBy,
+        speakingRole,
+        protagonistName,
         language,
       })
 
