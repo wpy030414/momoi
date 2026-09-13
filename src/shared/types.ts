@@ -80,6 +80,10 @@ export interface Agent {
   avatar: string
   role: 'default' | 'neutral'
   created_at: number
+  // Voice
+  voice_enabled: boolean
+  voice_sample_url: string
+  voice_settings: string  // JSON: VoiceSettings
 }
 
 // ---- MCP Server Config ----
@@ -136,6 +140,23 @@ export interface InstalledSkill {
   path: string
 }
 
+// ---- Voice ----
+
+export interface VoiceSettings {
+  speed: number              // 0.5 - 2.0，默认 1.0
+  pitch: number              // -12 ~ +12 semitones，默认 0
+  emotionStrength: number    // 0.0 - 1.0，默认 0.8
+  speakerId: string          // TTS API 返回的说话人 ID
+  provider: string           // 'gpt-sovits' | 'cosyvoice'
+}
+
+export interface VoiceAudioSegment {
+  index: number
+  text: string               // 这段话对应的原文
+  audio_url: string          // 音频文件相对路径
+  duration_seconds: number
+}
+
 // ---- SSE Events ----
 
 // ThinkingSegment 定义在 shared/thinking.ts（与服务端 loop 共用编解码），此处 re-export
@@ -159,6 +180,8 @@ export type ServerMessage =
   | { type: 'done'; reply: string; suggestions: string[]; agent_id?: string; agent_name?: string; infinite?: boolean }
   | { type: 'ask_user'; question_id: string; tool_call_id: string; questions: AskUserQuestion[]; agent_id?: string; agent_name?: string }
   | { type: 'error'; message: string; agent_id?: string; agent_name?: string }
+  | { type: 'voice_segment'; message_id: number; index: number; audio_url: string; text: string; duration_seconds: number }
+  | { type: 'voice_done'; message_id: number; total_segments: number }
 
 // ---- Ask User Tool ----
 

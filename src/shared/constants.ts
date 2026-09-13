@@ -19,3 +19,7 @@ export const DEFAULT_AGENT_MODEL = 'gpt-4o'
 export const DEFAULT_AGENT_SYSTEM_PROMPT = ''
 export const NEUTRAL_AGENT_NAME = '中立 Agent'
 export const NEUTRAL_AGENT_ID = 'neutral-agent'
+
+// TTS
+export const DEFAULT_TTS_ENDPOINT = 'http://localhost:9880'
+export const DEFAULT_TTS_PROVIDER = 'gpt-sovits'

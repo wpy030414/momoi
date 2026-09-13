@@ -12,6 +12,8 @@ import {
   DEFAULT_MODEL,
   NEUTRAL_AGENT_NAME,
   NEUTRAL_AGENT_ID,
+  DEFAULT_TTS_ENDPOINT,
+  DEFAULT_TTS_PROVIDER,
 } from '../shared/constants.js'
 
 // .env values (read at startup, not hot-reloadable)
@@ -67,6 +69,21 @@ export async function isExternalImageHostingEnabled(): Promise<boolean> {
   return (await getSetting('use_external_image_hosting', 'false')) === 'true'
 }
 
+// ---- TTS Config ----
+
+export async function getTtsConfig(): Promise<{ endpoint: string; provider: string }> {
+  return {
+    endpoint: await getSetting('tts_api_endpoint', DEFAULT_TTS_ENDPOINT),
+    provider: await getSetting('tts_provider', DEFAULT_TTS_PROVIDER),
+  }
+}
+
+export async function updateTtsConfig(partial: Partial<{ endpoint: string; provider: string }>): Promise<{ endpoint: string; provider: string }> {
+  if (partial.endpoint !== undefined) await setSetting('tts_api_endpoint', partial.endpoint)
+  if (partial.provider !== undefined) await setSetting('tts_provider', partial.provider)
+  return getTtsConfig()
+}
+
 export async function getConfig(): Promise<AppConfig> {
   return {
     app_name: await getSetting('app_name', DEFAULT_APP_NAME),
@@ -114,6 +131,9 @@ export async function listAgents(): Promise<Agent[]> {
     avatar: r.avatar,
     role: r.role as Agent['role'],
     created_at: r.created_at,
+    voice_enabled: (r as any).voice_enabled ?? false,
+    voice_sample_url: (r as any).voice_sample_url ?? '',
+    voice_settings: (r as any).voice_settings ?? '{}',
   }))
 }
 
@@ -128,10 +148,13 @@ export async function getAgent(id: string): Promise<Agent | null> {
     avatar: row.avatar,
     role: row.role as Agent['role'],
     created_at: row.created_at,
+    voice_enabled: (row as any).voice_enabled ?? false,
+    voice_sample_url: (row as any).voice_sample_url ?? '',
+    voice_settings: (row as any).voice_settings ?? '{}',
   }
 }
 
-export async function createAgent(name: string, model: string, systemPrompt: string, avatar = '', role: Agent['role'] = 'default'): Promise<Agent> {
+export async function createAgent(name: string, model: string, systemPrompt: string, avatar = '', role: Agent['role'] = 'default', voiceEnabled = false, voiceSampleUrl = '', voiceSettings = '{}'): Promise<Agent> {
   const id = role === 'neutral' ? NEUTRAL_AGENT_ID : randomUUID()
   const now = Math.floor(Date.now() / 1000)
   await db.insert(agents).values({
@@ -142,11 +165,14 @@ export async function createAgent(name: string, model: string, systemPrompt: str
     avatar,
     role,
     created_at: now,
-  }).run()
-  return { id, name, model, system_prompt: systemPrompt, avatar, role, created_at: now }
+    voice_enabled: voiceEnabled,
+    voice_sample_url: voiceSampleUrl,
+    voice_settings: voiceSettings,
+  } as any).run()
+  return { id, name, model, system_prompt: systemPrompt, avatar, role, created_at: now, voice_enabled: voiceEnabled, voice_sample_url: voiceSampleUrl, voice_settings: voiceSettings }
 }
 
-export async function updateAgent(id: string, partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar'>>): Promise<Agent | null> {
+export async function updateAgent(id: string, partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar' | 'voice_enabled' | 'voice_sample_url' | 'voice_settings'>>): Promise<Agent | null> {
   const existing = await getAgent(id)
   if (!existing) return null
   const updates: Record<string, unknown> = {}
@@ -154,6 +180,9 @@ export async function updateAgent(id: string, partial: Partial<Pick<Agent, 'name
   if (partial.model !== undefined) updates.model = partial.model
   if (partial.system_prompt !== undefined) updates.system_prompt = partial.system_prompt
   if (partial.avatar !== undefined) updates.avatar = partial.avatar
+  if (partial.voice_enabled !== undefined) updates.voice_enabled = partial.voice_enabled ? 1 : 0
+  if (partial.voice_sample_url !== undefined) updates.voice_sample_url = partial.voice_sample_url
+  if (partial.voice_settings !== undefined) updates.voice_settings = partial.voice_settings
   if (Object.keys(updates).length > 0) {
     await db.update(agents).set(updates as any).where(eq(agents.id, id)).run()
   }

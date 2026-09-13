@@ -38,6 +38,9 @@ export const agents = pgTable('agents', {
   avatar: text('avatar').notNull().default(''),
   role: text('role').notNull().default('default'),
   created_at: integer('created_at').notNull(),
+  voice_enabled: boolean('voice_enabled').notNull().default(false),
+  voice_sample_url: text('voice_sample_url').notNull().default(''),
+  voice_settings: text('voice_settings').notNull().default('{}'),
 })
 
 export const groupConversationAgents = pgTable('group_conversation_agents', {

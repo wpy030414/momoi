@@ -2,13 +2,13 @@ import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
 import { adminAuthMiddleware } from '../auth.js'
-import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen, isExternalImageHostingEnabled } from '../config.js'
+import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen, isExternalImageHostingEnabled, getTtsConfig, updateTtsConfig } from '../config.js'
 import { base64ToBuffer, uploadToCdn } from '../cdn.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '../../shared/constants.js'
 import fs from 'fs'
 import path from 'path'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
-import { db, conversations, messages, settings, users, userOauthBindings } from '../db.js'
+import { db, conversations, messages, settings, users, userOauthBindings, agents } from '../db.js'
 import { skillRegistry } from '../skills/loader.js'
 import AdmZip from 'adm-zip'
 
@@ -30,6 +30,8 @@ adminRoute.use('/stats', adminAuthMiddleware)
 adminRoute.use('/stats/*', adminAuthMiddleware)
 adminRoute.use('/users', adminAuthMiddleware)
 adminRoute.use('/users/*', adminAuthMiddleware)
+adminRoute.use('/tts', adminAuthMiddleware)
+adminRoute.use('/tts/*', adminAuthMiddleware)
 adminRoute.use('/direct-registration', adminAuthMiddleware)
 adminRoute.use('/oauth-registration', adminAuthMiddleware)
 
@@ -96,7 +98,7 @@ adminRoute.get('/agents', async (c) => {
 })
 
 adminRoute.post('/agents', async (c) => {
-  const body = await c.req.json<{ name: string; model: string; system_prompt: string; avatar?: string }>()
+  const body = await c.req.json<{ name: string; model: string; system_prompt: string; avatar?: string; voice_enabled?: boolean; voice_sample_url?: string; voice_settings?: string }>()
   if (!body.name?.trim()) {
     return c.json({ error: 'Agent name is required' }, 400)
   }
@@ -111,15 +113,15 @@ adminRoute.post('/agents', async (c) => {
     }
   }
 
-  const agent = await createAgent(body.name.trim(), body.model || '', body.system_prompt || '', body.avatar || '')
+  const agent = await createAgent(body.name.trim(), body.model || '', body.system_prompt || '', body.avatar || '', 'default', body.voice_enabled ?? false, body.voice_sample_url || '', body.voice_settings || '{}')
   return c.json({ agent })
 })
 
 adminRoute.put('/agents/:id', async (c) => {
   const id = c.req.param('id')
-  const body = await c.req.json<{ name?: string; model?: string; system_prompt?: string; avatar?: string }>()
+  const body = await c.req.json<{ name?: string; model?: string; system_prompt?: string; avatar?: string; voice_enabled?: boolean; voice_sample_url?: string; voice_settings?: string }>()
 
-  // Neutral agent: only model and system_prompt can be changed
+  // Neutral agent: only model, system_prompt can be changed (and voice fields)
   if (id === NEUTRAL_AGENT_ID) {
     delete body.name
     delete body.avatar
@@ -531,4 +533,138 @@ function cleanMacOSArtifacts(dir: string): void {
     }
   }
   removeDSStore(dir)
+}
+
+// ---- TTS Config ----
+
+adminRoute.get('/tts/config', async (c) => {
+  const config = await getTtsConfig()
+  return c.json(config)
+})
+
+adminRoute.put('/tts/config', async (c) => {
+  const body = await c.req.json<{ endpoint?: string; provider?: string }>()
+  const config = await updateTtsConfig(body)
+  return c.json(config)
+})
+
+// ---- Agent Voice Management ----
+
+adminRoute.post('/agents/:id/voice/upload', async (c) => {
+  const id = c.req.param('id')
+  const agent = await getAgentStub(id)
+  if (!agent) return c.json({ error: 'Agent not found' }, 404)
+
+  const body = await c.req.parseBody()
+  const file = body['file']
+  if (!file || typeof file === 'string') {
+    return c.json({ error: 'No audio file provided' }, 400)
+  }
+
+  const MAX_AUDIO_SIZE = 10 * 1024 * 1024 // 10MB
+  if (file.size > MAX_AUDIO_SIZE) {
+    return c.json({ error: 'File too large (max 10MB)' }, 400)
+  }
+
+  // Validate audio type
+  const ext = path.extname(file.name).toLowerCase()
+  const allowedExts = ['.wav', '.mp3', '.ogg', '.m4a', '.flac']
+  if (!allowedExts.includes(ext)) {
+    return c.json({ error: `Unsupported audio format: ${ext}. Allowed: ${allowedExts.join(', ')}` }, 400)
+  }
+
+  const voiceDir = path.resolve('data', 'voice', id)
+  if (!fs.existsSync(voiceDir)) fs.mkdirSync(voiceDir, { recursive: true })
+
+  const filename = `sample${ext}`
+  const filePath = path.join(voiceDir, filename)
+  const buffer = Buffer.from(await file.arrayBuffer())
+  fs.writeFileSync(filePath, buffer)
+
+  const sampleUrl = `/api/assets/voice/${id}/${filename}`
+  await updateAgent(id, { voice_sample_url: sampleUrl })
+
+  return c.json({ success: true, sample_url: sampleUrl })
+})
+
+adminRoute.post('/agents/:id/voice/clone', async (c) => {
+  const id = c.req.param('id')
+  const agent = await getAgentStub(id)
+  if (!agent) return c.json({ error: 'Agent not found' }, 404)
+
+  const samplePath = path.resolve('data', 'voice', id, 'sample.wav')
+  if (!fs.existsSync(samplePath)) {
+    // Try mp3
+    const mp3Path = path.resolve('data', 'voice', id, 'sample.mp3')
+    if (!fs.existsSync(mp3Path)) {
+      return c.json({ error: 'No voice sample uploaded. Please upload a reference audio first.' }, 400)
+    }
+  }
+
+  const ttsConfig = await getTtsConfig()
+  try {
+    const { createTtsProvider } = await import('../ai/tts.js')
+    const provider = createTtsProvider({ endpoint: ttsConfig.endpoint, type: ttsConfig.provider })
+    const audioPath = fs.existsSync(samplePath) ? samplePath : path.resolve('data', 'voice', id, 'sample.mp3')
+    const speakerId = await provider.registerVoice(audioPath)
+
+    const currentVoice = parseOrEmpty(agent.voice_settings)
+    currentVoice.speakerId = speakerId
+    currentVoice.provider = ttsConfig.provider
+    await updateAgent(id, { voice_settings: JSON.stringify(currentVoice) })
+
+    return c.json({ success: true, speaker_id: speakerId })
+  } catch (err: any) {
+    console.error('Voice clone failed:', err)
+    return c.json({ error: `Voice clone failed: ${err.message}` }, 500)
+  }
+})
+
+adminRoute.get('/agents/:id/voice/status', async (c) => {
+  const id = c.req.param('id')
+  const agent = await getAgentStub(id)
+  if (!agent) return c.json({ error: 'Agent not found' }, 404)
+
+  const settings = parseOrEmpty(agent.voice_settings)
+  return c.json({
+    speaker_id: settings.speakerId || null,
+    sample_url: agent.voice_sample_url || null,
+    voice_enabled: agent.voice_enabled,
+  })
+})
+
+adminRoute.delete('/agents/:id/voice', async (c) => {
+  const id = c.req.param('id')
+  const agent = await getAgentStub(id)
+  if (!agent) return c.json({ error: 'Agent not found' }, 404)
+
+  const voiceDir = path.resolve('data', 'voice', id)
+  if (fs.existsSync(voiceDir)) {
+    fs.rmSync(voiceDir, { recursive: true })
+  }
+
+  await updateAgent(id, { voice_enabled: false, voice_sample_url: '', voice_settings: '{}' })
+  return c.json({ success: true })
+})
+
+// Helper: get agent without full import cycle
+async function getAgentStub(id: string): Promise<import('@/shared/types').Agent | null> {
+  const row = await db.select().from(agents).where(eq(agents.id, id)).get()
+  if (!row) return null
+  return {
+    id: row.id,
+    name: row.name,
+    model: row.model,
+    system_prompt: row.system_prompt,
+    avatar: row.avatar,
+    role: row.role as any,
+    created_at: row.created_at,
+    voice_enabled: (row as any).voice_enabled ?? false,
+    voice_sample_url: (row as any).voice_sample_url ?? '',
+    voice_settings: (row as any).voice_settings ?? '{}',
+  }
+}
+
+function parseOrEmpty(json: string): Record<string, any> {
+  try { return JSON.parse(json) } catch { return {} }
 }

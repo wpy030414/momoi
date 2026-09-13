@@ -38,6 +38,9 @@ export const agents = sqliteTable('agents', {
   avatar: text('avatar').notNull().default(''),
   role: text('role').notNull().default('default'),
   created_at: integer('created_at').notNull(),
+  voice_enabled: integer('voice_enabled', { mode: 'boolean' }).notNull().default(false),
+  voice_sample_url: text('voice_sample_url').notNull().default(''),
+  voice_settings: text('voice_settings').notNull().default('{}'),
 })
 
 export const groupConversationAgents = sqliteTable('group_conversation_agents', {

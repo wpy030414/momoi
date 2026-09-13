@@ -18,6 +18,8 @@ import { userRoute } from './routes/user.js'
 import { workspaceRoute } from './routes/workspace.js'
 import { groupRoute } from './routes/group.js'
 import { oauthRoute } from './routes/oauth.js'
+import { assetsRoute } from './routes/assets.js'
+import { voiceRoute } from './routes/voice.js'
 import { serveClient } from './static.js'
 
 const app = new Hono()
@@ -40,6 +42,8 @@ app.route('/api/user', userRoute)
 app.route('/api/workspace', workspaceRoute)
 app.route('/api/group', groupRoute)
 app.route('/api/oauth', oauthRoute)
+app.route('/api/assets', assetsRoute)
+app.route('/api/voice', voiceRoute)
 
 // Static files — production only (dev mode uses Vite proxy)
 if (process.env.NODE_ENV === 'production') {

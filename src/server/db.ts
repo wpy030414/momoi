@@ -62,7 +62,10 @@ const MIGRATION_SQL = `
     system_prompt TEXT NOT NULL DEFAULT '',
     avatar TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT 'default',
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    voice_enabled INTEGER NOT NULL DEFAULT 0,
+    voice_sample_url TEXT NOT NULL DEFAULT '',
+    voice_settings TEXT NOT NULL DEFAULT '{}'
   );
 
   CREATE TABLE IF NOT EXISTS group_conversation_agents (
@@ -99,8 +102,7 @@ const MIGRATION_SQL = `
     provider_user_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     UNIQUE(provider_id, provider_user_id)
-  );
-`
+  );`
 
 // ---- SQLite (sql.js) local mode ----
 
@@ -126,6 +128,18 @@ async function initSqlite() {
 
   // Run migrations
   sqlDb.run(MIGRATION_SQL)
+
+  // Additive column migrations — sql.js throws if column already exists,
+  // so run each ALTER individually under try/catch.
+  const ADDITIVE_MIGRATIONS = [
+    `ALTER TABLE agents ADD COLUMN voice_enabled INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE agents ADD COLUMN voice_sample_url TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE agents ADD COLUMN voice_settings TEXT NOT NULL DEFAULT '{}'`,
+  ]
+  for (const stmt of ADDITIVE_MIGRATIONS) {
+    try { sqlDb.run(stmt) } catch { /* column already exists */ }
+  }
+
   persist()
 
   const db = drizzle(sqlDb, { schema }) as any
@@ -210,7 +224,10 @@ async function initPg(dbUrl: string, user: string, password: string) {
       system_prompt TEXT NOT NULL DEFAULT '',
       avatar TEXT NOT NULL DEFAULT '',
       role TEXT NOT NULL DEFAULT 'default',
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      voice_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      voice_sample_url TEXT NOT NULL DEFAULT '',
+      voice_settings TEXT NOT NULL DEFAULT '{}'
     );
 
     CREATE TABLE IF NOT EXISTS group_conversation_agents (
@@ -248,6 +265,11 @@ async function initPg(dbUrl: string, user: string, password: string) {
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
     CREATE INDEX IF NOT EXISTS idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
+
+    -- Additive column migrations for existing PG databases
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_sample_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_settings TEXT NOT NULL DEFAULT '{}';
   `)
 
   const db = drizzlePg(pool, { schema }) as any
@@ -310,7 +332,10 @@ async function initMysql(dbUrl: string, user: string, password: string) {
         system_prompt TEXT NOT NULL,
         avatar VARCHAR(255) NOT NULL DEFAULT '',
         role VARCHAR(20) NOT NULL DEFAULT 'default',
-        created_at INT NOT NULL
+        created_at INT NOT NULL,
+        voice_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        voice_sample_url VARCHAR(512) NOT NULL DEFAULT '',
+        voice_settings TEXT NOT NULL
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
       CREATE TABLE IF NOT EXISTS group_conversation_agents (
@@ -344,6 +369,16 @@ async function initMysql(dbUrl: string, user: string, password: string) {
         created_at INT NOT NULL,
         UNIQUE KEY uq_provider_user (provider_id, provider_user_id)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+      -- Additive column migrations for existing MySQL databases (IF NOT EXISTS avoids errors)
+      SET @stmt = (SELECT IF(
+        (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'agents' AND COLUMN_NAME = 'voice_enabled' AND TABLE_SCHEMA = DATABASE()) = 0,
+        'ALTER TABLE agents ADD COLUMN voice_enabled BOOLEAN NOT NULL DEFAULT FALSE, ADD COLUMN voice_sample_url VARCHAR(512) NOT NULL DEFAULT '''', ADD COLUMN voice_settings TEXT NOT NULL',
+        'SELECT 1'
+      ));
+      PREPARE stmt FROM @stmt;
+      EXECUTE stmt;
+      DEALLOCATE PREPARE stmt;
     `)
   } finally {
     conn.release()

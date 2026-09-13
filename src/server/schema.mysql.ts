@@ -38,6 +38,9 @@ export const agents = mysqlTable('agents', {
   avatar: varchar('avatar', { length: 255 }).notNull().default(''),
   role: varchar('role', { length: 20 }).notNull().default('default'),
   created_at: int('created_at').notNull(),
+  voice_enabled: boolean('voice_enabled').notNull().default(false),
+  voice_sample_url: varchar('voice_sample_url', { length: 512 }).notNull().default(''),
+  voice_settings: text('voice_settings').notNull(),
 })
 
 export const groupConversationAgents = mysqlTable('group_conversation_agents', {
