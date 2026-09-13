@@ -35,6 +35,8 @@ export function useChat() {
   const [loading, setLoading] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const infiniteModeRef = useRef(false)
+  /** 群聊标记：follow_up 事件据此决定是否补建 assistant 气泡（群聊由 agent_start 逐个建）。 */
+  const groupModeRef = useRef(false)
   const [pendingQuestion, setPendingQuestion] = useState<(import('@/shared/types').ServerMessage & { type: 'ask_user' }) | null>(null)
 
   // Load conversations on mount
@@ -130,6 +132,7 @@ export function useChat() {
     setMessages((prev) => [...prev, userMsg, ...(groupMode ? [] : [assistantMsg])])
     setLoading(true)
     infiniteModeRef.current = infiniteMode || false
+    groupModeRef.current = groupMode || false
 
     const abort = new AbortController()
     abortRef.current = abort
@@ -137,6 +140,8 @@ export function useChat() {
     let convId = activeId
     let attempt = 0
     let done = false
+    /** 本轮 SSE 流中是否收到过 done 事件（收尾 refetch 的前置条件之一） */
+    let gotDoneEvent = false
 
     while (attempt <= MAX_RETRIES && !done) {
       const isRetry = attempt > 0
@@ -214,6 +219,7 @@ export function useChat() {
                 if (msg.type === 'conversation_id') convId = msg.id
                 if (msg.type === 'token') receivedTokens = true
                 if (msg.type === 'done' || msg.type === 'error') receivedDone = true
+                if (msg.type === 'done') gotDoneEvent = true
                 handleSSEEvent(msg)
               } catch {
                 // skip malformed lines
@@ -268,13 +274,17 @@ export function useChat() {
     }
 
     setLoading(false)
+    // 守卫必须在置空前取值：先置 null 再比较会让条件恒为 false，收尾 refetch 成死代码。
+    const ownsAbort = abortRef.current === abort
     abortRef.current = null
     refreshConversations()
 
     // Re-fetch messages from server to get real IDs for locally-created messages.
     // 竞态守卫：done 已提前结束 loading，用户可能在流关闭前抢发了新消息（本地流式
     // 气泡已存在）——此时 abortRef 已被新一轮覆盖，跳过全量 refetch，避免抹掉新气泡。
-    if (convId && abortRef.current === abort) {
+    // 另要求收到过 done 事件：用户取消 / 重试耗尽时保留本地气泡（含错误提示），
+    // 不被 DB 快照覆盖。无限演算每轮都会发 done，会话结束时同样能触发对账。
+    if (convId && ownsAbort && gotDoneEvent) {
       try {
         const res = await api.getConversation(convId)
         setMessages(
@@ -521,7 +531,11 @@ export function useChat() {
         // Infinite mode: neutral agent generated a follow-up question
         // Replace the placeholder user message with actual content
         setMessages((prev) => {
-          const isGroupChat = prev.some((m) => m.agent_id)
+          // 群聊判定不能嗅探消息上的 agent_id——单聊消息同样记录发言 Agent，
+          // 从 DB 加载过的单聊会话会被误判为群聊，导致 assistant 气泡不创建，
+          // 后续 token/done 因「最后一条是 user」被整体丢弃（Agent 消息被吞）。
+          // 以 sendMessage 时记录的 groupModeRef 为准。
+          const isGroupChat = groupModeRef.current
           const translatedText = msg.text === '（继续）' ? t('chat.followUpFallback') : msg.text
           // Find the last user message (the placeholder) and replace its content
           const updated = [...prev]
