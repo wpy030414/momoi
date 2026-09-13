@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { MessageContent } from './MessageContent'
 import { ThinkingBlock } from './ThinkingBlock'
 import { AttachmentCard, AttachmentList } from './AttachmentCard'
+import { VoicePlayButton } from '../voice/VoicePlayButton'
 import { User, Bot, Undo2, Check, X } from 'lucide-react'
 import type { Attachment, ThinkingSegment } from '@/shared/types'
 
@@ -29,9 +30,13 @@ interface MessageBubbleProps {
   agentAvatar?: string | null
   /** Group chat: agent display name */
   agentName?: string
+  /** Whether this agent has voice enabled */
+  voiceEnabled?: boolean
+  /** Active agent ID (for voice audio URL resolution) */
+  activeAgentId?: string
 }
 
-export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, agentAvatar, agentName }: MessageBubbleProps) {
+export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, agentAvatar, agentName, voiceEnabled, activeAgentId }: MessageBubbleProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const [confirmingRevert, setConfirmingRevert] = useState(false)
@@ -103,6 +108,16 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
             <div className={`mb-2 ${isUser ? 'flex flex-wrap gap-1.5 justify-end' : ''}`}>
               <AttachmentList attachments={message.attachments} />
             </div>
+          )}
+
+          {/* Voice play button — assistant messages only when voice is enabled */}
+          {!isUser && !message.streaming && message.content && voiceEnabled && activeAgentId && message.id && (
+            <VoicePlayButton
+              agentId={activeAgentId}
+              messageId={message.id}
+              text={message.content}
+              enabled={true}
+            />
           )}
 
           {/* Message content */}

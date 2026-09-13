@@ -30,9 +30,13 @@ interface MessageListProps {
   agents?: AgentBrief[]
   /** Direct chat: fallback display name for messages without agent_id（历史消息 / 流式气泡） */
   fallbackAgentName?: string
+  /** Direct chat: whether the active agent has voice enabled */
+  agentVoiceEnabled?: boolean
+  /** All agents voice_enabled lookup (group chat) */
+  agentVoiceMap?: Map<string, boolean>
 }
 
-export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, agents, fallbackAgentName }: MessageListProps) {
+export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap }: MessageListProps) {
   // Only the last assistant message shows its suggestion chips — older ones
   // were for a past turn and are meaningless as "what to ask next".
   const lastAssistantIdx = [...messages]
@@ -47,12 +51,24 @@ export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, age
         // Resolve agent avatar for group messages
         let msgAgentAvatar = agentAvatar
         let msgAgentName: string | undefined
+        let msgVoiceEnabled = agentVoiceEnabled ?? false
+        let msgAgentId: string | undefined
         if (agents && msg.agent_id) {
           const agent = agents.find((a) => a.id === msg.agent_id)
           if (agent) {
             msgAgentAvatar = agent.avatar || undefined
             msgAgentName = agent.name
+            msgVoiceEnabled = (agent as any).voice_enabled ?? agentVoiceMap?.get(agent.id) ?? false
+            msgAgentId = agent.id
           }
+        } else if (!msg.agent_id && agentVoiceMap) {
+          // Direct chat: use the active agent's voice_enabled
+          // agentVoiceMap only has entries for known agents, so check first entry
+          msgVoiceEnabled = agentVoiceEnabled ?? false
+        }
+        // For direct chat, get agent ID from the message's agent_id if available
+        if (!msgAgentId && msg.agent_id) {
+          msgAgentId = msg.agent_id
         }
         return (
           <MessageBubble
@@ -63,6 +79,8 @@ export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, age
             onRevert={msg.role === 'user' && msg.id ? () => onRevert?.(idx) : undefined}
             agentAvatar={msgAgentAvatar}
             agentName={msgAgentName || msg.agent_name || fallbackAgentName}
+            voiceEnabled={msgVoiceEnabled}
+            activeAgentId={msgAgentId}
           />
         )
       })}

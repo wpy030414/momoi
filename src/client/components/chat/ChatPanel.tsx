@@ -11,6 +11,7 @@ interface AgentBrief {
   id: string
   name: string
   avatar: string
+  voice_enabled?: boolean
 }
 
 interface ChatMessage {
@@ -89,6 +90,12 @@ export function ChatPanel({
     : (activeAgentId ? agents?.find((a) => a.id === activeAgentId) : undefined)
       || (selectedAgentId ? agents?.find((a) => a.id === selectedAgentId) : undefined)
   const directAgentAvatar = directAgent?.avatar || null
+  const directAgentVoiceEnabled = directAgent?.voice_enabled ?? false
+  // Build a map of agent_id → voice_enabled for all agents (group chat)
+  const agentVoiceMap = useMemo(() => {
+    if (!agents) return new Map<string, boolean>()
+    return new Map(agents.map(a => [a.id, a.voice_enabled ?? false]))
+  }, [agents])
 
   // Time-of-day greeting
   const timeGreeting = useMemo(() => {
@@ -241,6 +248,8 @@ export function ChatPanel({
             agentAvatar={isGroup ? null : directAgentAvatar}
             agents={isGroup ? (groupAgents || []) : agents}
             fallbackAgentName={isGroup ? undefined : directAgent?.name}
+            agentVoiceEnabled={isGroup ? false : directAgentVoiceEnabled}
+            agentVoiceMap={agentVoiceMap}
           />
         )}
       </div>

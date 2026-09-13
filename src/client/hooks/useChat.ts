@@ -417,6 +417,28 @@ export function useChat() {
         })
         break
 
+      // --- Voice Events ---
+      case 'voice_segment':
+        window.dispatchEvent(new CustomEvent('voice:segment', {
+          detail: {
+            messageId: msg.message_id,
+            index: msg.index,
+            audioUrl: msg.audio_url,
+            text: msg.text,
+            duration: msg.duration_seconds,
+          }
+        }))
+        break
+
+      case 'voice_done':
+        window.dispatchEvent(new CustomEvent('voice:done', {
+          detail: {
+            messageId: msg.message_id,
+            totalSegments: msg.total_segments,
+          }
+        }))
+        break
+
       // --- Group Chat Events ---
       case 'agent_start':
         // Start a new agent message bubble in group chat

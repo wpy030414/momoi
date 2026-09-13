@@ -93,7 +93,7 @@ export function App() {
     }
   }, [])
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 768)
-  const [agents, setAgents] = useState<Array<{ id: string; name: string; avatar: string }>>([])
+  const [agents, setAgents] = useState<Array<{ id: string; name: string; avatar: string; voice_enabled?: boolean }>>([])
   const [agentsLoading, setAgentsLoading] = useState(true)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   // 移动端判定走 JS（不依赖 CSS 媒体查询）——钉钉 Android 内置内核会丢弃
