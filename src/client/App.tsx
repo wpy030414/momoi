@@ -634,7 +634,7 @@ export function App() {
               </button>
             </div>
             <p className="text-sm text-muted-foreground mb-4">{t('chat.minAgentsRequired')}</p>
-            <div className="space-y-2 mb-6">
+            <div className="space-y-2 mb-6 max-h-[60vh] overflow-y-auto">
               {agents.map((agent) => {
                 const isSelected = selectedGroupAgents.includes(agent.id)
                 return (
@@ -700,7 +700,7 @@ export function App() {
               </button>
             </div>
             <p className="text-sm text-muted-foreground mb-4">{t('chat.minAgentsRequired')}</p>
-            <div className="space-y-2 mb-6">
+            <div className="space-y-2 mb-6 max-h-[60vh] overflow-y-auto">
               {agents.map((agent) => {
                 const isSelected = selectedGroupAgents.includes(agent.id)
                 return (
