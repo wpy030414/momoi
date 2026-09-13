@@ -164,6 +164,7 @@ export type { ThinkingSegment } from './thinking.js'
 
 export type ServerMessage =
   | { type: 'conversation_id'; id: string }
+  | { type: 'user_message_id'; id: number }
   | { type: 'token'; text: string; agent_id?: string; agent_name?: string }
   | { type: 'thinking'; text: string; round?: number; agent_id?: string; agent_name?: string }
   | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown>; agent_id?: string; agent_name?: string }

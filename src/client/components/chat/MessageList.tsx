@@ -76,7 +76,7 @@ export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, age
             message={msg}
             onSuggestion={onSuggestion}
             showSuggestions={idx === lastAssistantIdxFromEnd}
-            onRevert={msg.role === 'user' && msg.id ? () => onRevert?.(idx) : undefined}
+            onRevert={msg.role === 'user' ? () => onRevert?.(idx) : undefined}
             agentAvatar={msgAgentAvatar}
             agentName={msgAgentName || msg.agent_name || fallbackAgentName}
             voiceEnabled={msgVoiceEnabled}

@@ -152,7 +152,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
         </div>
 
         {/* Revert button — user messages only, positioned on the visual left */}
-        {isUser && message.id && onRevert && (
+        {isUser && onRevert && (
           <div className="flex-shrink-0 flex items-center">
             {confirmingRevert ? (
               <div className="flex items-center gap-1">

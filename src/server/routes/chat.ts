@@ -167,13 +167,17 @@ chatRoute.post('/', async (c) => {
       // --- Save user message (skip on retry to avoid duplicates) ---
       const now = Math.floor(Date.now() / 1000)
       if (!_retry) {
-        await db.insert(messages).values({
+        const result = await db.insert(messages).values({
           conversation_id: convId,
           role: 'user',
           content: message,
           attachments: attachments ? JSON.stringify(attachments) : null,
           created_at: now,
-        }).run()
+        }).returning({ id: messages.id })
+        const userMsgId = Number(result[0]?.id ?? 0)
+        if (userMsgId > 0) {
+          send({ type: 'user_message_id', id: userMsgId })
+        }
       }
       await db.update(conversations).set({ updated_at: now }).where(eq(conversations.id, convId)).run()
 

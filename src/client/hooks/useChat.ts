@@ -316,6 +316,21 @@ export function useChat() {
         }
         break
 
+      case 'user_message_id':
+        // Assign the server-assigned ID to the locally-created user message
+        // so the revert button becomes available immediately
+        setMessages((prev) => {
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === 'user' && !prev[i].id) {
+              const updated = [...prev]
+              updated[i] = { ...updated[i], id: msg.id }
+              return updated
+            }
+          }
+          return prev
+        })
+        break
+
       case 'token':
         setMessages((prev) => {
           const last = prev[prev.length - 1]
@@ -657,24 +672,30 @@ export function useChat() {
   }, [])
 
   const revertMessage = useCallback(async (index: number) => {
-    if (!activeId) return null
-
     const message = messages[index]
-    if (!message || !message.id) return null
+    if (!message) return null
 
-    try {
-      // Delete messages from server (this message and all subsequent)
-      await api.revertMessages(activeId, message.id)
-
-      // Update local state - remove this message and all after it
-      setMessages((prev) => prev.slice(0, index))
-
-      return message.content
-    } catch (err) {
-      console.error('Failed to revert message:', err)
-      return null
+    // If stream is active, abort it first — the revert must interrupt any ongoing AI generation
+    if (loading && abortRef.current) {
+      abortRef.current.abort()
+      abortRef.current = null
+      setLoading(false)
     }
-  }, [activeId, messages])
+
+    // If message has a server-assigned ID, delete from server
+    if (activeId && message.id) {
+      try {
+        await api.revertMessages(activeId, message.id)
+      } catch (err) {
+        console.error('Failed to revert message on server:', err)
+      }
+    }
+
+    // Update local state — remove this message and all after it
+    setMessages((prev) => prev.slice(0, index))
+
+    return message.content
+  }, [activeId, messages, loading])
 
   return {
     conversations,
