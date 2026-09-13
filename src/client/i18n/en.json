@@ -62,7 +62,8 @@
     "saveAsMd": "Save as Markdown",
     "delete": "Delete",
     "deleteConfirm": "Delete conversation \"{{name}}\"? This action cannot be undone.",
-    "groupMembers": "Members"
+    "groupMembers": "Members",
+    "continueOnWechat": "Continue on WeChat"
   },
   "menu": {
     "logout": "Logout",
@@ -246,6 +247,19 @@
     "noBindings": "No linked accounts",
     "chooseProvider": "Choose Provider",
     "cannotRemoveLast": "Cannot remove your only login method. Set a PIN or link another account first."
+  },
+  "wechatBind": {
+    "title": "Bind WeChat",
+    "description": "Scan the QR code to continue chatting on WeChat",
+    "scanning": "Waiting for scan...",
+    "expired": "QR code expired",
+    "retry": "Regenerate",
+    "success": "Binding successful",
+    "successDesc": "You have successfully bound your WeChat account. You can now continue conversations on WeChat.",
+    "alreadyBound": "Already bound",
+    "alreadyBoundDesc": "Your account is already bound to WeChat",
+    "unbind": "Unbind",
+    "unbindConfirm": "Are you sure you want to unbind WeChat?"
   },
   "oauthRegister": {
     "title": "Complete Registration",

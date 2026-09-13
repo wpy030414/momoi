@@ -202,4 +202,27 @@ export const api = {
   getTtsConfig: () => request<{ endpoint: string; provider: string }>('/api/admin/tts/config'),
   updateTtsConfig: (cfg: { endpoint?: string; provider?: string }) =>
     request<{ endpoint: string; provider: string }>('/api/admin/tts/config', { method: 'PUT', body: JSON.stringify(cfg) }),
+
+  // WeChat binding
+  wechatBindInfo: () =>
+    request<{ bound: boolean; wechat_user_id?: string; bound_at?: number }>(
+      '/api/wechat/bind'
+    ),
+
+  wechatBindStart: (convId?: string) =>
+    request<{ qrcode_id: string; qrcode_page_url: string; qrcode_data_uri: string; expires_at: number }>(
+      '/api/wechat/bind',
+      { method: 'POST', body: JSON.stringify({ conv_id: convId || '' }) }
+    ),
+
+  wechatBindStatus: (qrcodeId: string) =>
+    request<{ status: 'wait' | 'confirmed' | 'expired' }>(
+      `/api/wechat/bind/status?qrcode_id=${encodeURIComponent(qrcodeId)}`
+    ),
+
+  wechatUnbind: () =>
+    request<{ success: boolean }>(
+      '/api/wechat/bind',
+      { method: 'DELETE' }
+    ),
 }

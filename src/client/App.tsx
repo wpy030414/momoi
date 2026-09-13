@@ -8,6 +8,7 @@ import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
 import { LinkedAccountsDialog } from './components/settings/LinkedAccountsDialog'
+import { WechatBindDialog } from './components/chat/WechatBindDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
 // Admin tab components — lazy loaded (only admins see them)
@@ -46,6 +47,8 @@ export function App() {
   const [changePinOpen, setChangePinOpen] = useState(false)
   const [changeUsernameOpen, setChangeUsernameOpen] = useState(false)
   const [linkedAccountsOpen, setLinkedAccountsOpen] = useState(false)
+  const [wechatBindOpen, setWechatBindOpen] = useState(false)
+  const [wechatBindConvId, setWechatBindConvId] = useState<string | null>(null)
   const [oauthRegisterInfo, setOauthRegisterInfo] = useState<{ providerId: string; providerUserId: string } | null>(null)
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
@@ -159,6 +162,11 @@ export function App() {
     const conv = chat.conversations.find((c) => c.id === id)
     setDeleteConvId(id)
     setDeleteConvTitle(conv?.title || '')
+  }
+
+  const handleContinueOnWechat = (convId: string) => {
+    setWechatBindConvId(convId)
+    setWechatBindOpen(true)
   }
 
   const confirmDeleteConversation = async () => {
@@ -462,6 +470,7 @@ export function App() {
             onDelete={handleDeleteConversation}
             onExport={chat.exportConversation}
             onManageGroupAgents={handleManageGroupAgents}
+            onContinueOnWechat={handleContinueOnWechat}
             appName={appName}
             currentUser={currentUser}
             showGithub={showGithub}
@@ -602,6 +611,16 @@ export function App() {
       <LinkedAccountsDialog
         open={linkedAccountsOpen}
         onOpenChange={setLinkedAccountsOpen}
+      />
+
+      {/* WeChat Bind Dialog */}
+      <WechatBindDialog
+        open={wechatBindOpen}
+        onOpenChange={(open) => {
+          setWechatBindOpen(open)
+          if (!open) setWechatBindConvId(null)
+        }}
+        convId={wechatBindConvId || ''}
       />
 
       {/* Group Chat Agent Selection Dialog */}

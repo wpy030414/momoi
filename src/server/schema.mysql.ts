@@ -74,3 +74,23 @@ export const userOauthBindings = mysqlTable('user_oauth_bindings', {
   provider_user_id: varchar('provider_user_id', { length: 255 }).notNull(),
   created_at: int('created_at').notNull(),
 })
+
+export const userWechatBindings = mysqlTable('user_wechat_bindings', {
+  id: varchar('id', { length: 255 }).primaryKey(),
+  user_id: varchar('user_id', { length: 255 }).notNull().unique(),
+  bot_token: text('bot_token').notNull(),
+  ilink_user_id: varchar('ilink_user_id', { length: 255 }).notNull().default(''),
+  wechat_user_id: varchar('wechat_user_id', { length: 255 }).notNull().default(''),
+  updates_buf: text('updates_buf').notNull(),
+  last_poll_at: int('last_poll_at').notNull().default(0),
+  pending_conv_id: varchar('pending_conv_id', { length: 36 }).notNull().default(''),
+  created_at: int('created_at').notNull(),
+})
+
+export const wechatSessions = mysqlTable('wechat_sessions', {
+  id: varchar('id', { length: 255 }).primaryKey(),
+  user_id: varchar('user_id', { length: 255 }).notNull(),
+  wechat_sender_id: varchar('wechat_sender_id', { length: 255 }).notNull(),
+  conversation_id: varchar('conversation_id', { length: 36 }).notNull(),
+  created_at: int('created_at').notNull(),
+})

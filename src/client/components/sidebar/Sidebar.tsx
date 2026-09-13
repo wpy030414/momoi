@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
-import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench } from 'lucide-react'
+import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone } from 'lucide-react'
 import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation } from '@/shared/types'
@@ -18,6 +18,7 @@ interface SidebarProps {
   onDelete: (id: string) => void
   onExport: (id: string) => void
   onManageGroupAgents?: (convId: string) => void
+  onContinueOnWechat?: (convId: string) => void
   appName: string
   currentUser: string
   showGithub?: boolean
@@ -37,7 +38,7 @@ interface MenuState {
   anchorRect: DOMRect
 }
 
-export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onManageGroupAgents, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings }: SidebarProps) {
+export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onManageGroupAgents, onContinueOnWechat, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings }: SidebarProps) {
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -239,6 +240,15 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
             left: Math.max(8, menu.anchorRect.right - 160),
           }}
         >
+          {(conversations.find((c) => c.id === menu.convId) as any)?.type === 'direct' && onContinueOnWechat && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+              onClick={() => { onContinueOnWechat(menu.convId); closeMenu() }}
+            >
+              <Smartphone className="h-3.5 w-3.5" />
+              {t('sidebar.continueOnWechat')}
+            </button>
+          )}
           <button
             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
             onClick={() => {

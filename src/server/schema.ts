@@ -74,3 +74,23 @@ export const userOauthBindings = sqliteTable('user_oauth_bindings', {
   provider_user_id: text('provider_user_id').notNull(),
   created_at: integer('created_at').notNull(),
 })
+
+export const userWechatBindings = sqliteTable('user_wechat_bindings', {
+  id: text('id').primaryKey(),
+  user_id: text('user_id').notNull().unique(),
+  bot_token: text('bot_token').notNull(),
+  ilink_user_id: text('ilink_user_id').notNull().default(''),
+  wechat_user_id: text('wechat_user_id').notNull().default(''),
+  updates_buf: text('updates_buf').notNull().default(''),
+  last_poll_at: integer('last_poll_at').notNull().default(0),
+  pending_conv_id: text('pending_conv_id').notNull().default(''),
+  created_at: integer('created_at').notNull(),
+})
+
+export const wechatSessions = sqliteTable('wechat_sessions', {
+  id: text('id').primaryKey(),
+  user_id: text('user_id').notNull(),
+  wechat_sender_id: text('wechat_sender_id').notNull(),
+  conversation_id: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  created_at: integer('created_at').notNull(),
+})

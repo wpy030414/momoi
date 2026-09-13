@@ -102,6 +102,27 @@ const MIGRATION_SQL = `
     provider_user_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     UNIQUE(provider_id, provider_user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS user_wechat_bindings (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL UNIQUE,
+    bot_token TEXT NOT NULL,
+    ilink_user_id TEXT NOT NULL DEFAULT '',
+    wechat_user_id TEXT NOT NULL DEFAULT '',
+    updates_buf TEXT NOT NULL DEFAULT '',
+    last_poll_at INTEGER NOT NULL DEFAULT 0,
+    pending_conv_id TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS wechat_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    wechat_sender_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    UNIQUE(user_id, wechat_sender_id)
   );`
 
 // ---- SQLite (sql.js) local mode ----
@@ -262,6 +283,27 @@ async function initPg(dbUrl: string, user: string, password: string) {
       UNIQUE(provider_id, provider_user_id)
     );
 
+    CREATE TABLE IF NOT EXISTS user_wechat_bindings (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL UNIQUE,
+      bot_token TEXT NOT NULL,
+	      ilink_user_id TEXT NOT NULL DEFAULT '',
+      wechat_user_id TEXT NOT NULL DEFAULT '',
+      updates_buf TEXT NOT NULL DEFAULT '',
+      last_poll_at INTEGER NOT NULL DEFAULT 0,
+      pending_conv_id TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS wechat_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      wechat_sender_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      UNIQUE(user_id, wechat_sender_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
     CREATE INDEX IF NOT EXISTS idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
@@ -370,6 +412,27 @@ async function initMysql(dbUrl: string, user: string, password: string) {
         UNIQUE KEY uq_provider_user (provider_id, provider_user_id)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+      CREATE TABLE IF NOT EXISTS user_wechat_bindings (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL UNIQUE,
+        bot_token TEXT NOT NULL,
+	        ilink_user_id VARCHAR(255) NOT NULL DEFAULT '',
+        wechat_user_id VARCHAR(255) NOT NULL DEFAULT '',
+        updates_buf TEXT NOT NULL,
+        last_poll_at INT NOT NULL DEFAULT 0,
+        pending_conv_id VARCHAR(36) NOT NULL DEFAULT '',
+        created_at INT NOT NULL
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+      CREATE TABLE IF NOT EXISTS wechat_sessions (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        wechat_sender_id VARCHAR(255) NOT NULL,
+        conversation_id VARCHAR(36) NOT NULL,
+        created_at INT NOT NULL,
+        UNIQUE KEY uq_wechat_session (user_id, wechat_sender_id)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
       -- Additive column migrations for existing MySQL databases (IF NOT EXISTS avoids errors)
       SET @stmt = (SELECT IF(
         (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'agents' AND COLUMN_NAME = 'voice_enabled' AND TABLE_SCHEMA = DATABASE()) = 0,
@@ -408,4 +471,6 @@ export const {
   mcpServers,
   users,
   userOauthBindings,
+  userWechatBindings,
+  wechatSessions,
 } = result.schema

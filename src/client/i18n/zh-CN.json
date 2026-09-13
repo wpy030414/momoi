@@ -62,7 +62,8 @@
     "saveAsMd": "另存为 Markdown",
     "delete": "删除",
     "deleteConfirm": "确定要删除会话「{{name}}」吗？此操作不可撤销。",
-    "groupMembers": "群成员"
+    "groupMembers": "群成员",
+    "continueOnWechat": "在微信上继续"
   },
   "menu": {
     "logout": "退出登录",
@@ -246,6 +247,19 @@
     "noBindings": "暂无关联账户",
     "chooseProvider": "选择供应商",
     "cannotRemoveLast": "无法移除唯一的登录方式，请先设置 PIN 或关联其他账户"
+  },
+  "wechatBind": {
+    "title": "绑定微信",
+    "description": "扫描二维码以在微信上继续对话",
+    "scanning": "等待扫码...",
+    "expired": "二维码已过期",
+    "retry": "重新生成",
+    "success": "绑定成功",
+    "successDesc": "你已成功绑定微信，现在可以在微信上继续对话了。",
+    "alreadyBound": "已绑定微信",
+    "alreadyBoundDesc": "你的账号已绑定微信",
+    "unbind": "解除绑定",
+    "unbindConfirm": "确定要解除微信绑定吗？"
   },
   "oauthRegister": {
     "title": "完成注册",

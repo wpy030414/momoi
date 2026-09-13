@@ -20,7 +20,9 @@ import { groupRoute } from './routes/group.js'
 import { oauthRoute } from './routes/oauth.js'
 import { assetsRoute } from './routes/assets.js'
 import { voiceRoute } from './routes/voice.js'
+import { wechatRoute } from './routes/wechat.js'
 import { serveClient } from './static.js'
+import { startWechatPoller } from './wechat/poller.js'
 
 const app = new Hono()
 
@@ -44,6 +46,7 @@ app.route('/api/group', groupRoute)
 app.route('/api/oauth', oauthRoute)
 app.route('/api/assets', assetsRoute)
 app.route('/api/voice', voiceRoute)
+app.route('/api/wechat', wechatRoute)
 
 // Static files — production only (dev mode uses Vite proxy)
 if (process.env.NODE_ENV === 'production') {
@@ -56,6 +59,9 @@ serve({
   port: env.PORT,
   hostname: '0.0.0.0',
 })
+
+// Start WeChat message poller (non-blocking, timer-based)
+startWechatPoller()
 
 // Banner — use visual-width-aware padding so CJK characters align properly in terminal
 const visualWidth = (s: string): number => {
