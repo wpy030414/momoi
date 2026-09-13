@@ -154,5 +154,6 @@ export function useGroupChat() {
     addAgentToGroup,
     removeAgentFromGroup,
     sendGroupMessage,
+    refreshGroupAgents,
   }
 }

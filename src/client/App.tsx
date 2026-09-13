@@ -728,6 +728,9 @@ export function App() {
                   // Batch add/remove
                   for (const id of toAdd) await chat.addAgentToGroup(id)
                   for (const id of toRemove) await chat.removeAgentFromGroup(id)
+                  // Re-fetch authoritative agent list from server so the @mention
+                  // popup and sidebar counts immediately reflect the change
+                  await chat.refreshGroupAgents()
                   setGroupManageOpen(false)
                   setGroupManageConvId(null)
                   setSelectedGroupAgents([])

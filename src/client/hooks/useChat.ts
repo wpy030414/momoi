@@ -608,14 +608,26 @@ export function useChat() {
     }
   }, [])
 
-  const createConversation = useCallback(() => {
-    setActiveId(null)
-    setMessages([])
-    // Clear hash
-    if (window.location.hash) {
-      history.replaceState(null, '', window.location.pathname + window.location.search)
+  const createConversation = useCallback(async () => {
+    try {
+      // Pre-create on server so sidebar shows the record immediately (like group chat)
+      const { conversation } = await api.createConversation()
+      setActiveId(conversation.id)
+      setMessages([])
+      const newHash = `#/c/${encodeURIComponent(conversation.id)}`
+      if (window.location.hash !== newHash) {
+        history.pushState(null, '', newHash)
+      }
+      refreshConversations()
+    } catch {
+      // Fallback: clear state (server creation failed, will be created on first message)
+      setActiveId(null)
+      setMessages([])
+      if (window.location.hash) {
+        history.replaceState(null, '', window.location.pathname + window.location.search)
+      }
     }
-  }, [])
+  }, [refreshConversations])
 
   const deleteConversation = useCallback(async (id: string) => {
     try {
