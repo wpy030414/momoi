@@ -213,7 +213,7 @@ export function ChatPanel({
                 supportAttachments={supportAttachments}
                 supportInfiniteMode={supportInfiniteMode}
                 noAgents={noAgents}
-                agents={agents}
+                agents={isGroup ? groupAgents : undefined}
                 conversationId={conversationId}
                 onEnsureConversation={onEnsureConversation}
               />
@@ -278,7 +278,7 @@ export function ChatPanel({
             supportAttachments={supportAttachments}
             supportInfiniteMode={supportInfiniteMode}
             noAgents={noAgents}
-            agents={agents}
+            agents={isGroup ? groupAgents : undefined}
             conversationId={conversationId}
             onEnsureConversation={onEnsureConversation}
           />

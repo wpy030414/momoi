@@ -16,11 +16,6 @@ interface AgentBrief {
   avatar: string
 }
 
-interface MentionEntry {
-  agentId: string
-  agentName: string
-}
-
 interface InputBarProps {
   onSend: (text: string, attachments?: Attachment[]) => void
   disabled?: boolean
@@ -35,7 +30,7 @@ interface InputBarProps {
   supportInfiniteMode?: boolean
   /** Whether to show the "no agents" disabled state */
   noAgents?: boolean
-  /** Available agents for @mention autocomplete */
+  /** Available agents for @mention autocomplete (group chat members only; undefined hides the menu) */
   agents?: AgentBrief[]
   /** Current conversation id; null when no active conversation */
   conversationId?: string | null
@@ -71,27 +66,26 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
   const menuRef = useRef<HTMLDivElement>(null)
 
   // --- @Mention state ---
-  const [mentions, setMentions] = useState<MentionEntry[]>([])
   const [mentionOpen, setMentionOpen] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
   const [mentionIndex, setMentionIndex] = useState(1)
-  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null)
+  const [menuPosition, setMenuPosition] = useState<{ bottom: number; left: number } | null>(null)
 
   const isInputDisabled = disabled || noAgents
 
   // Filtered agents based on current query
   const filteredAgents = (agents || []).filter((a) =>
     a.name.toLowerCase().includes(mentionQuery.toLowerCase())
-    && !mentions.some((m) => m.agentId === a.id) // Dedup
   )
 
-  // Update menu position relative to the container
+  // Position the menu fully ABOVE the input box (anchored by its bottom edge),
+  // so it never covers the text being typed.
   const updateMenuPosition = useCallback(() => {
     if (!containerRef.current) return
     const rect = containerRef.current.getBoundingClientRect()
     setMenuPosition({
-      top: rect.top - 8,
-      left: rect.left,
+      bottom: window.innerHeight - rect.top + 8,
+      left: rect.left + 16,
     })
   }, [])
 
@@ -113,41 +107,34 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
     const cursorPos = textareaRef.current?.selectionStart ?? text.length
     const detection = detectMention(text, cursorPos)
     if (!detection) return
-    // Remove @query from textarea
+    // Replace the "@query" fragment in place with the finalized "@Name " text
     const before = text.slice(0, detection.start)
     const after = text.slice(cursorPos)
-    setText(before + after)
-    setMentions((prev) => [...prev, { agentId: agent.id, agentName: agent.name }])
+    const inserted = `@${agent.name} `
+    const newText = before + inserted + after
+    setText(newText)
     setMentionOpen(false)
     setMentionQuery('')
-    // Restore cursor position after the removed text
     requestAnimationFrame(() => {
       if (textareaRef.current) {
-        const newPos = detection.start
+        const newPos = detection.start + inserted.length
         textareaRef.current.focus()
         textareaRef.current.setSelectionRange(newPos, newPos)
+        // Re-run auto-grow since programmatic setText skips onInput
+        textareaRef.current.style.height = 'auto'
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
       }
     })
   }, [text])
 
-  const removeMention = (index: number) => {
-    setMentions((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  const hasContent = text.trim().length > 0 || attachments.length > 0 || mentions.length > 0
+  const hasContent = text.trim().length > 0 || attachments.length > 0
 
   const handleSend = () => {
     const trimmed = text.trim()
-    if ((!trimmed && attachments.length === 0 && mentions.length === 0) || isInputDisabled || uploading) return
-    // Append @mentions as text suffix
-    const mentionSuffix = mentions.length > 0
-      ? (trimmed ? '\n\n' : '') + mentions.map((m) => `@${m.agentName}`).join(' ')
-      : ''
-    const fullText = trimmed + mentionSuffix
-    onSend(fullText || '', attachments.length > 0 ? attachments : undefined)
+    if ((!trimmed && attachments.length === 0) || isInputDisabled || uploading) return
+    onSend(trimmed, attachments.length > 0 ? attachments : undefined)
     setText('')
     setAttachments([])
-    setMentions([])
     setMentionOpen(false)
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -309,20 +296,6 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
           </div>
         )}
 
-        {/* Mention chips */}
-        {mentions.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {mentions.map((m, idx) => (
-              <div key={m.agentId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-primary/10 text-primary text-xs border border-primary/20 max-w-[200px]">
-                <span className="truncate">@{m.agentName}</span>
-                <button onClick={() => removeMention(idx)} className="ml-0.5 hover:text-destructive flex-shrink-0">
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
         {uploadError && (
           <div className="flex items-start gap-1.5 mb-2 px-2 py-1.5 rounded-md bg-destructive/10 text-destructive text-xs">
             <span className="flex-1 break-words">{t('chat.uploadFailed', { message: uploadError })}</span>
@@ -401,7 +374,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
         <div
           ref={menuRef}
           className="fixed z-[9999] max-h-[200px] overflow-y-auto w-56 rounded-md border bg-popover p-1 shadow-md animate-in fade-in-0 zoom-in-95"
-          style={{ top: menuPosition.top, left: menuPosition.left }}
+          style={{ bottom: menuPosition.bottom, left: menuPosition.left }}
         >
           {filteredAgents.map((agent, idx) => (
             <button
