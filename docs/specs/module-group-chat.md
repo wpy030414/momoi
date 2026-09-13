@@ -219,13 +219,14 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
 
 ### 追问生成（`generateNeutralFollowUp`）
 
-- 中立 Agent 系统提示词：以用户口吻生成自然追问
-- 输入：最近 20 条消息的上下文（含 Agent 名字，非 UUID）
+- 中立 Agent 身份锚定：**用户代笔**（非「中立观察者」）——系统提示词声明唯一身份是「用户本人」，并附禁止性铁律（绝不模仿任何 Agent 的语气/口癖、绝不替 Agent 编台词、绝不当旁观叙述者），防止读完强人设 Agent 台词后滑向角色扮演腔
+- 输入：最近 20 条消息的上下文（含 Agent 名字，非 UUID），以定界符（`【对话记录开始】/【对话记录结束】`）包裹为数据，附行格式图例（「用户:」= 用户本人、「[名字]:」= AI 角色），以「现在轮到用户发言」锚点收尾
 - 追问形式：问题、反问、动作描述（如「（托腮思考了一会儿）」）
 - 如果对话已自然结束，输出「（继续）」
 - 追问通过 `follow_up` SSE 事件下发
 - 追问内容以 `role: 'user'` 存入 DB，作为下一轮对话的用户消息
-- 支持额外系统提示词注入（从 `neutralAgent.system_prompt` 读取）
+- 输出防御性清理：剥离「用户：」标签前缀与包裹引号
+- 支持额外系统提示词注入（从 `neutralAgent.system_prompt` 读取，追加在铁律之后）
 
 ### 循环控制
 

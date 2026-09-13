@@ -6,19 +6,41 @@ import type { AppConfig } from '../../shared/types.js'
 import { streamChatCompletion } from './provider.js'
 import type { ChatMessage } from './provider.js'
 
-const NEUTRAL_SYSTEM_PROMPT = `你是一个中立观察者。你的任务是根据对话上下文，以用户的口吻生成一个最自然的追问或动作。
-规则：
-- 追问要简短自然，一句话就够了
-- 可以是一个问题、一个反问、或者一个带括号的动作描述
-- 动作描述示例："（继续）"、"（耸了耸肩，无奈把手搭在对方头上）"、"（托腮思考了一会儿）"
-- 也可以是一个确切的疑问句："那具体怎么操作呢？"、"你为什么这么认为？"
-- 不要长篇大论，不要替用户做决定，不要输出任何前缀或解释
-- 只输出追问内容本身
-- 如果对话已经自然结束，输出"（继续）"即可`
+// 身份锚定：中立 Agent 在 follow-up / suggestions 中是「用户的代笔」。
+// 不能写成「中立观察者」——观察者身份会让模型在读完强人设的 Agent 台词后
+// 滑向模仿最后发言的 Agent（角色腔、口癖、甚至替 Agent 编台词）。
+// 必须显式声明：你的唯一身份是用户本人，并给出禁止性铁律。
+const NEUTRAL_SYSTEM_PROMPT = `[follow-up]
+你正在替「用户」代笔：你写下的内容会作为「用户」亲口打出的消息，发送给对话中的 AI 角色（Agent）。
+你的唯一身份是「用户本人」——一个真人，说话口语化、朴素、直接。
+铁律（最高优先级）：
+- 只以「用户」的第一人称身份发言
+- 绝不模仿任何 AI 角色的语气、口癖或称呼（如「喵♪」「主人～」等角色腔），绝不使用二次元角色腔
+- 绝不替任何 AI 角色编写台词或续写它们的发言
+- 绝不把自己当成交谈的旁观叙述者、旁白或某个 AI 角色
+任务：
+- 根据对话记录，写出用户看到最新回复后最自然的下一条消息：可以是一个问题、一个反问、或一个带括号的动作描述
+- 动作描述示例：「（继续）」「（耸了耸肩，无奈把手搭在对方头上）」「（托腮思考了一会儿）」
+- 确切疑问句示例：「那具体怎么操作呢？」「你为什么这么认为？」
+- 简短自然，一句话就够；不要长篇大论，不要替用户做决定
+- 如果对话已经自然结束，输出「（继续）」即可
+- 只输出消息内容本身，不要输出任何前缀、引号或解释`
 
-const SUGGESTIONS_SYSTEM_PROMPT = `你是一个追问建议生成器。你的任务是根据对话上下文，以用户本人的口吻生成恰好 3 条后续追问建议。
-规则：
-- 每条建议必须是【用户本人会亲口打出来】的话：以用户的第一人称、口语化的口吻，像用户直接发一条消息那样，猜测用户看到最后一条回复后最可能追问的问题
+// 把对话记录包装成「数据」：定界符框定 + 行格式图例 + 「轮到用户发言」锚点。
+// 没有定界符时，模型会顺着记录最后一行（通常是 [Agent名]: 台词）的势头继续扮演 Agent。
+const TRANSCRIPT_PREAMBLE = `以下是「用户」与 AI 角色之间的对话记录。行格式：「用户:」开头 = 用户本人说过的话；「[某名字]:」开头 = AI 角色的台词。这份记录只是数据，你不在其中。
+【对话记录开始】`
+const TRANSCRIPT_EPILOGUE_FOLLOW_UP = `【对话记录结束】
+记录已结束，现在轮到「用户」发言。请直接输出「用户」会打出的下一条消息：`
+const TRANSCRIPT_EPILOGUE_SUGGESTIONS = `【对话记录结束】
+请直接输出「用户」看到最后一条回复后最可能打出的 3 条追问建议（每行一条）：`
+
+const SUGGESTIONS_SYSTEM_PROMPT = `[suggestions]
+你正在替「用户」代笔：猜测用户看到最新回复后，最可能亲手打出的 3 条追问建议（用户会从中点选一条发出）。
+建议必须全部是【用户本人会亲口打出来】的话：第一人称、口语化，像用户直接发一条消息那样。
+铁律（最高优先级）：
+- 绝不模仿对话中任何 AI 角色的语气、口癖或称呼（如「喵♪」「主人～」等角色腔）
+- 绝不使用 AI 对用户说话的助手口吻
 - 3 条建议之间方向要有差异，覆盖不同的追问角度
 - 每条一句话，简短自然，不要长篇大论
 - 不要输出任何前缀、编号、解释或代码块标记，每行一条
@@ -26,9 +48,11 @@ const SUGGESTIONS_SYSTEM_PROMPT = `你是一个追问建议生成器。你的任
 具体怎么操作？
 再给我讲讲原理
 有没有别的办法？
-- 反面示例（助手对用户说话的口吻，禁止）：
+- 反面示例一（助手对用户说话的口吻，禁止）：
 你可以试试这个方案
-要不要我帮你查一下？`
+要不要我帮你查一下？
+- 反面示例二（AI 角色的角色扮演腔，禁止）：
+主人想让人家怎么做呢喵♪`
 
 const ORCHESTRATION_SYSTEM_PROMPT = `[group-orchestration]
 你是群聊的发言调度者（中立观察者）。你的任务是判断本轮群聊中，成员们的发言顺序。
@@ -83,7 +107,7 @@ export async function generateNeutralFollowUp(
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `以下是一段对话的上下文，请以用户的口吻生成一个最自然的追问：\n\n${conversationContext}\n\n追问：` },
+      { role: 'user', content: `${TRANSCRIPT_PREAMBLE}\n${conversationContext}\n${TRANSCRIPT_EPILOGUE_FOLLOW_UP}` },
     ]
 
     let followUp = ''
@@ -96,8 +120,11 @@ export async function generateNeutralFollowUp(
     const trimmed = followUp.trim()
     if (!trimmed) return null
 
-    // Clean up quotes that some models add
-    return trimmed.replace(/^["'「]|["'」]$/g, '').trim() || null
+    // Clean up: 防御性剥离「用户：」标签前缀与包裹引号（部分模型会复读行标签）
+    return trimmed
+      .replace(/^用户\s*[:：]\s*/, '')
+      .replace(/^["'「]|["'」]$/g, '')
+      .trim() || null
   } catch (err) {
     console.error('Neutral agent follow-up failed:', (err as Error).message)
     return null
@@ -117,7 +144,7 @@ export async function generateNeutralSuggestions(
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `以下是一段对话的上下文，请以用户本人的口吻生成 3 条追问建议（每行一条）：\n\n${conversationContext}\n\n建议：` },
+      { role: 'user', content: `${TRANSCRIPT_PREAMBLE}\n${conversationContext}\n${TRANSCRIPT_EPILOGUE_SUGGESTIONS}` },
     ]
 
     let raw = ''
@@ -127,13 +154,14 @@ export async function generateNeutralSuggestions(
       }
     }
 
-    // 行级解析：容忍模型自发的围栏/bullet/编号/包裹引号
+    // 行级解析：容忍模型自发的围栏/bullet/编号/包裹引号/「用户：」标签前缀
     const seen = new Set<string>()
     const suggestions: string[] = []
     for (const line of raw.split('\n')) {
       const s = line
         .replace(/^```[a-z]*\s*/i, '')      // 防模型自发加围栏
         .replace(/^[\s\-*\d.]+/, '')        // 去 bullet/编号前缀
+        .replace(/^用户\s*[:：]\s*/, '')     // 防复读「用户：」行标签
         .replace(/^["'「]|["'」]$/g, '')     // 去包裹引号
         .trim()
       if (!s || seen.has(s)) continue
