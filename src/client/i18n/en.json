@@ -431,5 +431,12 @@
     "fallback": {
       "internalError": "Internal server error"
     }
+  },
+  "voice": {
+    "play": "Play voice",
+    "replay": "Replay",
+    "loading": "Loading...",
+    "pause": "Pause",
+    "resume": "Resume"
   }
 }

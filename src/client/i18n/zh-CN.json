@@ -431,5 +431,12 @@
     "fallback": {
       "internalError": "内部服务器错误"
     }
+  },
+  "voice": {
+    "play": "播放语音",
+    "replay": "重新播放",
+    "loading": "加载中...",
+    "pause": "暂停",
+    "resume": "继续"
   }
 }

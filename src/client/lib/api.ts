@@ -191,4 +191,15 @@ export const api = {
       return res.json() as Promise<{ success: boolean; skills: import('@/shared/types').InstalledSkill[] }>
     })
   },
+
+  // Voice
+  getVoiceSegments: (agentId: string, messageId: number) =>
+    request<{ segments: import('@/shared/types').VoiceAudioSegment[]; complete: boolean }>(
+      '/api/voice/segments', { method: 'POST', body: JSON.stringify({ agent_id: agentId, message_id: messageId }) }
+    ),
+
+  // Admin - TTS
+  getTtsConfig: () => request<{ endpoint: string; provider: string }>('/api/admin/tts/config'),
+  updateTtsConfig: (cfg: { endpoint?: string; provider?: string }) =>
+    request<{ endpoint: string; provider: string }>('/api/admin/tts/config', { method: 'PUT', body: JSON.stringify(cfg) }),
 }
