@@ -7,6 +7,7 @@ import { db, conversations, groupConversationAgents, agents } from '../db.js'
 import { eq, and, sql, ne } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
+import { broadcastGroupMembers } from '../realtime.js'
 
 function getUserId(c: any): string {
   return c.get('userId') || ''
@@ -84,6 +85,9 @@ groupRoute.post('/:id/agents', async (c) => {
     sort_order: maxOrder + 1,
   }).run()
 
+  // 群成员变更 —— 同账号其他设备实时刷新成员列表与侧边栏人数
+  broadcastGroupMembers(userId, convId)
+
   return c.json({ success: true })
 })
 
@@ -108,6 +112,9 @@ groupRoute.delete('/:id/agents/:agentId', async (c) => {
       eq(groupConversationAgents.agent_id, agentId),
     ))
     .run()
+
+  // 群成员变更 —— 同账号其他设备实时刷新成员列表与侧边栏人数
+  broadcastGroupMembers(userId, convId)
 
   return c.json({ success: true })
 })

@@ -7,7 +7,6 @@ import { useState, useCallback, useEffect } from 'react'
 import { useChat } from './useChat'
 import { api } from '../lib/api'
 import type { Conversation } from '@/shared/types'
-
 interface AgentBrief {
   id: string
   name: string
@@ -42,11 +41,14 @@ export function useGroupChat() {
           setGroupAgents([])
         }
       }).catch(console.error)
+    } else if (chat.draftType === 'group') {
+      // 群聊草稿态（activeId 为 null）：保持群聊模式与已选成员，等待首条消息
+      setIsGroupMode(true)
     } else {
       setIsGroupMode(false)
       setGroupAgents([])
     }
-  }, [chat.activeId])
+  }, [chat.activeId, chat.draftType])
 
   // Override selectConversation to set group mode BEFORE messages are rendered
   const selectConversation = useCallback(async (id: string) => {
@@ -69,32 +71,22 @@ export function useGroupChat() {
     await chat.selectConversation(id)
   }, [chat])
 
-  // Create a new group conversation
+  // Create a new group conversation (draft — record created on first message)
   const createGroupConversation = useCallback(async (agentIds: string[]) => {
     try {
-      const res = await api.createGroupConversation(agentIds)
-      const conv = res.conversation
-      setIsGroupMode(true)
       // Load the agents we just added
       const agentBriefs = agentIds
         .map((id) => allAgents.find((a) => a.id === id))
         .filter((a): a is AgentBrief => !!a)
       setGroupAgents(agentBriefs)
-      // Push hash and set active
-      const newHash = `#/c/${encodeURIComponent(conv.id)}`
-      if (window.location.hash !== newHash) {
-        history.pushState(null, '', newHash)
-      }
-      // Use the selectConversation to load the new conversation
-      chat.selectConversation(conv.id)
-      // Refresh sidebar to show the new conversation immediately
-      chat.refreshConversations()
-      return conv
+      // 进入群聊草稿态：不落库，选好 Agent 后即就位，首条消息发出时由服务端建会
+      chat.startGroupDraft()
+      return null
     } catch (err) {
       console.error('Failed to create group conversation:', err)
       return null
     }
-  }, [allAgents, chat.selectConversation])
+  }, [allAgents, chat.startGroupDraft])
 
   // Add an agent to the current group conversation
   const addAgentToGroup = useCallback(async (agentId: string) => {
@@ -149,6 +141,18 @@ export function useGroupChat() {
       console.error('Failed to refresh group agents:', err)
     }
   }, [chat.activeId])
+
+  // Realtime: 其他设备改动了群成员 —— 若正在查看该群，刷新成员列表
+  useEffect(() => {
+    const onGroupMembers = (e: Event) => {
+      const convId = (e as CustomEvent).detail?.conversation_id as string | undefined
+      if (convId && chat.activeId === convId) {
+        refreshGroupAgents()
+      }
+    }
+    window.addEventListener('realtime:group_members', onGroupMembers)
+    return () => window.removeEventListener('realtime:group_members', onGroupMembers)
+  }, [chat.activeId, refreshGroupAgents])
 
   return {
     ...chat,

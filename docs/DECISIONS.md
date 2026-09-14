@@ -721,3 +721,39 @@
 - 客户端删除 `getToken`/`setToken` 与全部手动 Authorization 附加点（`request()`、SSE fetch、上传、附件下载）；`LoginScreen.onLogin` 签名变为 `(username, expiresAt)`
 - 所有 auth 相关 spec 文档中 Bearer/回退/迁移期 表述同步清除
 - D32 的续期机制不变，仅传输载体从 Bearer 变为 Cookie 且不可逆
+
+---
+
+## D34：新会话草稿态 + 多设备实时同步（SSE 事件通道）
+
+**日期**：2026-09
+
+**背景**：① 点击「新会话」/「新群聊」即调用 `POST /api/conversations` 预建记录，导致侧边栏出现空会话；② 同账号多设备登录时，A 设备对话 B 设备必须手动刷新才能看到进展。
+
+**决策**：
+
+1. **新会话改为草稿态，不落库**：`createConversation`（单聊）与 `createGroupConversation`（群聊）只进入本地草稿态（`draftType: 'direct' | 'group'`，`activeId` 为 null），不调建会接口、不写 DB。会话记录在**发出第一条消息**时由 `POST /api/chat` 服务端创建（无 `conversation_id` 分支已存在），收到 `conversation_id` SSE 事件后清除草稿态。群聊选好 Agent 后侧边栏不再自动收回。
+2. **多设备实时同步走 SSE 事件通道**：新增 `GET /api/events?device_id=xxx`（SSE 长连接，`userAuthMiddleware` 认证，15s 心跳），服务端进程内事件总线（`Map<userId, Set<subscriber>>`）把以下事件实时推送给同账号其他设备：
+   - `stream`：聊天流中继（`user_message` / `token` / `thinking` / `tool_call` / `agent_start` / `done` / `suggestions` / `voice_segment` 等），跳过发起方 `device_id`
+   - `conv_sync`：会话列表变更（新建/删除/重命名/群成员数）
+   - `conv_changed`：回退消息 → 正在查看该会话的设备整条重拉
+   - `group_members`：群成员变更
+3. **设备标识**：客户端在 `localStorage` 持久化随机 `momoi_device_id`，`POST /api/chat` 携带 `device_id` 供服务端跳过对源设备的中继；`GET /api/events` 用它维护每设备唯一长连接。
+
+**原因**：
+- 草稿态契合「没有对话就没有记录」的心智模型（类 ChatGPT 未发送草稿），侧边栏保持干净；服务端 `POST /api/chat` 的「无 `conversation_id` 即建会」分支已存在，改动集中在客户端
+- 多设备同步需求是**服务端单向推送**（A 设备产生、B 设备消费），SSE 是标准 HTTP、兼容代理/CDN，与既有 D1 架构决策一致；WebSocket 被 AGENTS.md 列为非目标
+- 进程内事件总线对单实例部署足够简单；多实例需 Redis pub/sub（列为已知边界）
+
+**备选与权衡**：
+- ❌ 多设备改用 WebSocket：被项目非目标排除（D1 已迁移到 SSE）；且本场景是单向推送，双向能力用不上
+- ❌ 客户端定时轮询：实时性差（思考中/流式内容要求亚秒级）、浪费请求
+- ❌ 草稿态仍预建会但延迟删除空会话：逻辑复杂、易残留脏数据；直接不建更干净
+- ⚠️ 上传附件例外：草稿态上传需要真实会话 ID（workspace 落盘），经 `ensureConversation` 按草稿类型预建真实会话（技术必要，可接受的边缘行为）
+- ⚠️ 同一浏览器多标签页共享 `device_id`：后开标签页会顶掉先开的订阅（避免事件双发）；用户需求是多设备同步，多标签页场景不额外引入 BroadcastChannel
+- ⚠️ 仅限单实例部署：多实例/横向扩容需替换为 Redis pub/sub
+
+**影响**：
+- 新增 `src/server/realtime.ts`（内存事件总线）与 `src/server/routes/events.ts`（SSE 通道路由）；`chat.ts` / `conversations.ts` / `group.ts` 在关键写路径广播事件
+- `useChat.ts` 新增草稿态、`device_id` 携带、实时订阅与中继事件应用；`useGroupChat.ts` 群聊草稿化 + 实时群成员刷新；`api.ts` 新增设备 ID 与实时连接管理
+- `shared/types.ts` 新增 `RealtimeEvent` 与 `user_message` 事件；`module-chat.md` spec 同步更新

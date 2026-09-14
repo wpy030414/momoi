@@ -127,10 +127,18 @@ export function App() {
   // Ensure a conversation exists for file upload — create one lazily if needed
   const ensureConversation = useCallback(async (): Promise<string> => {
     if (chat.activeId) return chat.activeId
+    // 草稿态（尚未发出首条消息）：上传附件需要真实会话 ID（workspace 落盘）。
+    // 按当前草稿类型创建对应会话 —— 群聊草稿带 agent_ids，避免误建成单聊。
+    if (chat.draftType === 'group') {
+      const agentIds = chat.groupAgents.map((a: { id: string }) => a.id)
+      const { conversation } = await api.createGroupConversation(agentIds)
+      await chat.selectConversation(conversation.id)
+      return conversation.id
+    }
     const { conversation } = await api.createConversation()
     await chat.selectConversation(conversation.id)
     return conversation.id
-  }, [chat.activeId, chat.selectConversation])
+  }, [chat.activeId, chat.draftType, chat.groupAgents, chat.selectConversation])
 
   // When admin disables support_infinite_mode, force-disable any active infinite loop
   useEffect(() => {
@@ -694,9 +702,9 @@ export function App() {
                 onClick={async () => {
                   if (selectedGroupAgents.length >= 2) {
                     setGroupDialogOpen(false)
-                    const conv = await chat.createGroupConversation(selectedGroupAgents)
+                    await chat.createGroupConversation(selectedGroupAgents)
                     setSelectedGroupAgents([])
-                    setSidebarOpen(false) // Close sidebar on mobile
+                    // 侧边栏不自动收回：选好 Agent 后停留在群聊新会话视图
                   }
                 }}
               >

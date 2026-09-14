@@ -21,6 +21,7 @@ import { oauthRoute } from './routes/oauth.js'
 import { assetsRoute } from './routes/assets.js'
 import { voiceRoute } from './routes/voice.js'
 import { wechatRoute } from './routes/wechat.js'
+import { eventsRoute } from './routes/events.js'
 import { serveClient } from './static.js'
 import { startWechatPoller } from './wechat/poller.js'
 
@@ -47,6 +48,7 @@ app.route('/api/oauth', oauthRoute)
 app.route('/api/assets', assetsRoute)
 app.route('/api/voice', voiceRoute)
 app.route('/api/wechat', wechatRoute)
+app.route('/api/events', eventsRoute)
 
 // Static files — production only (dev mode uses Vite proxy)
 if (process.env.NODE_ENV === 'production') {

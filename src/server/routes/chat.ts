@@ -17,6 +17,7 @@ import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { SandboxFS } from '../tools/workspace.js'
 import { synthesizeAndSave, markVoiceComplete, createTtsProvider } from '../ai/tts.js'
+import { broadcastStream, broadcastConversationSync } from '../realtime.js'
 
 export const chatRoute = new Hono()
 
@@ -92,8 +93,8 @@ chatRoute.post('/', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group'; agent_ids?: string[]; infinite_mode?: boolean; language?: string }>()
-  const { message, conversation_id, _retry, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language } = body
+  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string }>()
+  const { message, conversation_id, _retry, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id } = body
   const requestedAgentId = body.agent_id
   // 本轮实际采用的 Agent：新建会话取请求 agent_id；已有单聊会话锚定到
   // conversations.agent_id（见下方归属校验分支）。
@@ -108,8 +109,19 @@ chatRoute.post('/', async (c) => {
     // Hono 的 writeSSE 是异步的；串行化写入并跟踪 pending 写入，
     // 防止流关闭时尾部事件（agent_done / group_done）未 flush 被丢弃。
     let writeChain: Promise<void> = Promise.resolve()
+    // 已确认的会话 ID：conversation_id 事件到达后，向同账号其他设备实时
+    // 中继本轮流事件（源设备跳过，直接消费 fetch 流）。
+    let streamConvId: string | null = null
     const send = (msg: ServerMessage) => {
       if (aborted) return
+      // 实时中继：仅转发对渲染有意义的流事件，跳过仅在源设备本地生效的
+      // conversation_id / user_message_id（其他设备以整条会话刷新兜底对齐）。
+      if (streamConvId && msg.type !== 'conversation_id' && msg.type !== 'user_message_id') {
+        broadcastStream(userId, device_id || '', {
+          conversation_id: streamConvId,
+          event: msg,
+        })
+      }
       writeChain = writeChain
         .then(() => stream.writeSSE({ data: JSON.stringify(msg), event: 'message' }))
         .catch((err) => {
@@ -148,6 +160,9 @@ chatRoute.post('/', async (c) => {
           type: isGroup ? 'group' : 'direct',
           created_at: now, updated_at: now,
         }).run()
+
+        // 新会话由「首条消息」创建 —— 同账号其他设备侧边栏需实时出现该记录
+        broadcastConversationSync(userId)
 
         // Insert group agent associations
         if (isGroup && groupAgentIds.length > 0) {
@@ -195,6 +210,12 @@ chatRoute.post('/', async (c) => {
         if (userMsgId > 0) {
           send({ type: 'user_message_id', id: userMsgId })
         }
+        // 实时中继：他设备需要用户消息内容来渲染用户气泡（源设备本地已有，跳过）
+        streamConvId = convId
+        broadcastStream(userId, device_id || '', {
+          conversation_id: convId,
+          event: { type: 'user_message', id: userMsgId, content: message, attachments },
+        })
       }
       await db.update(conversations).set({ updated_at: now }).where(eq(conversations.id, convId)).run()
 
@@ -217,6 +238,7 @@ chatRoute.post('/', async (c) => {
         }))
 
       // --- Tell client the conversation ID ---
+      streamConvId = convId
       send({ type: 'conversation_id', id: convId })
 
       // --- Parse attachments and build user message ---

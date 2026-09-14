@@ -4,6 +4,7 @@ import { eq, and, desc, gte, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
+import { broadcastConversationSync, broadcastConversationChanged } from '../realtime.js'
 
 function getUserId(c: any): string {
   return c.get('userId') || ''
@@ -102,6 +103,10 @@ conversationsRoute.post('/', async (c) => {
   }
 
   const conv = await db.select().from(conversations).where(eq(conversations.id, id)).get()
+
+  // 侧边栏新会话记录实时同步到同账号其他设备
+  broadcastConversationSync(userId)
+
   return c.json({ conversation: conv }, 201)
 })
 
@@ -116,6 +121,9 @@ conversationsRoute.delete('/:id', async (c) => {
     .set({ deleted_at: now, updated_at: now })
     .where(and(eq(conversations.id, id), eq(conversations.user_id, userId)))
     .run()
+
+  // 侧边栏删除记录实时同步到同账号其他设备
+  broadcastConversationSync(userId)
 
   return c.json({ success: true })
 })
@@ -135,6 +143,10 @@ conversationsRoute.patch('/:id', async (c) => {
   // else's conversation (the UPDATE above no-ops) still gets that conversation echoed.
   const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
+
+  // 重命名记录实时同步到同账号其他设备侧边栏
+  broadcastConversationSync(userId)
+
   return c.json({ conversation: conv })
 })
 
@@ -165,6 +177,10 @@ conversationsRoute.delete('/:id/messages/:messageId', async (c) => {
   // Update conversation timestamp
   const now = Math.floor(Date.now() / 1000)
   await db.update(conversations).set({ updated_at: now }).where(eq(conversations.id, convId)).run()
+
+  // 回退消息后，同账号其他设备若正在查看该会话需实时刷新消息列表
+  broadcastConversationChanged(userId, convId)
+  broadcastConversationSync(userId)
 
   return c.json({ success: true })
 })

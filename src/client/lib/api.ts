@@ -49,6 +49,116 @@ export function notifyAuthExpired(requestStartedAt: number) {
   window.dispatchEvent(new CustomEvent('auth:expired', { detail: { startedAt: requestStartedAt } }))
 }
 
+// ---- Device identity (for realtime multi-device sync) ----
+// 每个「标签页」一个稳定随机 ID（存 sessionStorage，标签页独立）：
+// - POST /api/chat 用它标记「来源」，服务端只跳过该标签页的中继，
+//   同一浏览器的其他标签页（不同 ID）也能实时收到 —— 修复多标签页
+//   顶掉问题（localStorage 会共享 deviceId，后开的标签页顶掉先开的订阅）
+// - GET /api/events 用它维护本标签页唯一长连接；刷新页面 sessionStorage
+//   保留同 ID，重连时服务端替换旧订阅，不双发
+let deviceId: string | null = null
+export function getDeviceId(): string {
+  if (deviceId) return deviceId
+  try {
+    deviceId = sessionStorage.getItem('momoi_device_id')
+  } catch { deviceId = null }
+  if (!deviceId) {
+    deviceId = `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    try { sessionStorage.setItem('momoi_device_id', deviceId) } catch { /* ignore */ }
+  }
+  return deviceId
+}
+
+// ---- Realtime 事件通道（SSE 长连接）----
+
+type RealtimeListener = (event: import('@/shared/types').RealtimeEvent) => void
+
+const realtimeListeners = new Set<RealtimeListener>()
+let realtimeSource: EventSource | null = null
+let realtimeSourceKey: string | null = null // `${username}:${deviceId}`
+let realtimeConnectedOnce = false // 本次连接是否已成功过一次（区分首次/重连）
+
+/**
+ * 建立（或复用）GET /api/events SSE 长连接，监听同账号其他设备推送的事件。
+ * 多标签页 / 多设备并发打开时，由 useChat 协调同一 (username, deviceId)
+ * 只建一条连接。返回取消监听函数（不影响其他监听者）。
+ */
+export function subscribeRealtime(listener: RealtimeListener): () => void {
+  realtimeListeners.add(listener)
+  return () => {
+    realtimeListeners.delete(listener)
+    if (realtimeListeners.size === 0) {
+      realtimeSource?.close()
+      realtimeSource = null
+      realtimeSourceKey = null
+      realtimeConnectedOnce = false
+    }
+  }
+}
+
+function ensureRealtimeSource(username: string) {
+  const key = `${username}:${getDeviceId()}`
+  if (realtimeSource && realtimeSourceKey === key) return
+  if (realtimeSource) realtimeSource.close()
+  // EventSource 默认携带 Cookie（HttpOnly JWT 认证）；X-User 头无法附加到
+  // EventSource，改走查询参数传递用户名（服务端仍以 Cookie JWT 为准校验）。
+  realtimeSource = new EventSource(`/api/events?device_id=${encodeURIComponent(getDeviceId())}&user=${encodeURIComponent(username)}`)
+  realtimeSourceKey = key
+  realtimeSource.onopen = () => {
+    if (realtimeConnectedOnce) {
+      // 断线重连成功：SSE 无历史重放，断线期间错过的事件需主动对账。
+      // 通知订阅者刷新会话列表与当前会话消息（避免「没立刻出现」）。
+      dispatchRealtime({ type: 'conv_sync' })
+      const m = window.location.hash.match(/^#\/c\/(.+)$/)
+      if (m) {
+        dispatchRealtime({ type: 'conv_changed', conversation_id: decodeURIComponent(m[1]) })
+      }
+    } else {
+      realtimeConnectedOnce = true
+    }
+  }
+  // 统一从默认 message 事件解析：data 已是完整 JSON（含 type），
+  // 不依赖自定义事件名（老内核 WebView 对 `event:` 字段支持不可靠）。
+  realtimeSource.onmessage = (e) => {
+    let payload: import('@/shared/types').RealtimeEvent
+    try {
+      payload = JSON.parse((e as MessageEvent).data) as import('@/shared/types').RealtimeEvent
+    } catch { return /* malformed */ }
+    dispatchRealtime(payload)
+  }
+  // 断线自动重连（EventSource 内建）；onerror 保持打开由浏览器按 retry 重连
+  realtimeSource.onerror = () => {
+    console.warn('[realtime] SSE error/closed, browser will auto-reconnect')
+  }
+}
+
+function dispatchRealtime(payload: import('@/shared/types').RealtimeEvent) {
+  for (const listener of [...realtimeListeners]) {
+    try { listener(payload) } catch (err) { console.error('Realtime listener error:', err) }
+  }
+}
+
+/** 供 useChat 挂载时按 (username, deviceId) 确保唯一长连接。 */
+export function connectRealtime(username: string) {
+  ensureRealtimeSource(username)
+}
+
+/** 供 useChat 卸载时清理监听（事件源保留给其他监听者）。 */
+export function disconnectRealtime() {
+  if (realtimeListeners.size > 0) return
+  realtimeSource?.close()
+  realtimeSource = null
+  realtimeSourceKey = null
+}
+
+export function getDeviceIdForRequest(): string | null {
+  try {
+    return typeof window !== 'undefined' ? getDeviceId() : null
+  } catch {
+    return null
+  }
+}
+
 // Endpoints where 401 means "wrong credentials", not "session expired" —
 // a wrong-PIN attempt must never trigger the expired-session logout path.
 const CREDENTIALS_ENDPOINTS = ['/api/user/verify', '/api/user/change-pin']

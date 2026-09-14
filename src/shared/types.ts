@@ -165,6 +165,8 @@ export type { ThinkingSegment } from './thinking.js'
 export type ServerMessage =
   | { type: 'conversation_id'; id: string }
   | { type: 'user_message_id'; id: number }
+  /** 实时中继专用：他设备渲染用户气泡（源设备本地已有，不重发） */
+  | { type: 'user_message'; id: number; content: string; attachments?: Attachment[] }
   | { type: 'token'; text: string; agent_id?: string; agent_name?: string }
   | { type: 'thinking'; text: string; round?: number; agent_id?: string; agent_name?: string }
   | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown>; agent_id?: string; agent_name?: string }
@@ -183,6 +185,15 @@ export type ServerMessage =
   | { type: 'error'; message: string; agent_id?: string; agent_name?: string }
   | { type: 'voice_segment'; message_id: number; index: number; audio_url: string; text: string; duration_seconds: number }
   | { type: 'voice_done'; message_id: number; total_segments: number }
+
+// ---- Realtime 事件通道（GET /api/events SSE）----
+
+/** 实时事件通道上推送的负载（event 字段见 ServerMessage，wrapper 附带会话 ID） */
+export type RealtimeEvent =
+  | { type: 'stream'; conversation_id: string; event: ServerMessage }
+  | { type: 'conv_sync' }
+  | { type: 'conv_changed'; conversation_id: string }
+  | { type: 'group_members'; conversation_id: string }
 
 // ---- Ask User Tool ----
 

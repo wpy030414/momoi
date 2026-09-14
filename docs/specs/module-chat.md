@@ -53,7 +53,9 @@
 
 | 事件 | 数据 | 说明 |
 |---|---|---|
-| `conversation_id` | `{ id: string }` | 对话 ID（新建或复用时都会发送） |
+| `conversation_id` | `{ id: string }` | 对话 ID（新建或复用时都会发送；首条消息创建会话时清除客户端草稿态） |
+| `user_message_id` | `{ id: number }` | 刚入库的用户消息 ID（回退按钮立即可用） |
+| `user_message` | `{ id: number, content: string, attachments? }` | **实时中继专用**：他设备渲染用户气泡（源设备本地已有，不重发） |
 | `token` | `{ text: string, agent_id?, agent_name? }` | 文本增量 token |
 | `thinking` | `{ text: string, round?: number, agent_id?, agent_name? }` | 思考过程增量 token；`round` 为分段轮号 |
 | `tool_call` | `{ id?: string, name: string, input: object, agent_id?, agent_name? }` | AI 发起工具调用 |
@@ -160,6 +162,15 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 11. **多轮思考分段渲染**：SSE `thinking` 事件带 `round` 字段时，前端按轮聚合为 `thinkingSegments`；历史消息通过 `decodeThinkingToSegments` 切分
 12. **消息渲染**：群聊按 `msg.agent_id` 显示各 Agent 头像和名称；单聊同样显示 Agent 名称（优先消息的 `agent_id`，回退当前会话的 Agent，再回退下拉选择）
 13. **会话归属同步**（App.tsx）：切进已有会话时把 Agent 下拉选择（`selectedAgentId`）同步为该会话归属的 Agent，防止全局下拉状态（后台增删 Agent 后列表刷新会重置为 `agents[0]`）与当前会话错位；服务端按 `conversations.agent_id` 的锚定为最终兜底
+14. **草稿会话（新机制）**：点击「新会话」/「新群聊」只进入**草稿态**（`draftType: 'direct' | 'group'`，`activeId` 为 null），**不落库、不建记录、不调 `POST /api/conversations`**。会话记录在**发出第一条消息**时由服务端在 `POST /api/chat` 内创建（无 `conversation_id` → 服务端建会，群聊按 `conversation_type: 'group'` + `agent_ids` 写关联表），收到 SSE `conversation_id` 事件后客户端清除草稿标记并写入 hash，侧边栏同步出现记录（无需刷新）。例外：草稿态上传附件经 `ensureConversation` 需要真实会话 ID（workspace 落盘），按当前草稿类型预建真实会话（技术必要）
+15. **多设备实时同步（新机制）**：客户端维护一条 `GET /api/events` SSE 长连接（同账号每设备一条，按 `localStorage` 持久化的 `momoi_device_id` 标识），接收：
+    - `stream` 事件：其他设备正在流式输出同一会话时，直接把中继的 `ServerMessage` 应用到本地消息列表（tokens / thinking / tool_call / agent_start / done / suggestions / voice_segment 等）；`user_message` 中继用于渲染他设备的用户气泡（单聊同时预建流式 assistant 气泡以承接后续 token）
+    - `conv_sync`：会话列表变更信号 → 刷新侧边栏（新建/删除/重命名/群成员数）
+    - `conv_changed`：其他设备回退了某会话 → 若本设备正在查看则整条重拉对齐
+    - `group_members`：群成员变更 → 刷新成员列表与侧边栏人数
+    - 事件源 `EventSource` 携带 Cookie 认证（HttpOnly JWT），用户名经查询参数传递（EventSource 无法附加自定义请求头）；断线由浏览器自动重连
+    - 源设备自跳过：聊天流中继携带发起方 `device_id`，源设备不重复接收（已通过自己的 fetch 流渲染）
+16. **发送请求体**：`POST /api/chat` 新增可选 `device_id`（来源设备标识，服务端据此跳过对源设备的实时中继）
 
 ### 客户端（useGroupChat.ts）
 
@@ -167,9 +178,16 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 
 1. **Agent 列表**：从 `GET /api/app-name` 加载所有可用 Agent
 2. **群聊检测**：切换对话时通过 `GET /api/conversations/:id` 检测 `type === 'group'`，加载群组成员
-3. **创建群聊**：`createGroupConversation(agentIds)` 调用 API 创建群组对话
+3. **创建群聊（草稿态）**：`createGroupConversation(agentIds)` 只暂存所选成员（`groupAgents`）并进入群聊草稿态（`draftType: 'group'`），**不调用服务端建会**；选好 Agent 后侧边栏不自动收回；首条消息发出时由服务端创建群会话
 4. **发送消息**：`sendGroupMessage` 携带 `agent_ids` 和 `conversation_type: 'group'`
 5. **成员管理**：`addAgentToGroup` / `removeAgentFromGroup` 增删群组成员
+6. **实时群成员同步**：其他设备改动了群成员时，若本设备正在查看该群则刷新成员列表
+
+### 服务端（realtime.ts + routes/events.ts）
+
+1. **进程内事件总线**：`Map<userId, Set<subscriber>>`，每个订阅持有 `device_id` 与串行化写入链。聊天流事件经 `broadcastStream` 跳过源设备后实时中继到同账号其他设备；会话列表 / 内容变更 / 群成员变更经 `broadcastConversationSync` / `broadcastConversationChanged` / `broadcastGroupMembers` 广播
+2. **事件通道路由**：`GET /api/events?device_id=xxx`（`userAuthMiddleware` 认证）→ SSE 长连接，每 15s 心跳；客户端断开时 `onAbort` 清理订阅。订阅按 `deviceId` 幂等（同设备重连先移除旧订阅，避免事件双发）
+3. **仅限单实例**：多实例 / 横向扩容需把内存总线替换为 Redis pub/sub（超出当前范围，见 `AGENTS.md` 非目标）
 
 ## 上游 API 客户端（provider.ts）
 
