@@ -87,6 +87,8 @@ export function App() {
         if (Number.isFinite(exp)) setSessionExpiry(exp)
       }
       setCurrentUser(oauthUser)
+      // New session just established (Set-Cookie on the OAuth redirect response)
+      lastLoginAtRef.current = Date.now()
       // Clean query params from URL without reload
       const url = new URL(window.location.href)
       url.searchParams.delete('oauth_user')
@@ -180,6 +182,8 @@ export function App() {
     localStorage.setItem('user', username)
     setSessionExpiry(expiresAt)
     setCurrentUser(username)
+    // 标记新会话生效时刻：晚于此时刻才发起的请求，其 401 才代表「这个新会话已失效」
+    lastLoginAtRef.current = Date.now()
     // Reload conversations for the new user
     setTimeout(() => chat.refreshConversations(), 100)
   }
@@ -195,8 +199,10 @@ export function App() {
     if (window.location.hash === '#/settings') {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
-    // Clear current session
-    chat.createConversation()
+    // Clear current session LOCALLY. 绝不能在这里调 chat.createConversation()：
+    // 那会在服务端预创建会话，无会话时必然 401 → auth:expired → handleLogout →
+    // 又发请求 → ……无限 401 死循环，还会把刚登录拿到的新 cookie 通过 /logout 误杀。
+    chat.resetChat()
   }
 
   // Detect admin status for the logged-in user
@@ -255,12 +261,22 @@ export function App() {
     }
   }, [currentUser])
 
+  // Most recent successful login (PIN / OAuth / rename re-issue). Used to drop
+  // "stale" 401s whose request started BEFORE that moment: their verdict
+  // describes the dead old session, and honoring them right after login would
+  // /logout and destroy the brand-new cookie — the "instantly kicked out" bug.
+  const lastLoginAtRef = useRef(0)
+
   // Listen for auth:expired events dispatched by the API layer
   // when a 401 response is received (token invalid/expired).
   useEffect(() => {
-    const onAuthExpired = () => handleLogout()
-    window.addEventListener('auth:expired', onAuthExpired)
-    return () => window.removeEventListener('auth:expired', onAuthExpired)
+    const onAuthExpired = (e: Event) => {
+      const startedAt = (e as CustomEvent).detail?.startedAt ?? 0
+      if (startedAt <= lastLoginAtRef.current) return // stale 401 from before the current login
+      handleLogout()
+    }
+    window.addEventListener('auth:expired', onAuthExpired as EventListener)
+    return () => window.removeEventListener('auth:expired', onAuthExpired as EventListener)
   }, [])
 
   useEffect(() => {
@@ -604,6 +620,8 @@ export function App() {
           localStorage.setItem('user', newUsername)
           setSessionExpiry(expiresAt)
           setCurrentUser(newUsername)
+          // rename re-issues the auth cookie — treat as a fresh login
+          lastLoginAtRef.current = Date.now()
         }}
       />
 

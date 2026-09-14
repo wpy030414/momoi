@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, getUser, clearSession } from '../lib/api'
+import { api, getUser, clearSession, notifyAuthExpired } from '../lib/api'
 import type { Conversation, Attachment, AskUserQuestion } from '@/shared/types'
 import type { ThinkingSegment } from '@/shared/thinking'
 import { decodeThinkingToSegments, thinkingSegmentHeader } from '@/shared/thinking'
@@ -154,6 +154,7 @@ export function useChat() {
       }
 
       try {
+        const reqStartedAt = Date.now()
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: {
@@ -178,7 +179,7 @@ export function useChat() {
         if (!res.ok) {
           if (res.status === 401) {
             clearSession()
-            window.dispatchEvent(new CustomEvent('auth:expired'))
+            notifyAuthExpired(reqStartedAt)
           }
           const err = await res.json().catch(() => ({ error: res.statusText }))
           throw new Error(err.error || `HTTP ${res.status}`)
@@ -608,6 +609,23 @@ export function useChat() {
     }
   }, [])
 
+  /** 本地状态重置：登出 / 切换身份时使用，绝不发任何网络请求。
+   *  （若在这里发请求，无会话的请求会 401 → auth:expired → handleLogout →
+   *   再发请求 → ……形成无限 401 死循环，且会误杀刚登录拿到的新 cookie。） */
+  const resetChat = useCallback(() => {
+    // 正在流式输出的会话一并掐断
+    abortRef.current?.abort()
+    abortRef.current = null
+    setLoading(false)
+    setActiveId(null)
+    setMessages([])
+    setConversations([])
+    setPendingQuestion(null)
+    if (window.location.hash.startsWith('#/c/')) {
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }, [])
+
   const createConversation = useCallback(async () => {
     try {
       // Pre-create on server so sidebar shows the record immediately (like group chat)
@@ -731,6 +749,7 @@ export function useChat() {
     sendMessage,
     selectConversation,
     createConversation,
+    resetChat,
     renameConversation,
     deleteConversation,
     exportConversation,

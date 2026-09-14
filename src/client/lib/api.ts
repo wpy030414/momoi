@@ -31,6 +31,28 @@ export function clearSession() {
   localStorage.removeItem('token_expires_at')
 }
 
+/**
+ * Notify the app that the session is dead (an authenticated endpoint returned 401).
+ *
+ * - Throttled: a burst of parallel 401s must not fan out into a logout storm
+ *   (each dispatch triggers handleLogout, which fires more requests → more 401s).
+ * - Carries the request's start time: the app drops "stale" 401s whose request
+ *   began BEFORE the most recent successful login. Those verdicts describe the
+ *   dead OLD session; honoring them after login would call /logout and destroy
+ *   the brand-new cookie — the "instantly kicked back to the login screen" bug.
+ */
+let lastAuthExpiredDispatch = 0
+export function notifyAuthExpired(requestStartedAt: number) {
+  const now = Date.now()
+  if (now - lastAuthExpiredDispatch < 1000) return
+  lastAuthExpiredDispatch = now
+  window.dispatchEvent(new CustomEvent('auth:expired', { detail: { startedAt: requestStartedAt } }))
+}
+
+// Endpoints where 401 means "wrong credentials", not "session expired" —
+// a wrong-PIN attempt must never trigger the expired-session logout path.
+const CREDENTIALS_ENDPOINTS = ['/api/user/verify', '/api/user/change-pin']
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const user = getUser()
   const optsHeaders = (options?.headers as Record<string, string>) || {}
@@ -44,14 +66,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // The HttpOnly cookie rides along on same-origin fetches — no manual
   // Authorization header needed (or possible: JS cannot read the cookie).
 
+  const startedAt = Date.now()
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers,
   })
   if (!res.ok) {
-    if (res.status === 401) {
+    const isCredentialsRejection =
+      res.status === 401 && CREDENTIALS_ENDPOINTS.some((p) => path.startsWith(p))
+    if (res.status === 401 && !isCredentialsRejection) {
       clearSession()
-      window.dispatchEvent(new CustomEvent('auth:expired'))
+      notifyAuthExpired(startedAt)
     }
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error(st(err.error || `HTTP ${res.status}`))
@@ -176,6 +201,7 @@ export const api = {
   uploadSkill: (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
+    const startedAt = Date.now()
     return fetch('/api/admin/skills/upload', {
       method: 'POST',
       body: formData,
@@ -183,7 +209,7 @@ export const api = {
       if (!res.ok) {
         if (res.status === 401) {
           clearSession()
-          window.dispatchEvent(new CustomEvent('auth:expired'))
+          notifyAuthExpired(startedAt)
         }
         const err = await res.json().catch(() => ({ error: res.statusText }))
         throw new Error(st(err.error || `HTTP ${res.status}`))
