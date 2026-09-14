@@ -105,10 +105,12 @@ export function useGroupChat() {
       if (agent) {
         setGroupAgents((prev) => [...prev, agent])
       }
+      // 群成员数变化需同步到侧边栏会话列表（agent_count）
+      chat.refreshConversations()
     } catch (err) {
       console.error('Failed to add agent to group:', err)
     }
-  }, [chat.activeId, allAgents])
+  }, [chat.activeId, allAgents, chat.refreshConversations])
 
   // Remove an agent from the current group conversation
   const removeAgentFromGroup = useCallback(async (agentId: string) => {
@@ -116,10 +118,12 @@ export function useGroupChat() {
     try {
       await api.removeGroupAgent(chat.activeId, agentId)
       setGroupAgents((prev) => prev.filter((a) => a.id !== agentId))
+      // 群成员数变化需同步到侧边栏会话列表（agent_count）
+      chat.refreshConversations()
     } catch (err) {
       console.error('Failed to remove agent from group:', err)
     }
-  }, [chat.activeId])
+  }, [chat.activeId, chat.refreshConversations])
 
   // Send a group message
   const sendGroupMessage = useCallback(async (
