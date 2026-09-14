@@ -8,10 +8,9 @@ const DATABASE_URL = process.env.DATABASE_URL
 const DATABASE_USER = process.env.DATABASE_USER
 const DATABASE_SECRET = process.env.DATABASE_SECRET
 
-function detectRemoteDialect(url: string): 'pg' | 'mysql' {
+function detectRemoteDialect(url: string): 'pg' {
   if (url.startsWith('postgres://') || url.startsWith('postgresql://')) return 'pg'
-  if (url.startsWith('mysql://') || url.startsWith('mariadb://')) return 'mysql'
-  throw new Error(`Unsupported DATABASE_URL scheme: ${url.split('://')[0]}://. Expected postgres://, postgresql://, mysql://, or mariadb://`)
+  throw new Error(`Unsupported DATABASE_URL scheme: ${url.split('://')[0]}://. Expected postgres:// or postgresql://`)
 }
 
 const remoteDialect = (DATABASE_URL && DATABASE_USER && DATABASE_SECRET)
@@ -319,146 +318,11 @@ async function initPg(dbUrl: string, user: string, password: string) {
   return { db, schema }
 }
 
-// ---- MySQL / MariaDB remote mode ----
-
-async function initMysql(dbUrl: string, user: string, password: string) {
-  let mysql: any; let drizzleMysql: any; let schema: any
-  try {
-    mysql = await import('mysql2/promise')
-    drizzleMysql = (await import('drizzle-orm/mysql2')).drizzle
-    schema = await import('./schema.mysql.js')
-  } catch (err) {
-    console.error('[db] MySQL driver not found. Install it with: pnpm add mysql2')
-    throw err
-  }
-
-  const pool = mysql.createPool({ uri: dbUrl, user, password, connectionLimit: 5 })
-
-  const conn = await pool.getConnection()
-  try {
-    await conn.query(`
-      CREATE TABLE IF NOT EXISTS conversations (
-        id VARCHAR(36) PRIMARY KEY,
-        user_id VARCHAR(255) NOT NULL DEFAULT '',
-        title VARCHAR(255) NOT NULL DEFAULT '新对话',
-        agent_id VARCHAR(36) NOT NULL DEFAULT '',
-        type VARCHAR(20) NOT NULL DEFAULT 'direct',
-        created_at INT NOT NULL,
-        updated_at INT NOT NULL,
-        deleted_at INT
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-      CREATE TABLE IF NOT EXISTS messages (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        conversation_id VARCHAR(36) NOT NULL,
-        role VARCHAR(20) NOT NULL,
-        content TEXT NOT NULL,
-        thinking TEXT,
-        tool_calls TEXT,
-        tool_call_id VARCHAR(255),
-        suggestions TEXT,
-        attachments TEXT,
-        agent_id VARCHAR(36),
-        created_at INT NOT NULL
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-      CREATE TABLE IF NOT EXISTS settings (
-        \`key\` VARCHAR(255) PRIMARY KEY,
-        value TEXT NOT NULL
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-      CREATE TABLE IF NOT EXISTS agents (
-        id VARCHAR(36) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL DEFAULT '',
-        model VARCHAR(255) NOT NULL DEFAULT '',
-        system_prompt TEXT NOT NULL,
-        avatar VARCHAR(255) NOT NULL DEFAULT '',
-        role VARCHAR(20) NOT NULL DEFAULT 'default',
-        created_at INT NOT NULL,
-        voice_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-        voice_sample_url VARCHAR(512) NOT NULL DEFAULT '',
-        voice_settings TEXT NOT NULL
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-      CREATE TABLE IF NOT EXISTS group_conversation_agents (
-        conversation_id VARCHAR(36) NOT NULL,
-        agent_id VARCHAR(36) NOT NULL,
-        sort_order INT NOT NULL DEFAULT 0,
-        PRIMARY KEY (conversation_id, agent_id)
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-      CREATE TABLE IF NOT EXISTS mcp_servers (
-        id VARCHAR(36) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL DEFAULT '',
-        url VARCHAR(2048) NOT NULL DEFAULT '',
-        enabled BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at INT NOT NULL
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-      CREATE TABLE IF NOT EXISTS users (
-        username VARCHAR(255) PRIMARY KEY,
-        pin_hash VARCHAR(255) NOT NULL DEFAULT '',
-        first_login_at INT NOT NULL,
-        last_login_at INT NOT NULL,
-        banned BOOLEAN NOT NULL DEFAULT FALSE
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-      CREATE TABLE IF NOT EXISTS user_oauth_bindings (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(255) NOT NULL,
-        provider_id VARCHAR(255) NOT NULL,
-        provider_user_id VARCHAR(255) NOT NULL,
-        created_at INT NOT NULL,
-        UNIQUE KEY uq_provider_user (provider_id, provider_user_id)
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-      CREATE TABLE IF NOT EXISTS user_wechat_bindings (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(255) NOT NULL UNIQUE,
-        bot_token TEXT NOT NULL,
-	        ilink_user_id VARCHAR(255) NOT NULL DEFAULT '',
-        wechat_user_id VARCHAR(255) NOT NULL DEFAULT '',
-        updates_buf TEXT NOT NULL,
-        last_poll_at INT NOT NULL DEFAULT 0,
-        pending_conv_id VARCHAR(36) NOT NULL DEFAULT '',
-        created_at INT NOT NULL
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-      CREATE TABLE IF NOT EXISTS wechat_sessions (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(255) NOT NULL,
-        wechat_sender_id VARCHAR(255) NOT NULL,
-        conversation_id VARCHAR(36) NOT NULL,
-        created_at INT NOT NULL,
-        UNIQUE KEY uq_wechat_session (user_id, wechat_sender_id)
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-      -- Additive column migrations for existing MySQL databases (IF NOT EXISTS avoids errors)
-      SET @stmt = (SELECT IF(
-        (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'agents' AND COLUMN_NAME = 'voice_enabled' AND TABLE_SCHEMA = DATABASE()) = 0,
-        'ALTER TABLE agents ADD COLUMN voice_enabled BOOLEAN NOT NULL DEFAULT FALSE, ADD COLUMN voice_sample_url VARCHAR(512) NOT NULL DEFAULT '''', ADD COLUMN voice_settings TEXT NOT NULL',
-        'SELECT 1'
-      ));
-      PREPARE stmt FROM @stmt;
-      EXECUTE stmt;
-      DEALLOCATE PREPARE stmt;
-    `)
-  } finally {
-    conn.release()
-  }
-
-  const db = drizzleMysql(pool, { schema, mode: 'default' }) as any
-  console.log('[db] MySQL/MariaDB ready')
-  return { db, schema }
-}
-
 // ---- Dialect factory + unified exports ----
 
 const result = remoteDialect === 'pg'
   ? await initPg(DATABASE_URL!, DATABASE_USER!, DATABASE_SECRET!)
-  : remoteDialect === 'mysql'
-    ? await initMysql(DATABASE_URL!, DATABASE_USER!, DATABASE_SECRET!)
-    : await initSqlite()
+  : await initSqlite()
 
 export const db = result.db
 

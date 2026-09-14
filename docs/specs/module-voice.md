@@ -10,8 +10,8 @@
 |---|---|
 | `src/shared/types.ts` | Agent 扩展字段、VoiceSettings、VoiceAudioSegment、SSE 事件 |
 | `src/shared/constants.ts` | TTS 默认配置常量 |
-| `src/server/schema.ts` | agents 表 voice 列（SQLite/PG/MySQL） |
-| `src/server/db.ts` | 三方言迁移 SQL |
+| `src/server/schema.ts` | agents 表 voice 列（SQLite/PG） |
+| `src/server/db.ts` | 双方言迁移 SQL |
 | `src/server/config.ts` | Agent CRUD 扩展 + TTS 配置函数 |
 | `src/server/routes/admin.ts` | 声线上传/克隆/删除 + TTS 配置端点 |
 | `src/server/routes/voice.ts` | REST segments 查询端点 |
