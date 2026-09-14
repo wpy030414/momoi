@@ -3,7 +3,7 @@
 // Composes useChat with group-specific state and methods
 // ============================================================
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useChat } from './useChat'
 import { api } from '../lib/api'
 import type { Conversation } from '@/shared/types'
@@ -18,6 +18,9 @@ export function useGroupChat() {
   const [groupAgents, setGroupAgents] = useState<AgentBrief[]>([])
   const [isGroupMode, setIsGroupMode] = useState(false)
   const [allAgents, setAllAgents] = useState<AgentBrief[]>([])
+  // 群模式同步守卫：包装层刚同步过的会话不再重复请求；世代计数丢弃乱序响应
+  const lastGroupSyncRef = useRef<string | null>(null)
+  const groupModeGenRef = useRef(0)
 
   // Load all available agents on mount
   useEffect(() => {
@@ -26,10 +29,24 @@ export function useGroupChat() {
     }).catch(console.error)
   }, [])
 
-  // When switching conversations, detect group mode and load agents
+  // When switching conversations, detect group mode and load agents.
+  // 覆盖未经包装层的路径（hash 恢复 / 实时事件设置 activeId）；乱序响应按世代丢弃。
   useEffect(() => {
+    // 任何视图变化都作废在途响应：否则慢响应会在用户已切走（新建草稿等）后
+    // 回来，把过期群状态盖到当前视图上（direct 草稿被误标群 → 首条消息误建群会话）
+    const gen = ++groupModeGenRef.current
     if (chat.activeId) {
+      if (lastGroupSyncRef.current === chat.activeId) return // 包装层刚同步过，无需重复请求
+      // 侧边栏列表已能判定单聊：无需再拉会话详情（内层 loadConversation 刚拉过同一会话）
+      const knownType = chat.conversations.find((c) => c.id === chat.activeId)?.type
+      if (knownType === 'direct') {
+        setIsGroupMode(false)
+        setGroupAgents([])
+        lastGroupSyncRef.current = chat.activeId
+        return
+      }
       api.getConversation(chat.activeId).then((res) => {
+        if (groupModeGenRef.current !== gen) return // 过期响应，丢弃
         const conv = res.conversation as Conversation
         if (conv.type === 'group') {
           setIsGroupMode(true)
@@ -40,35 +57,42 @@ export function useGroupChat() {
           setIsGroupMode(false)
           setGroupAgents([])
         }
+        lastGroupSyncRef.current = chat.activeId
       }).catch(console.error)
     } else if (chat.draftType === 'group') {
       // 群聊草稿态（activeId 为 null）：保持群聊模式与已选成员，等待首条消息
+      lastGroupSyncRef.current = null
       setIsGroupMode(true)
+    } else {
+      lastGroupSyncRef.current = null
+      setIsGroupMode(false)
+      setGroupAgents([])
+    }
+  }, [chat.activeId, chat.draftType, chat.conversations])
+
+  // Override selectConversation: 复用 useChat 内层加载结果同步群模式，
+  // 不再预取（旧实现对同一会话发两次 getConversation，且两次响应乱序时互相覆盖）。
+  const selectConversation = useCallback(async (id: string) => {
+    // 从侧边栏列表同步判断群模式——与内层 loadConversation 同步返回，
+    // 避免 await 后 setState 被 React 分批 flush 导致过渡帧 isGroup=false
+    // 时 ChatPanel 把发送路由到 onSend（单聊）而非 onSendGroup
+    const knownType = chat.conversations.find((c) => c.id === id)?.type
+    if (knownType === 'group') {
+      setIsGroupMode(true)
+    } else if (knownType === 'direct') {
+      setIsGroupMode(false)
+      setGroupAgents([])
+    }
+    const res = await chat.selectConversation(id)
+    if (!res) return // 内层世代守卫已拦截（乱序 / 加载失败）
+    if ((res.conversation as Conversation).type === 'group') {
+      setIsGroupMode(true)
+      setGroupAgents(res.agents || [])
     } else {
       setIsGroupMode(false)
       setGroupAgents([])
     }
-  }, [chat.activeId, chat.draftType])
-
-  // Override selectConversation to set group mode BEFORE messages are rendered
-  const selectConversation = useCallback(async (id: string) => {
-    // Pre-fetch to determine group mode before loading messages
-    try {
-      const res = await api.getConversation(id)
-      const conv = res.conversation as Conversation
-      if (conv.type === 'group') {
-        setIsGroupMode(true)
-        if (res.agents) setGroupAgents(res.agents)
-      } else {
-        setIsGroupMode(false)
-        setGroupAgents([])
-      }
-    } catch {
-      setIsGroupMode(false)
-      setGroupAgents([])
-    }
-    // Load messages (this will trigger a second API call, but ensures correct state)
-    await chat.selectConversation(id)
+    lastGroupSyncRef.current = id
   }, [chat])
 
   // Create a new group conversation (draft — record created on first message)

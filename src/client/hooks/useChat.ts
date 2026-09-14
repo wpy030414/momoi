@@ -1,9 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, getUser, clearSession, notifyAuthExpired, getDeviceIdForRequest, subscribeRealtime, connectRealtime } from '../lib/api'
-import type { Conversation, Attachment, AskUserQuestion } from '@/shared/types'
+import type { Conversation, Attachment } from '@/shared/types'
 import type { ThinkingSegment } from '@/shared/thinking'
 import { decodeThinkingToSegments, thinkingSegmentHeader } from '@/shared/thinking'
+
+/** runtime tracer — 定位串会话竞态，修完即删 */
+function tracer(tag: string, ...args: any[]) {
+  if (typeof window !== 'undefined') (window as any).__chatTrace = (window as any).__chatTrace || []
+  if (typeof window !== 'undefined') (window as any).__chatTrace.push(`${Date.now() % 100000} ${tag} ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a).slice(0, 120)).join(' ')}`)
+}
 
 interface ChatMessage {
   id?: number
@@ -24,8 +30,22 @@ interface ChatMessage {
   agent_name?: string | null
 }
 
+/** Agent 向用户提问的待答事件（ask_user），按会话分区存储 */
+type PendingQuestion = import('@/shared/types').ServerMessage & { type: 'ask_user' }
+
 const MAX_RETRIES = 3
 const RETRY_BASE_MS = 2000
+
+/** 草稿分区 key 前缀：无会话 ID 的草稿以唯一自增 `draft:N` 作为分区标识，
+ *  与真实会话 ID 命名空间隔离，双草稿互不冲突。 */
+const DRAFT_PREFIX = 'draft:'
+const isDraftKey = (k: string) => k.startsWith(DRAFT_PREFIX)
+
+/** 远程流判活 TTL：他设备流事件的终态（done/error）可能丢失，窗口内
+ *  快照合并按「流进行中」处理，避免吞掉尾部正在生成的消息。
+ *  与本地空闲超时一致（60s）：远程流静默（长工具执行 / 群聊 agent 间隔）
+ *  超过本地也会放弃的时长，才视为结束。 */
+const REMOTE_STREAM_TTL_MS = 60_000
 
 /** 服务端 Message → 本地 ChatMessage 映射（历史加载 / 收尾 refetch / 会话切换共用） */
 function mapServerMessage(m: { id: number; role: string; content: string; thinking?: string | null; tool_calls?: unknown; suggestions?: unknown; attachments?: unknown; agent_id?: string | null }): ChatMessage {
@@ -42,22 +62,221 @@ function mapServerMessage(m: { id: number; role: string; content: string; thinki
   }
 }
 
+/**
+ * 快照合并：DB 快照为历史权威，若该分区仍有活动流（本地 / 远程），
+ * 保留分区尾部「比快照新」的消息（流式占位 / 未落库气泡），避免切换
+ * 会话时丢掉正在生成的回复。非活动分区由调用方直接整体覆盖。
+ *
+ * mode='merge'（视图加载）：非空快照下 id > maxSnapId 视为「比快照新」
+ *   （如已落库但快照更旧的远程中继消息）；空快照只保留活动尾部。
+ * mode='reconcile'（conv_changed 对账 / 流收尾）：DB 完全权威——带 id
+ *   但不在快照中的持久化消息视为「已被他端删除」，绝不复活。
+ * （导出以便将来接入单测；纯函数，无外部依赖。） */
+export function mergeSnapshotIntoPartition(prev: ChatMessage[], snapshot: ChatMessage[], mode: 'merge' | 'reconcile' = 'merge'): ChatMessage[] {
+  const maxSnapId = snapshot.reduce((mx, m) => Math.max(mx, m.id ?? 0), 0)
+  let cut = prev.length
+  while (cut > 0) {
+    const m = prev[cut - 1]
+    // 活动尾部 = 流式中（streaming===true）或乐观消息（无 id 且未被标记结束
+    // ——streaming 为 undefined，如本地乐观 user 气泡）。done/agent_done 后的
+    // 无 id 气泡（streaming===false）不算：DB 快照已含其落库版本，再 keep 会重复。
+    const live = m.streaming === true || (m.id == null && m.streaming !== false)
+    // reconcile：只保留活动尾部——快照里已有的由快照自身提供，不在快照中的
+    //   持久化消息视为已被他端删除。
+    // merge：非空快照下 id > maxSnapId 视为「比快照新」（如已落库但快照更旧
+    //   的远程中继消息）仍需保留；空快照（回退到零条）只保留活动尾部。
+    const keep = live || (mode === 'merge' && snapshot.length > 0 && m.id != null && m.id > maxSnapId)
+    if (!keep) break
+    cut--
+  }
+  return [...snapshot, ...prev.slice(cut)]
+}
+
+/** 本地流元数据：abort 控制器与模式标记跟随分区 key 存取（替代全局单份 ref） */
+interface LocalStream {
+  abort: AbortController
+  infinite: boolean
+  group: boolean
+  /** 用户主动取消（cancel / 回退）：sendMessage 的 catch 据此区分「用户取消」与「空闲超时重试」 */
+  userCancelled?: boolean
+}
+
 export function useChat() {
   const { t, i18n } = useTranslation()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [loading, setLoading] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
-  const infiniteModeRef = useRef(false)
-  /** 群聊标记：follow_up 事件据此决定是否补建 assistant 气泡（群聊由 agent_start 逐个建）。 */
-  const groupModeRef = useRef(false)
-  const [pendingQuestion, setPendingQuestion] = useState<(import('@/shared/types').ServerMessage & { type: 'ask_user' }) | null>(null)
   /** 草稿会话标记：新建会话在发出第一条消息前不落库、不建记录。
    *  direct / group 表示当前处于「新会话草稿」状态（activeId 为 null），
    *  首条消息发送时服务端按 conversation_type + agent_ids 建会，收到
-   *  conversation_id 事件后清除草稿标记，转为真实会话。 */
+   *  conversation_id 事件后分区迁移至真实 ID，转为真实会话。 */
   const [draftType, setDraftType] = useState<'direct' | 'group' | null>(null)
+  /** 当前草稿的分区 key（唯一 draft:N）；activeId 与其互斥，二者合称视图 key */
+  const [draftKey, setDraftKey] = useState<string | null>(null)
+
+  // ---- 按会话分区的状态（渲染派生）；ref 镜像同步最新值供事件处理器读取 ----
+  const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({})
+  const [loadingByConv, setLoadingByConv] = useState<Record<string, boolean>>({})
+  const [pendingByConv, setPendingByConv] = useState<Record<string, PendingQuestion | null>>({})
+
+  const messagesByConvRef = useRef<Record<string, ChatMessage[]>>({})
+  const loadingRef = useRef<Record<string, boolean>>({})
+  const pendingRef = useRef<Record<string, PendingQuestion | null>>({})
+  const conversationsRef = useRef<Conversation[]>([])
+
+  /** 视图 key：activeId ?? draftKey（null = 首页空态）。事件回调经 ref 读最新值。 */
+  const activeIdRef = useRef<string | null>(null)
+  const activeKeyRef = useRef<string | null>(null)
+  const draftKeyRef = useRef<string | null>(null)
+  const draftSeqRef = useRef(0)
+  /** 视图加载世代：mount 恢复 / hashchange / 主动切换共用，乱序响应按世代丢弃 */
+  const loadGenRef = useRef(0)
+  /** 本地流注册表（含 abort 与模式标记），key = 分区 key */
+  const streamsRef = useRef<Map<string, LocalStream>>(new Map())
+  /** 远程流（他设备）最近事件时间戳，TTL 内视为流进行中 */
+  const remoteLastAtRef = useRef<Map<string, number>>(new Map())
+  /** 会话类型缓存（direct / group），供远程流事件判组 */
+  const convTypesRef = useRef<Map<string, 'direct' | 'group'>>(new Map())
+
+  useEffect(() => {
+    conversationsRef.current = conversations
+  }, [conversations])
+
+  /** 视图 key 唯一写入口：三个 ref 同步更新 + 两个 state 镜像。
+   *  所有「切换 activeId / 草稿」的站点必须经此——setActiveId 的 effect
+   *  是异步提交的，散落的手工 ref patch 会留下毫秒级不一致窗口
+   *  （视图已显示新会话、activeKeyRef 仍指向旧值，cancel/revert 失灵）。 */
+  const setViewKey = useCallback((active: string | null, draft: string | null) => {
+    activeIdRef.current = active
+    draftKeyRef.current = draft
+    activeKeyRef.current = active ?? draft
+    setActiveId(active)
+    setDraftKey(draft)
+  }, [])
+
+  // ---- 分区写入辅助：ref 为事实源、state 为渲染镜像，所有分区写必须经此 ----
+
+  const updateMessages = useCallback((key: string, updater: (prev: ChatMessage[]) => ChatMessage[]) => {
+    const cur = messagesByConvRef.current[key] ?? []
+    const next = updater(cur)
+    if (next === cur) return // 「返回原引用」= 不变，短路（沿用旧 setMessages 语义）
+    const all = { ...messagesByConvRef.current, [key]: next }
+    messagesByConvRef.current = all
+    setMessagesByConv(all)
+  }, [])
+
+  const setLoadingFor = useCallback((key: string, v: boolean) => {
+    if (loadingRef.current[key] === v) return
+    const all = { ...loadingRef.current, [key]: v }
+    loadingRef.current = all
+    setLoadingByConv(all)
+  }, [])
+
+  const setPendingFor = useCallback((key: string, q: PendingQuestion | null) => {
+    const all = { ...pendingRef.current, [key]: q }
+    pendingRef.current = all
+    setPendingByConv(all)
+  }, [])
+
+  const clearPendingFor = useCallback((key: string) => {
+    if (!(key in pendingRef.current)) return
+    const all = { ...pendingRef.current }
+    delete all[key]
+    pendingRef.current = all
+    setPendingByConv(all)
+  }, [])
+
+  /** 会话类型：草稿视为单聊；缓存 → 会话列表 → direct 兜底 */
+  const convTypeOf = useCallback((key: string): 'direct' | 'group' => {
+    if (isDraftKey(key)) return 'direct'
+    const cached = convTypesRef.current.get(key)
+    if (cached) return cached
+    const conv = conversationsRef.current.find((c) => c.id === key)
+    return ((conv?.type as 'direct' | 'group') || 'direct')
+  }, [])
+
+  /** 分区是否有活动流：本地流注册表中存在，或远程流 TTL 窗口内 */
+  const isStreamLive = useCallback((key: string): boolean => {
+    if (streamsRef.current.has(key)) return true
+    return Date.now() - (remoteLastAtRef.current.get(key) ?? 0) < REMOTE_STREAM_TTL_MS
+  }, [])
+
+  /** 快照落分区：活动流走合并（保住正在生成的尾部），否则整体覆盖。
+   *  mode 语义见 mergeSnapshotIntoPartition（merge=视图加载 / reconcile=DB 对账）。 */
+  const applySnapshot = useCallback((key: string, snapshot: ChatMessage[], mode: 'merge' | 'reconcile' = 'merge') => {
+    updateMessages(key, (prev) => (isStreamLive(key) ? mergeSnapshotIntoPartition(prev, snapshot, mode) : snapshot))
+  }, [updateMessages, isStreamLive])
+
+  const updateLastMessage = useCallback((key: string, patch: Partial<ChatMessage>) => {
+    updateMessages(key, (prev) => {
+      const last = prev[prev.length - 1]
+      if (!last || last.role !== 'assistant') return prev
+      return [...prev.slice(0, -1), { ...last, ...patch }]
+    })
+  }, [updateMessages])
+
+  /** 分区重命名（conversation_id 到达、草稿转正）：消息 / loading / pending / 流注册表 / 远程戳整体迁移 */
+  const renamePartition = useCallback((oldKey: string, newKey: string) => {
+    const all = { ...messagesByConvRef.current }
+    if (all[oldKey] !== undefined) {
+      const msgs = all[oldKey]
+      delete all[oldKey]
+      if (all[newKey] === undefined) all[newKey] = msgs
+      messagesByConvRef.current = all
+      setMessagesByConv(all)
+    }
+    if (oldKey in loadingRef.current) {
+      const l = { ...loadingRef.current }
+      const v = l[oldKey]
+      delete l[oldKey]
+      if (!(newKey in l)) l[newKey] = v
+      loadingRef.current = l
+      setLoadingByConv(l)
+    }
+    if (oldKey in pendingRef.current) {
+      const q = { ...pendingRef.current }
+      const v = q[oldKey]
+      delete q[oldKey]
+      if (!(newKey in q)) q[newKey] = v
+      pendingRef.current = q
+      setPendingByConv(q)
+    }
+    const entry = streamsRef.current.get(oldKey)
+    if (entry) {
+      streamsRef.current.delete(oldKey)
+      if (!streamsRef.current.has(newKey)) streamsRef.current.set(newKey, entry)
+    }
+    const remoteAt = remoteLastAtRef.current.get(oldKey)
+    if (remoteAt !== undefined) {
+      remoteLastAtRef.current.delete(oldKey)
+      if (!remoteLastAtRef.current.has(newKey)) remoteLastAtRef.current.set(newKey, remoteAt)
+    }
+  }, [])
+
+  /** 分区销毁（删除会话 / 登出）：掐断本地流并清空全部痕迹。
+   *  掐流前标记 userCancelled，让流按「用户取消」收尾而不是重试。 */
+  const clearPartition = useCallback((key: string) => {
+    const entry = streamsRef.current.get(key)
+    if (entry) {
+      entry.userCancelled = true
+      entry.abort.abort()
+    }
+    streamsRef.current.delete(key)
+    remoteLastAtRef.current.delete(key)
+    convTypesRef.current.delete(key)
+    if (key in messagesByConvRef.current) {
+      const all = { ...messagesByConvRef.current }
+      delete all[key]
+      messagesByConvRef.current = all
+      setMessagesByConv(all)
+    }
+    if (key in loadingRef.current) {
+      const l = { ...loadingRef.current }
+      delete l[key]
+      loadingRef.current = l
+      setLoadingByConv(l)
+    }
+    clearPendingFor(key)
+  }, [clearPendingFor])
 
   // Load conversations on mount
   useEffect(() => {
@@ -66,22 +285,54 @@ export function useChat() {
       .catch(console.error)
   }, [])
 
+  const refreshConversations = useCallback(() => {
+    api.listConversations()
+      .then((res) => setConversations(res.conversations))
+      .catch(console.error)
+  }, [])
+
+  /**
+   * 会话视图加载公共入口（mount 恢复 / hashchange / 主动切换共用）。
+   * 世代守卫：发起时占用 gen，响应回来若已过期（用户又切走了）整体丢弃，
+   * 杜绝慢响应覆盖新视图。快照经 applySnapshot 落分区，活动流的尾部
+   * （正在生成的回复）不会被 DB 快照抹掉。
+   *
+   * 关键：setViewKey 在 await 之前同步更新——sendMessage 的 streamKey
+   * 取自此 ref，若等 API 返回才更新，用户在「已切走、旧流已结束」的窗口
+   * 发消息会被路由到旧会话（串会话的水龙头口）。
+   */
+  const loadConversation = useCallback(async (id: string, gen: number, mode: 'initial' | 'hash') => {
+    // 即刻固定视图键位，让并发 sendMessage 读到正确分区
+    setViewKey(id, null)
+    setDraftType(null)
+    const newHash = `#/c/${encodeURIComponent(id)}`
+    if (mode === 'initial' && window.location.hash !== newHash) {
+      history.pushState(null, '', newHash)
+    }
+    try {
+      const res = await api.getConversation(id)
+      if (loadGenRef.current !== gen) return null
+      const type = ((res.conversation as Conversation).type as 'direct' | 'group') || 'direct'
+      convTypesRef.current.set(id, type)
+      applySnapshot(id, res.messages.map(mapServerMessage))
+      return res
+    } catch {
+      if (loadGenRef.current !== gen) return null
+      // Access denied or not found — clear hash, return to initial page
+      setViewKey(null, draftKeyRef.current)
+      setDraftType(null)
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+      return null
+    }
+  }, [applySnapshot, setViewKey])
+
   // Restore conversation from URL hash on mount (#/c/{id})
   useEffect(() => {
     const match = window.location.hash.match(/^#\/c\/(.+)$/)
     if (!match) return
     const id = decodeURIComponent(match[1])
-    api.getConversation(id)
-      .then((res) => {
-        setActiveId(id)
-        setMessages(res.messages.map(mapServerMessage))
-      })
-      .catch((err) => {
-        // Access denied or not found — clear hash, stay on initial page
-        console.error('Failed to restore conversation from URL:', err)
-        history.replaceState(null, '', window.location.pathname + window.location.search)
-      })
-  }, [])
+    void loadConversation(id, ++loadGenRef.current, 'hash')
+  }, [loadConversation])
 
   // Sync active conversation when URL hash changes (browser back/forward)
   useEffect(() => {
@@ -89,76 +340,57 @@ export function useChat() {
       const match = window.location.hash.match(/^#\/c\/(.+)$/)
       const id = match ? decodeURIComponent(match[1]) : null
       if (!id) {
-        setActiveId(null)
-        setMessages([])
+        // 回到首页：作废在途加载；各分区保留，草稿绑定不动
+        ++loadGenRef.current
+        setViewKey(null, draftKeyRef.current)
         return
       }
-      api.getConversation(id)
-        .then((res) => {
-          setActiveId(id)
-          setMessages(res.messages.map(mapServerMessage))
-        })
-        .catch(() => {
-          history.replaceState(null, '', window.location.pathname + window.location.search)
-        })
+      void loadConversation(id, ++loadGenRef.current, 'hash')
     }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
-  }, [])
+  }, [loadConversation])
 
-  const refreshConversations = useCallback(() => {
-    api.listConversations()
-      .then((res) => setConversations(res.conversations))
-      .catch(console.error)
-  }, [])
-
-  /** 会话切换后同步 group 模式（useGroupChat 也维护了同名状态，此处兜底） */
-  const activeIdRef = useRef<string | null>(null)
-  useEffect(() => {
-    activeIdRef.current = activeId
-  }, [activeId])
-
-  /** 当前活动会话的群聊判定：跟随 conversations 状态，供实时中继事件使用 */
-  const activeConvTypeRef = useRef<'direct' | 'group'>('direct')
-  useEffect(() => {
-    const conv = conversations.find((c) => c.id === activeId)
-    activeConvTypeRef.current = (conv?.type as 'direct' | 'group') || 'direct'
-  }, [conversations, activeId])
-
-  /** 全量重拉指定会话的消息（回退 / conv_changed 事件对齐用） */
+  /** 全量重拉指定会话的消息（回退 / conv_changed 对账用）。
+   *  分区存在即对账（含后台会话，切回即正确）；未打开过的会话不惰性建分区。 */
   const refetchConversation = useCallback(async (id: string) => {
-    try {
-      const res = await api.getConversation(id)
-      if (activeIdRef.current === id) {
-        setMessages(res.messages.map(mapServerMessage))
-      }
-    } catch {
-      // 会话不存在 / 无权限 —— 保持现状，等用户操作触发
+    const res = await api.getConversation(id).catch(() => null)
+    if (!res) return
+    const type = ((res.conversation as Conversation).type as 'direct' | 'group') || 'direct'
+    convTypesRef.current.set(id, type)
+    if (messagesByConvRef.current[id] !== undefined) {
+      // conv_changed = 他端改动 DB（回退等）：DB 权威对账，绝不复活已删消息
+      applySnapshot(id, res.messages.map(mapServerMessage), 'reconcile')
     }
-  }, [])
-
-  const updateLastMessage = useCallback((patch: Partial<ChatMessage>) => {
-    setMessages((prev) => {
-      const last = prev[prev.length - 1]
-      if (!last || last.role !== 'assistant') return prev
-      return [...prev.slice(0, -1), { ...last, ...patch }]
-    })
-  }, [])
+  }, [applySnapshot])
 
   const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean) => {
-    if (!text.trim() || loading) return
+    if (!text.trim()) return
+
+    // 目标分区：当前会话 → 当前草稿 → 首页空态就地开隐式 direct 草稿（保持原有行为）
+    let streamKey: string
+    if (activeIdRef.current) {
+      streamKey = activeIdRef.current
+    } else if (draftKeyRef.current) {
+      streamKey = draftKeyRef.current
+    } else {
+      streamKey = `${DRAFT_PREFIX}${++draftSeqRef.current}`
+      setDraftType('direct')
+      setViewKey(null, streamKey)
+    }
+    // 同会话串行（防重复发送）；跨会话不再互斥——这正是多会话并发的基础
+    if (loadingRef.current[streamKey]) return
+    tracer('send:start', streamKey, activeIdRef.current, draftKeyRef.current, activeKeyRef.current)
 
     const userMsg: ChatMessage = { role: 'user', content: text, attachments }
     const assistantMsg: ChatMessage = { role: 'assistant', content: '', streaming: true, thinkingSegments: [] }
-    setMessages((prev) => [...prev, userMsg, ...(groupMode ? [] : [assistantMsg])])
-    setLoading(true)
-    infiniteModeRef.current = infiniteMode || false
-    groupModeRef.current = groupMode || false
+    updateMessages(streamKey, (prev) => [...prev, userMsg, ...(groupMode ? [] : [assistantMsg])])
 
-    const abort = new AbortController()
-    abortRef.current = abort
+    const entry: LocalStream = { abort: new AbortController(), infinite: !!infiniteMode, group: !!groupMode }
+    streamsRef.current.set(streamKey, entry)
+    setLoadingFor(streamKey, true)
 
-    let convId = activeId
+    let convId = activeIdRef.current
     let attempt = 0
     let done = false
     /** 本轮 SSE 流中是否收到过 done 事件（收尾 refetch 的前置条件之一） */
@@ -167,11 +399,16 @@ export function useChat() {
     while (attempt <= MAX_RETRIES && !done) {
       const isRetry = attempt > 0
 
+      // 该流仍在本会话的「当前流注册表」中才可继续——done 后 SSE 连接
+      // （等 suggestions）关闭前，同会话新一轮 send 已替换了 streamsRef 项；
+      // 此时 old 流掉线若被重试，会误用 updateLastMessage 把新流的气泡抹掉。
+      if (isRetry && streamsRef.current.get(streamKey) !== entry) break
+
       if (isRetry) {
-        updateLastMessage({ content: '', streaming: true })
+        updateLastMessage(streamKey, { content: '', streaming: true })
         const delay = Math.min(RETRY_BASE_MS * Math.pow(2, attempt - 1), 10_000)
         await new Promise((r) => setTimeout(r, delay))
-        if (abort.signal.aborted) break
+        if (entry.abort.signal.aborted) break
       }
 
       try {
@@ -195,7 +432,7 @@ export function useChat() {
             language: i18n.language,
             device_id: getDeviceIdForRequest() || undefined,
           }),
-          signal: abort.signal,
+          signal: entry.abort.signal,
         })
 
         if (!res.ok) {
@@ -218,7 +455,7 @@ export function useChat() {
 
         const resetIdleTimer = () => {
           if (idleTimer) clearTimeout(idleTimer)
-          idleTimer = setTimeout(() => abort.abort(), IDLE_TIMEOUT)
+          idleTimer = setTimeout(() => entry.abort.abort(), IDLE_TIMEOUT)
         }
         resetIdleTimer()
 
@@ -239,11 +476,32 @@ export function useChat() {
 
               try {
                 const msg = JSON.parse(data)
-                if (msg.type === 'conversation_id') convId = msg.id
                 if (msg.type === 'token') receivedTokens = true
                 if (msg.type === 'done' || msg.type === 'error') receivedDone = true
                 if (msg.type === 'done') gotDoneEvent = true
-                handleSSEEvent(msg)
+
+                // 草稿转正：服务端为新会话（或重试轮）下发 conversation_id。
+                // 分区整体迁移至真实 ID；仅当用户仍停留在这份草稿上才提升视图，
+                // 避免把已切走的视图拽回来。
+                if (msg.type === 'conversation_id') {
+                  convId = msg.id
+                  if (msg.id && msg.id !== streamKey) {
+                    const oldKey = streamKey
+                    renamePartition(oldKey, msg.id)
+                    convTypesRef.current.set(msg.id, groupMode ? 'group' : 'direct')
+                    if (activeKeyRef.current === oldKey) {
+                      setViewKey(msg.id, null)
+                      setDraftType(null)
+                      const newHash = `#/c/${encodeURIComponent(msg.id)}`
+                      if (window.location.hash !== newHash) {
+                        history.replaceState(null, '', newHash)
+                      }
+                    }
+                    streamKey = msg.id
+                  }
+                }
+
+                handleSSEEvent(msg, streamKey)
               } catch {
                 // skip malformed lines
               }
@@ -258,7 +516,7 @@ export function useChat() {
               // Likely a transient network drop — treat as graceful close, don't retry
               // (retrying would duplicate the message and waste tokens)
               console.warn('Stream closed early but partial content received; keeping response')
-              updateLastMessage({ streaming: false })
+              updateLastMessage(streamKey, { streaming: false })
               done = true
             } else {
               // No content at all — this is a real failure, retry
@@ -272,22 +530,24 @@ export function useChat() {
         }
       } catch (err) {
         const isAbort = (err as Error).name === 'AbortError'
-        const isUserCancel = isAbort && attempt === 0 && abortRef.current !== abort
+        // 读闭包里的 entry（而非注册表）：分区可能已被 clearPartition / resetChat
+        // 连同注册表项一起删除，此时仍要按「用户取消」收尾而不是重试
+        const isUserCancel = isAbort && !!entry.userCancelled
 
         if (isUserCancel) {
-          // User explicitly cancelled
-          updateLastMessage({ streaming: false })
+          // User explicitly cancelled (cancel / revert) — keep the local bubble
+          updateLastMessage(streamKey, { streaming: false })
           done = true
         } else if (isAbort) {
           // Idle timeout or connection drop — retry
           if (attempt >= MAX_RETRIES) {
-            updateLastMessage({ content: t('chat.errorMessage', { message: t('chat.connectionTimeout') }), streaming: false })
+            updateLastMessage(streamKey, { content: t('chat.errorMessage', { message: t('chat.connectionTimeout') }), streaming: false })
             done = true
           }
           // else: loop continues
         } else if (attempt >= MAX_RETRIES) {
           console.error('Chat error:', err)
-          updateLastMessage({ content: t('chat.errorMessage', { message: (err as Error).message }), streaming: false })
+          updateLastMessage(streamKey, { content: t('chat.errorMessage', { message: (err as Error).message }), streaming: false })
           done = true
         }
         // Non-fatal network error — retry
@@ -296,61 +556,54 @@ export function useChat() {
       attempt++
     }
 
-    setLoading(false)
-    // 守卫必须在置空前取值：先置 null 再比较会让条件恒为 false，收尾 refetch 成死代码。
-    const ownsAbort = abortRef.current === abort
-    abortRef.current = null
-    refreshConversations()
+    // 收尾：仅当本会话没有更新的流（同会话抢发）才动 loading / 注册表，
+    // 避免误关新一轮的 loading 或误删其注册表项。分区已被销毁（删除会话 /
+    // 登出重置）时 ownsStream 同样为 false —— 此时也不再发任何请求（401 教训）。
+    const ownsStream = streamsRef.current.get(streamKey) === entry
+    if (ownsStream) {
+      setLoadingFor(streamKey, false)
+      streamsRef.current.delete(streamKey)
+      remoteLastAtRef.current.delete(streamKey)
+      refreshConversations()
+    }
 
     // Re-fetch messages from server to get real IDs for locally-created messages.
-    // 竞态守卫：done 已提前结束 loading，用户可能在流关闭前抢发了新消息（本地流式
-    // 气泡已存在）——此时 abortRef 已被新一轮覆盖，跳过全量 refetch，避免抹掉新气泡。
+    // 写回本会话自己的分区（不再污染当前视图——用户可能已切到其他会话）。
+    // 竞态守卫：done 已提前结束 loading，用户可能在流关闭前抢发了新消息（同会话
+    // 新流已在流式）——此时注册表项已被新一轮覆盖，跳过全量 refetch，避免抹掉新气泡。
     // 另要求收到过 done 事件：用户取消 / 重试耗尽时保留本地气泡（含错误提示），
     // 不被 DB 快照覆盖。无限演算每轮都会发 done，会话结束时同样能触发对账。
-    if (convId && ownsAbort && gotDoneEvent) {
-      try {
-        const res = await api.getConversation(convId)
-        setMessages(res.messages.map(mapServerMessage))
-      } catch {
-        // Non-fatal — messages stay without IDs, revert buttons won't show on them
+    // 流已主动终止（cancel / revert）：绝对禁止后续 refetch——会覆盖掉本地
+    //   故意保留的半生成内容或回退截断状态，并可能复活刚被回退的消息。
+    const forciblyTerminated = streamTerminatedForciblyRef.current
+    streamTerminatedForciblyRef.current = false
+    if (convId && ownsStream && gotDoneEvent && !forciblyTerminated) {
+      const res = await api.getConversation(convId).catch(() => null)
+      if (res) {
+        // 流已结束（gotDoneEvent）：DB 权威对账——不复活他端已删的消息
+        applySnapshot(streamKey, res.messages.map(mapServerMessage), 'reconcile')
       }
     }
 
-    // Safety net: ensure streaming is cleared
-    setMessages((prev) => {
-      const last = prev[prev.length - 1]
-      if (!last || last.role !== 'assistant' || !last.streaming) return prev
-      return [...prev.slice(0, -1), { ...last, streaming: false }]
-    })
-  }, [activeId, loading, updateLastMessage, refreshConversations, t])
+    // Safety net: ensure streaming is cleared（同样只在没有更新流时执行）
+    if (!streamsRef.current.has(streamKey)) {
+      updateLastMessage(streamKey, { streaming: false })
+    }
+  }, [updateMessages, updateLastMessage, setLoadingFor, renamePartition, applySnapshot, refreshConversations, setViewKey, t, i18n])
 
-  /** 实时中继事件入口：他设备流事件应用到本设备正在查看的会话 */
-  const handleRemoteStreamEvent = useCallback((msg: any) => {
-    handleSSEEvent(msg, { remote: true })
+  /** 实时中继事件入口：他设备流事件写入其会话自己的分区 */
+  const handleRemoteStreamEvent = useCallback((msg: import('@/shared/types').ServerMessage, conversationId: string) => {
+    handleSSEEventRef.current(msg, conversationId, { remote: true })
   }, [])
 
-  function handleSSEEvent(msg: any, opts?: { remote?: boolean }) {
+  function handleSSEEvent(msg: any, key: string, opts?: { remote?: boolean }) {
     const remote = !!opts?.remote
     switch (msg.type) {
-      case 'conversation_id':
-        if (remote) return // 他设备的会话 ID 事件对本设备无意义
-        setActiveId(msg.id)
-        // 首条消息创建会话：草稿态转为真实会话
-        setDraftType(null)
-        // First message creates a new conversation — push its id to hash
-        if (msg.id) {
-          const newHash = `#/c/${encodeURIComponent(msg.id)}`
-          if (window.location.hash !== newHash) {
-            history.replaceState(null, '', newHash)
-          }
-        }
-        break
-
-      case 'user_message_id':
+      case 'user_message_id': {
         if (remote) return // 他设备的用户消息 ID 回填对本设备无意义
         // Assign the server-assigned ID to the locally-created user message
         // so the revert button becomes available immediately
-        setMessages((prev) => {
+        updateMessages(key, (prev) => {
           for (let i = prev.length - 1; i >= 0; i--) {
             if (prev[i].role === 'user' && !prev[i].id) {
               const updated = [...prev]
@@ -361,13 +614,14 @@ export function useChat() {
           return prev
         })
         break
+      }
 
-      case 'user_message':
+      case 'user_message': {
         // 实时中继：他设备渲染用户气泡（source 设备本地已有，不重发）。
         // 单聊下同步预建流式 assistant 气泡 —— 与源设备 sendMessage 的
         // 初始状态对齐，否则后续 token 因「最后一条是 user」被丢弃。
-        setMessages((prev) => {
-          const isGroup = activeConvTypeRef.current === 'group'
+        const isGroup = convTypeOf(key) === 'group'
+        updateMessages(key, (prev) => {
           const userBubble = { role: 'user' as const, id: msg.id, content: msg.content, attachments: msg.attachments || undefined }
           if (isGroup) return [...prev, userBubble]
           return [
@@ -377,11 +631,17 @@ export function useChat() {
           ]
         })
         break
+      }
 
       case 'token':
-        setMessages((prev) => {
+        updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
+          // 远程流恢复：尾部气泡曾被 DB 快照整体覆盖（判活 TTL 过期所致），
+          // 重新置为流式让后续 token 继续追加，而不是静默丢流
+          if (remote && !last.streaming) {
+            return [...prev.slice(0, -1), { ...last, content: last.content + msg.text, streaming: true }]
+          }
           return [...prev.slice(0, -1), { ...last, content: last.content + msg.text }]
         })
         break
@@ -390,7 +650,7 @@ export function useChat() {
         // 「唯一事实源」：thinking 纯文本（即服务端下发序列，含分隔符）作为真源，
         // thinkingSegments 每次都从它派生（同一套 decode 也用于历史加载）。
         const segRound = typeof msg.round === 'number' ? msg.round : undefined
-        setMessages((prev) => {
+        updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
           const newThinking = (last.thinking || '') + msg.text
@@ -406,14 +666,14 @@ export function useChat() {
             updated[updated.length - 1] = { ...updated[updated.length - 1], text: updated[updated.length - 1].text + msg.text }
             segments = updated
           }
-          return [...prev.slice(0, -1), { ...last, thinking: newThinking, thinkingSegments: segments }]
+          return [...prev.slice(0, -1), { ...last, thinking: newThinking, thinkingSegments: segments, ...(remote && !last.streaming ? { streaming: true } : {}) }]
         })
         break
       }
 
       case 'tool_call':
       case 'tool_execution_start':
-        setMessages((prev) => {
+        updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
           return [...prev.slice(0, -1), {
@@ -424,7 +684,7 @@ export function useChat() {
         break
 
       case 'tool_result':
-        setMessages((prev) => {
+        updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || !last.toolCalls?.length) return prev
           const calls = [...last.toolCalls]
@@ -445,20 +705,25 @@ export function useChat() {
           }
           return [...prev.slice(0, -1), { ...last, toolCalls: calls }]
         })
-        // 如果 pendingQuestion 的 tool_call_id 匹配，清除问题卡片
-        setPendingQuestion((prev) => {
-          if (prev && msg.id && prev.tool_call_id === msg.id) return null
-          return prev
-        })
+        // 如果 pendingQuestion 的 tool_call_id 匹配，清除问题卡片（限本会话）
+        if (pendingRef.current[key] && msg.id && pendingRef.current[key]!.tool_call_id === msg.id) {
+          setPendingFor(key, null)
+        }
         break
 
       case 'done':
         // 单聊对齐 group_done：收到 done 即结束 loading
         // （连接可能还要保持打开，等待中立 Agent 补发 suggestions）
-        if (!remote && !infiniteModeRef.current) {
-          setLoading(false)
+        if (!remote && !streamsRef.current.get(key)?.infinite) {
+          setLoadingFor(key, false)
         }
-        setMessages((prev) => {
+        // remote done 在无限演算中不清 TTL：每轮 done 之后还有
+        // follow_up → 下一轮 agent_start，TTL 清早了会导致轮间
+        // conv_changed 对账时 isStreamLive=false → 整体覆盖丢 follow_up
+        if (remote && !streamsRef.current.get(key)?.infinite) {
+          remoteLastAtRef.current.delete(key)
+        }
+        updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
           return [...prev.slice(0, -1), {
@@ -472,7 +737,8 @@ export function useChat() {
 
       case 'error':
         console.error('Server error:', msg.message)
-        setMessages((prev) => {
+        if (remote) remoteLastAtRef.current.delete(key)
+        updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
           return [...prev.slice(0, -1), { ...last, content: t('chat.errorMessage', { message: msg.message }), streaming: false }]
@@ -504,7 +770,7 @@ export function useChat() {
       // --- Group Chat Events ---
       case 'agent_start':
         // Start a new agent message bubble in group chat
-        setMessages((prev) => [
+        updateMessages(key, (prev) => [
           ...prev,
           {
             role: 'assistant',
@@ -519,7 +785,7 @@ export function useChat() {
 
       case 'agent_done':
         // Mark this agent's message as complete
-        setMessages((prev) => {
+        updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant' || last.agent_id !== msg.agent_id) return prev
           return [...prev.slice(0, -1), {
@@ -536,7 +802,7 @@ export function useChat() {
         // 守卫 1：仅当最后一条消息仍是 assistant 气泡时应用——loading 已提前结束，
         //         用户可能已抢发下一条消息，此时晚到的建议直接丢弃（DB 已持久化，刷新可见）。
         // 守卫 2：群聊下 agent_id 不匹配（同上竞态）也丢弃。
-        setMessages((prev) => {
+        updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
           if (msg.agent_id && last.agent_id && last.agent_id !== msg.agent_id) return prev
@@ -545,36 +811,41 @@ export function useChat() {
         break
 
       case 'group_done':
-        if (!remote && !infiniteModeRef.current) {
-          setLoading(false)
+        if (!remote && !streamsRef.current.get(key)?.infinite) {
+          setLoadingFor(key, false)
+        }
+        // remote 无限演算：group_done 后可能还有下一轮，不清 TTL
+        if (remote && !streamsRef.current.get(key)?.infinite) {
+          remoteLastAtRef.current.delete(key)
         }
         break
 
       case 'infinite_mode_off':
         // Server-side infinite mode ended (user turned off or hit 500 limit)
-        if (!remote) setLoading(false)
+        if (!remote) setLoadingFor(key, false)
+        if (remote) remoteLastAtRef.current.delete(key)
         break
 
       case 'follow_up_start':
         // Infinite mode: neutral agent is about to generate a follow-up
         // Create a placeholder user message bubble with loading animation
-        setMessages((prev) => [
+        updateMessages(key, (prev) => [
           ...prev,
           { role: 'user' as const, content: '', streaming: true },
         ])
         break
 
-      case 'follow_up':
+      case 'follow_up': {
         // Infinite mode: neutral agent generated a follow-up question
         // Replace the placeholder user message with actual content
-        setMessages((prev) => {
-          // 群聊判定不能嗅探消息上的 agent_id——单聊消息同样记录发言 Agent，
-          // 从 DB 加载过的单聊会话会被误判为群聊，导致 assistant 气泡不创建，
-          // 后续 token/done 因「最后一条是 user」被整体丢弃（Agent 消息被吞）。
-          // 本地流：以 sendMessage 时记录的 groupModeRef 为准；
-          // 实时中继：以当前会话类型（activeConvTypeRef）为准。
-          const isGroupChat = remote ? activeConvTypeRef.current === 'group' : groupModeRef.current
-          const translatedText = msg.text === '（继续）' ? t('chat.followUpFallback') : msg.text
+        // 群聊判定不能嗅探消息上的 agent_id——单聊消息同样记录发言 Agent，
+        // 从 DB 加载过的单聊会话会被误判为群聊，导致 assistant 气泡不创建，
+        // 后续 token/done 因「最后一条是 user」被整体丢弃（Agent 消息被吞）。
+        // 本地流：以 sendMessage 时注册的流元数据（entry.group）为准；
+        // 实时中继：以该会话的类型缓存（convTypeOf）为准。
+        const isGroupChat = remote ? convTypeOf(key) === 'group' : !!streamsRef.current.get(key)?.group
+        const translatedText = msg.text === '（继续）' ? t('chat.followUpFallback') : msg.text
+        updateMessages(key, (prev) => {
           // Find the last user message (the placeholder) and replace its content
           const updated = [...prev]
           for (let i = updated.length - 1; i >= 0; i--) {
@@ -590,112 +861,128 @@ export function useChat() {
           return updated
         })
         break
+      }
 
       case 'ask_user':
-        // Agent 向用户提问 —— 显示问题卡片
-        setPendingQuestion(msg as (import('@/shared/types').ServerMessage & { type: 'ask_user' }))
+        // Agent 向用户提问 —— 按会话分区存储，只弹在所属会话的视图上
+        setPendingFor(key, msg as PendingQuestion)
         break
     }
   }
 
+  /** 每次渲染后刷新 ref：让 useCallback 包裹的远程入口始终调到最新闭包（t 随语言变化等） */
+  const handleSSEEventRef = useRef(handleSSEEvent)
+  useEffect(() => {
+    handleSSEEventRef.current = handleSSEEvent
+  })
+
   const sendAnswer = useCallback(async (questionId: string, answer: string, selectedOptions?: string[]) => {
-    if (!activeId) return
-    setPendingQuestion(null)
+    // 按 question_id 反查所属会话——提问卡片只出现在所属会话视图上，
+    // 但用户可能在卡片弹出后切走，答案必须送回原会话而非当前视图。
+    let targetKey: string | null = null
+    for (const [k, q] of Object.entries(pendingRef.current)) {
+      if (q && q.question_id === questionId) { targetKey = k; break }
+    }
+    if (!targetKey || isDraftKey(targetKey)) return
+    setPendingFor(targetKey, null)
     try {
-      await api.answerQuestion(activeId, questionId, answer, selectedOptions)
+      await api.answerQuestion(targetKey, questionId, answer, selectedOptions)
     } catch (err) {
       console.error('Failed to send answer:', err)
     }
-  }, [activeId])
+  }, [setPendingFor])
 
+  /** cancel / revertMessage 应绝对禁止后续任何对账——流已主动终止，
+   *  收尾的全量 refetch 会覆盖掉本地故意保留的气泡（取消后的半生成内容、
+   *  回退后的截断状态）。sendMessage 的收尾判此标志跳过 refetch。 */
+  const streamTerminatedForciblyRef = useRef(false)
   const cancel = useCallback(() => {
+    const key = activeKeyRef.current
+    if (!key) return
     // 如果有待回答的问题，先发送空答案（跳过）
-    if (pendingQuestion) {
-      sendAnswer(pendingQuestion.question_id, '', [])
+    const pq = pendingRef.current[key]
+    if (pq) {
+      setPendingFor(key, null)
+      if (!isDraftKey(key)) {
+        api.answerQuestion(key, pq.question_id, '', []).catch(console.error)
+      }
     }
-    abortRef.current?.abort()
-    abortRef.current = null
-    setLoading(false)
-  }, [pendingQuestion, sendAnswer])
+    const entry = streamsRef.current.get(key)
+    if (entry) {
+      entry.userCancelled = true
+      entry.abort.abort()
+    }
+    streamTerminatedForciblyRef.current = true
+    setLoadingFor(key, false)
+  }, [setPendingFor, setLoadingFor])
 
   const selectConversation = useCallback(async (id: string) => {
-    try {
-      const res = await api.getConversation(id)
-      setActiveId(id)
-      setDraftType(null)
-      // Sync URL hash
-      const newHash = `#/c/${encodeURIComponent(id)}`
-      if (window.location.hash !== newHash) {
-        history.pushState(null, '', newHash)
-      }
-      setMessages(res.messages.map(mapServerMessage))
-    } catch (err) {
-      console.error('Failed to load conversation:', err)
-      // Access denied — clear hash, return to initial page
-      history.replaceState(null, '', window.location.pathname + window.location.search)
-    }
-  }, [])
+    return loadConversation(id, ++loadGenRef.current, 'initial')
+  }, [loadConversation])
 
   /** 本地状态重置：登出 / 切换身份时使用，绝不发任何网络请求。
    *  （若在这里发请求，无会话的请求会 401 → auth:expired → handleLogout →
    *   再发请求 → ……形成无限 401 死循环，且会误杀刚登录拿到的新 cookie。） */
   const resetChat = useCallback(() => {
-    // 正在流式输出的会话一并掐断
-    abortRef.current?.abort()
-    abortRef.current = null
-    setLoading(false)
-    setActiveId(null)
-    setMessages([])
-    setConversations([])
-    setPendingQuestion(null)
+    // 掐断所有本地流并清空全部分区。
+    // 先标记 userCancelled 再 abort：否则流会按「连接中断」进重试循环，
+    // 带着已失效的凭证重新请求（401 死循环的教训见下方注释）。
+    for (const entry of streamsRef.current.values()) {
+      entry.userCancelled = true
+      entry.abort.abort()
+    }
+    streamsRef.current.clear()
+    remoteLastAtRef.current.clear()
+    convTypesRef.current.clear()
+    ++loadGenRef.current // 在途的会话加载全部作废
+    messagesByConvRef.current = {}
+    setMessagesByConv({})
+    loadingRef.current = {}
+    setLoadingByConv({})
+    pendingRef.current = {}
+    setPendingByConv({})
+    setViewKey(null, null)
     setDraftType(null)
+    setConversations([])
     if (window.location.hash.startsWith('#/c/')) {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
-  }, [])
+  }, [setViewKey])
 
   /** 新建会话（单聊）—— 只进入草稿态，不落库。
-   *  会话记录在「发出第一条消息」时由服务端创建（侧边栏同步出现）。 */
-  const createConversation = useCallback(async () => {
-    // 正在流式输出的会话一并掐断
-    abortRef.current?.abort()
-    abortRef.current = null
-    setLoading(false)
-    setActiveId(null)
-    setMessages([])
-    setPendingQuestion(null)
+   *  会话记录在「发出第一条消息」时由服务端创建（侧边栏同步出现）。
+   *  注意：不掐断其他会话正在进行的后台流（多会话并发的关键）。 */
+  const createConversation = useCallback(() => {
+    const key = `${DRAFT_PREFIX}${++draftSeqRef.current}`
+    ++loadGenRef.current // 作废在途的会话加载，防止慢响应覆盖新草稿
+    setViewKey(null, key)
     setDraftType('direct')
     // 草稿态无会话 ID，hash 归位
     if (window.location.hash) {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
-  }, [])
+  }, [setViewKey])
 
   /** 新建群聊草稿：由 useGroupChat 传入所选 Agent，先暂存组态。
    *  会话记录在「发出第一条消息」时由服务端创建。 */
   const startGroupDraft = useCallback(() => {
-    abortRef.current?.abort()
-    abortRef.current = null
-    setLoading(false)
-    setActiveId(null)
-    setMessages([])
-    setPendingQuestion(null)
+    const key = `${DRAFT_PREFIX}${++draftSeqRef.current}`
+    ++loadGenRef.current // 作废在途的会话加载，防止慢响应覆盖新草稿
+    setViewKey(null, key)
     setDraftType('group')
-    // 群聊组态由 useGroupChat 负责维护（groupAgents）；
-    // 此处预置 groupModeRef，避免首条消息发出前 follow_up 事件误判为单聊
-    groupModeRef.current = true
     if (window.location.hash) {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
-  }, [])
+  }, [setViewKey])
 
   const deleteConversation = useCallback(async (id: string) => {
     try {
       await api.deleteConversation(id)
+      ++loadGenRef.current // 作废在途加载——防止慢响应在删除后复活会话
       setConversations((prev) => prev.filter((c) => c.id !== id))
-      if (activeId === id) {
-        setActiveId(null)
-        setMessages([])
+      clearPartition(id)
+      if (activeIdRef.current === id) {
+        setViewKey(null, null)
         setDraftType(null)
         // Clear hash since we deleted the active conversation
         if (window.location.hash) {
@@ -705,7 +992,7 @@ export function useChat() {
     } catch (err) {
       console.error('Failed to delete conversation:', err)
     }
-  }, [activeId])
+  }, [clearPartition, setViewKey])
 
   const renameConversation = useCallback(async (id: string, title: string) => {
     try {
@@ -756,33 +1043,41 @@ export function useChat() {
     } catch (err) {
       console.error('Failed to export conversation:', err)
     }
-  }, [])
+  }, [t])
 
   const revertMessage = useCallback(async (index: number) => {
-    const message = messages[index]
+    const key = activeKeyRef.current
+    if (!key) return null
+    const message = messagesByConvRef.current[key]?.[index]
     if (!message) return null
 
     // If stream is active, abort it first — the revert must interrupt any ongoing AI generation
-    if (loading && abortRef.current) {
-      abortRef.current.abort()
-      abortRef.current = null
-      setLoading(false)
+    // （仅限本会话的流；标记 userCancelled 使 sendMessage 按用户取消收尾而非重试）
+    // 禁止收尾 refetch：full-overwrite 会覆盖本地回退后的截断状态（复活刚删的消息）
+    // 不以 loadingRef 为条件：done 早就在流结束前清 loading 了（suggestions
+    //   阶段 SSE 仍打开），回退时流仍存活，不掐就会留下孤儿流误伤后续消息。
+    const entry = streamsRef.current.get(key)
+    if (entry) {
+      entry.userCancelled = true
+      entry.abort.abort()
+      setLoadingFor(key, false)
+      streamTerminatedForciblyRef.current = true
     }
 
     // If message has a server-assigned ID, delete from server
-    if (activeId && message.id) {
+    if (!isDraftKey(key) && message.id) {
       try {
-        await api.revertMessages(activeId, message.id)
+        await api.revertMessages(key, message.id)
       } catch (err) {
         console.error('Failed to revert message on server:', err)
       }
     }
 
     // Update local state — remove this message and all after it
-    setMessages((prev) => prev.slice(0, index))
+    updateMessages(key, (prev) => prev.slice(0, index))
 
     return message.content
-  }, [activeId, messages, loading])
+  }, [updateMessages, setLoadingFor])
 
   // ---- Realtime: 同账号多设备实时同步 ----
   // 建立 SSE 长连接（GET /api/events），接收其他设备的聊天流事件与
@@ -799,7 +1094,7 @@ export function useChat() {
           refreshConversations()
           break
         case 'conv_changed':
-          // 其他设备回退了某会话的消息 —— 若本设备正在查看，整条重拉对齐
+          // 其他设备回退了某会话的消息 —— 分区存在则整条重拉对齐（含后台会话）
           refetchConversation(payload.conversation_id)
           refreshConversations()
           break
@@ -809,15 +1104,17 @@ export function useChat() {
           window.dispatchEvent(new CustomEvent('realtime:group_members', { detail: { conversation_id: payload.conversation_id } }))
           break
         case 'stream': {
-          // 其他设备正在流式输出 —— 若本设备正在查看同一会话，直接应用流事件。
-          // 守卫：activeId 匹配，或当前 URL hash 指向该会话（覆盖刚切换、
-          // activeId 尚未同步 / 深链直开等边缘情况），确保任何情况都不丢流。
+          // 其他设备正在流式输出 —— 事件写入该会话自己的分区：
+          // 当前正在查看（activeKey 或 hash 指向），或该分区已存在（打开过的
+          // 会话后台也实时更新，切回即见）。写入自己分区不会再污染当前视图。
+          const cid = payload.conversation_id
           const hashConvId = (() => {
             const m = window.location.hash.match(/^#\/c\/(.+)$/)
             return m ? decodeURIComponent(m[1]) : null
           })()
-          if (activeIdRef.current === payload.conversation_id || hashConvId === payload.conversation_id) {
-            handleRemoteStreamEvent(payload.event)
+          if (activeKeyRef.current === cid || hashConvId === cid || messagesByConvRef.current[cid] !== undefined) {
+            remoteLastAtRef.current.set(cid, Date.now())
+            handleRemoteStreamEvent(payload.event, cid)
           }
           break
         }
@@ -827,7 +1124,13 @@ export function useChat() {
       unsubscribe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshConversations, refetchConversation, getUser()])
+  }, [refreshConversations, refetchConversation, handleRemoteStreamEvent, getUser()])
+
+  // ---- 派生导出（签名与旧版一致，视图只是当前分区 key 的投影） ----
+  const activeKey = activeId ?? draftKey
+  const messages = (activeKey != null ? messagesByConv[activeKey] : undefined) || []
+  const loading = !!(activeKey != null && loadingByConv[activeKey])
+  const pendingQuestion = (activeKey != null ? pendingByConv[activeKey] : undefined) ?? null
 
   return {
     conversations,
