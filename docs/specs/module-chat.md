@@ -15,7 +15,11 @@
 | `src/server/ai/neutral-agent.ts` | 中立 Agent：无限模式追问 + 回复后追问建议 + 群聊发言调度 |
 | `src/server/ai/tools.ts` | 工具注册表（委托到内置工具 registry） |
 | `src/server/tools/group-mention-tool.ts` | @mention 工具：Agent 间点名调用 |
+| `src/server/tools/ask-user-tool.ts` | ask_user 工具：阻塞式向用户提问并等待回答 |
+| `src/server/realtime.ts` | 进程内事件总线：同账号多设备实时同步 |
+| `src/server/routes/events.ts` | 实时事件通道 `GET /api/events`（SSE 长连接） |
 | `src/shared/thinking.ts` | thinking 分段的编解码 |
+| `src/shared/types.ts` | ServerMessage 联合类型、RealtimeEvent、AskUserQuestion 等 |
 | `src/client/hooks/useChat.ts` | 客户端聊天状态管理 + SSE 解析 + 重试 + 哈希路由 |
 | `src/client/hooks/useGroupChat.ts` | 群聊状态管理 |
 
@@ -36,7 +40,9 @@
   "attachments": [{ "url": "...", "name": "...", "size": 123, "type": "image/png" }],
   "conversation_type": "direct | group",
   "agent_ids": ["可选-群聊Agent ID列表"],
-  "infinite_mode": false
+  "infinite_mode": false,
+  "language": "zh-CN",
+  "device_id": "来源设备标识（同账号实时中继用，源设备据此跳过）"
 }
 ```
 
@@ -49,26 +55,30 @@
 
 **响应**：SSE 流（`Content-Type: text/event-stream`），每条事件通过 `event: message` + `data: {json}` 发送。
 
-**事件类型**（`ServerMessage` 联合类型）：
+##### SSE 事件表
 
 | 事件 | 数据 | 说明 |
 |---|---|---|
-| `conversation_id` | `{ id: string }` | 对话 ID（新建或复用时都会发送；首条消息创建会话时清除客户端草稿态） |
-| `user_message_id` | `{ id: number }` | 刚入库的用户消息 ID（回退按钮立即可用） |
-| `user_message` | `{ id: number, content: string, attachments? }` | **实时中继专用**：他设备渲染用户气泡（源设备本地已有，不重发） |
+| `conversation_id` | `{ id: string }` | 对话 ID（新建或复用时发送；清除客户端草稿态） |
+| `user_message_id` | `{ id: number }` | 刚入库的用户消息 ID |
+| `user_message` | `{ id: number, content: string, attachments? }` | **实时中继专用**：他设备渲染用户气泡 |
 | `token` | `{ text: string, agent_id?, agent_name? }` | 文本增量 token |
-| `thinking` | `{ text: string, round?: number, agent_id?, agent_name? }` | 思考过程增量 token；`round` 为分段轮号 |
-| `tool_call` | `{ id?: string, name: string, input: object, agent_id?, agent_name? }` | AI 发起工具调用 |
-| `tool_execution_start` | `{ id?: string, name: string, input: object, agent_id?, agent_name? }` | 工具实际开始执行 |
+| `thinking` | `{ text: string, round?: number, agent_id?, agent_name? }` | 思考过程增量 token |
+| `tool_call` | `{ id?: string, name: string, input: object, agent_id?, agent_name? }` | LLM 发起工具调用（intent 阶段，尚未执行） |
+| `tool_execution_start` | `{ id?: string, name: string, input: object, agent_id?, agent_name? }` | 工具实际开始执行（`tool_call` 是 LLM intent，`tool_execution_start` 是运行时确认——分离后客户端可区分"声明要调"与"正在执行"两个阶段） |
 | `tool_result` | `{ id?: string, name: string, summary: string, artifacts?, agent_id?, agent_name? }` | 工具调用结果 |
+| `ask_user` | `{ question_id: string, tool_call_id: string, questions: AskUserQuestion[], agent_id?, agent_name? }` | Agent 调用 ask_user 工具向用户提问（暂停执行，等待用户回答） |
 | `agent_start` | `{ agent_id: string, agent_name: string }` | 群聊中某个 Agent 开始回复 |
 | `agent_done` | `{ agent_id: string, agent_name: string, reply: string, suggestions: string[] }` | 群聊中某个 Agent 回复完成 |
-| `group_start` | `{ agent_ids: string[] }` | 群聊开始（含本轮参与者与顺序） |
+| `group_start` | `{ agent_ids: string[] }` | 群聊开始 |
 | `group_done` | `{ infinite?: boolean }` | 群聊结束 |
-| `suggestions` | `{ suggestions: string[], agent_id?: string \| null }` | 回复完成后由中立 Agent 异步补发的追问建议（在 done/agent_done/group_done 之后到达） |
+| `suggestions` | `{ suggestions: string[], agent_id?: string \| null }` | 回复完成后由中立 Agent 异步补发的追问建议 |
+| `follow_up_start` | `{}` | 无限模式：中立 Agent 即将生成追问（客户端据此创建占位气泡） |
 | `follow_up` | `{ text: string }` | 无限模式：中立 Agent 生成的追问 |
 | `infinite_mode_off` | `{}` | 无限模式已关闭 |
 | `done` | `{ reply: string, suggestions: string[], agent_id?, agent_name?, infinite? }` | 对话完成（终止事件） |
+| `voice_segment` | `{ message_id: number, index: number, audio_url: string, text: string, duration_seconds: number }` | TTS 语音合成片段（逐句流式下发） |
+| `voice_done` | `{ message_id: number, total_segments: number }` | 该消息全部 TTS 片段合成完毕 |
 | `error` | `{ message: string, agent_id?, agent_name? }` | 错误（终止事件） |
 
 **保活**：每 15 秒发送 SSE 注释 `:\n\n`，防止代理/浏览器关闭空闲连接。
@@ -91,6 +101,102 @@
 
 群聊创建接口。与 `POST /api/chat` 使用相同的 SSE 流式端点，但 `conversation_type` 固定为 `group`。
 
+### POST /api/chat/:conversationId/answer
+
+向 ask_user 工具提交用户回答。
+
+**认证**：需用户 JWT（`userAuthMiddleware`）。缺失 → `401`。
+
+**请求**：
+```json
+{
+  "question_id": "uuid-问题的唯一ID（必填）",
+  "answer": "用户自由填写内容（可选，跳过时为空）",
+  "selected_options": ["选中的选项 label 列表（可选）"]
+}
+```
+
+**响应**：
+- `200 { "success": true }` — 回答已接收，ask_user Promise resolve
+- `400 { "error": "question_id is required" }` — 缺少 question_id
+- `403 { "error": "Question does not belong to this conversation" }` — 问题不属于指定会话
+- `410 { "error": "Question not found or has expired" }` — 问题不存在、已被回答或已超时
+
+**行为**：`answer` 和 `selected_options` 至少传一个。两者的优先级：
+- 若有 `selected_options` → 回答文本为「用户选择了: xxx。附加说明: yyy」
+- 若仅传 `answer` → 直接用作回答文本
+- 两者皆空 → 视为「用户跳过了此问题」
+
+### Voice（TTS 语音合成）
+
+当 Agent 启用 `voice_enabled` 时，每次 assistant 消息持久化后，服务端按标点 + 长度（`[。！？.!?\n]` 或满 40 字符）将回复文本拆句，逐句异步调用 TTS 提供方（GPT-SoVITS / CosyVoice），生成音频文件并下发 SSE 事件：
+
+- **`voice_segment`**：单句音频生成完毕。`message_id` 关联消息，`index` 表示句序号（0-based），`audio_url` 为音频文件相对路径，`text` 为对应的原文，`duration_seconds` 为音频时长
+- **`voice_done`**：全部句段合成完毕（含超时 30s 兜底）。`total_segments` 表示总句数
+
+Voice 参数从 Agent 的 `voice_settings` JSON 中读取：`speakerId`（必选）、`speed`（默认 1.0）、`pitch`（默认 0）。TTS 配置端点与 provider 类型从 `getTtsConfig()` 动态获取。
+
+### ask_user 工具
+
+`ask_user` 是阻塞式工具：Agent 调用后暂停执行，向用户展示问题（单选/多选/自由输入），等待用户回答后以工具结果回传 LLM 继续循环。
+
+**核心流程**：
+1. Agent 调用 `ask_user` → 工具 validate 问题参数（questions 非空、options 2-4 个）
+2. 通过 `ctx.onUpdate` 触发 `tool_execution_update` → 服务端发 SSE `ask_user` 事件（含 `questionId`、`tool_call_id`、`questions`）
+3. execute() 返回永不 resolve 的 Promise —— Pi 循环自然暂停
+4. 客户端渲染问题 UI → 用户填写回答 → 调用 `POST /api/chat/:id/answer`
+5. answer 端点查出问题 → `resolveQuestion()` → Promise resolve → LLM 继续循环
+6. 超时（120s）或 SSE 断开 → `rejectQuestion()` → LLM 收到错误
+
+**`ask_user` SSE 事件**：
+- `type: "ask_user"` — `questionId`（问题 UUID）、`tool_call_id`、`questions`（`AskUserQuestion[]`，每个含 `header`、`question`、`options`、`multiSelect`）
+
+**`AskUserQuestion` 结构**：
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `header` | `string` | 短标签，最多 12 字符（如「文件命名」） |
+| `question` | `string` | 完整问题文本 |
+| `options` | `AskUserOption[]` | 2-4 个预设选项，每个含 `label` 和可选 `description`；空数组 = 自由输入 |
+| `multiSelect` | `boolean` | 是否允许多选 |
+
+**注意**：`tool_call` 事件（LLM intent）和 `ask_user` 事件是两件事——`tool_call` 表示 LLM 声明要调这个工具（与其他工具的 tool_call 一致），`ask_user` 是工具 execute 后下发的 UI 事件（含 questionId 供 answer 端点回传）。
+
+### 实时事件通道（GET /api/events）
+
+同账号多设备实时同步的核心基础设施。客户端每设备维护一条 SSE 长连接，接收聊天流中继、会话列表变更等事件。
+
+**认证**：需用户 JWT（`userAuthMiddleware`）。`device_id` 经 query 参数传递（EventSource 无法附加自定义请求头）。
+
+**SSE 防缓冲响应头**：`Cache-Control: no-cache`、`X-Accel-Buffering: no`、`Connection: keep-alive`，阻止 Nginx/CDN 缓冲聚合。
+
+**保活**：每 15s `:keepalive\n\n`。
+
+**RealtimeEvent 类型**（`data` 字段为完整 JSON）：
+
+| 事件 | 数据 | 说明 |
+|---|---|---|
+| `stream` | `{ type: "stream", conversation_id: string, event: ServerMessage }` | 聊天流中继：同账号其他设备的实时消息事件 |
+| `conv_sync` | `{ type: "conv_sync" }` | 会话列表变更信号 → 刷新侧边栏 |
+| `conv_changed` | `{ type: "conv_changed", conversation_id: string }` | 会话内容变更（如回退消息）→ 正在查看的设备重新拉取 |
+| `group_members` | `{ type: "group_members", conversation_id: string }` | 群成员变更 → 刷新成员列表 |
+
+**订阅管理**：
+- 按 `deviceId` 幂等：同设备重连时先移除旧订阅，避免事件双发
+- 惰性清理：广播时顺带移除 `aborted` 订阅，防止异常断线泄漏
+- 仅内存态，单实例部署；多实例需替换为 Redis pub/sub
+
+**源设备自跳过**：`broadcastStream` 携带 `originDeviceId`，源设备自己的事件通道不重复推送（已通过 fetch 流直接渲染）。
+
+### 服务端事件总线（realtime.ts）
+
+进程内 `Map<userId, Set<RealtimeSubscriber>>`。每个订阅持 `deviceId`、`aborted` 标记、串行化 `writeChain`。
+
+**广播函数**：
+- `broadcastStream(userId, originDeviceId, data)` — 聊天流事件中继（`POST /api/chat` 的 `send()` 内调用，跳过源设备）
+- `broadcastConversationSync(userId)` — 会话列表变更（新建/删除/重命名时调用）
+- `broadcastConversationChanged(userId, conversationId)` — 会话内容变更广播
+- `broadcastGroupMembers(userId, conversationId)` — 群成员变更广播
+
 ## 行为约束
 
 ### 服务端（chat.ts）
@@ -106,6 +212,11 @@
 9. **追问建议补发**：非无限模式下，本轮最后一条 assistant 消息入库后由中立 Agent（其 `model` / `system_prompt` 现查）基于最近 20 条上下文生成 3 条追问建议：先 `UPDATE messages.suggestions`，再补发 `suggestions` SSE 事件。与 follow_up 共用「用户代笔」身份锚定（系统提示词铁律禁止模仿 Agent 口癖/助手口吻 + 定界符包裹上下文），输出行级防御清理（围栏/bullet/编号/引号/「用户：」标签前缀）。`done`/`agent_done` 中的 `suggestions` 字段正常路径为空数组。生成失败或超时（30s）静默降级为无建议；兜底路径（模型自发输出围栏被解析出建议）跳过生成，避免重复
 10. **文档附件复制到工作区**：`docx/pptx/xlsx/xls/pdf` 附件会自动复制到对话工作区
 11. **无限模式循环**：每次 Agent 回复后由中立 Agent 生成追问，重新加载历史并启动新一轮 AI 循环，直到关闭或达上限
+12. **参数透传**：`language` 参数透传到 Pi Agent 循环和群聊编排，供多语言提示词注入使用
+13. **device_id**：请求携带 `device_id`（来源设备标识），服务端据此跳过对源设备的实时中继（源设备已通过 fetch 流直接渲染）。`user_message` 中继在 `streamConvId` 确立后立即广播
+14. **Voice 语音合成**：当 Agent `voice_enabled` 为 true 时，每次 assistant 消息持久化后异步逐句 TTS 合成；按标点 + 长度（`[。！？.!?\n]` 或 40 字符）拆句，每句完成发送 `voice_segment` 事件，全部完成（或 30s 超时）后发送 `voice_done`
+15. **ask_user 工具集成**：Agent 调用 ask_user 时，服务端通过 SSE 下发 `ask_user` 事件（含 questionId、questions 数据）；用户回答经 `POST /api/chat/:id/answer` 端点递交，`resolveQuestion()` 唤醒 Promise 并将回答作为工具结果回传 LLM；超时 120s 或 SSE 断开则 `rejectQuestion()`
+16. **实时中继广播**：`send()` 内每次写入 SSE 事件后（除 `conversation_id` 和 `user_message_id`），调用 `broadcastStream` 中继到同账号其他设备的 `/api/events` 连接，跳过源 `device_id`；`user_message` 在 `streamConvId` 确立后单独广播
 
 ### 服务端（pi-adapter.ts）
 

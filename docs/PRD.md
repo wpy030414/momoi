@@ -150,13 +150,101 @@ Momoi 是一个**轻量级、可自托管的 Web AI 智能体平台**。它的�
 - 工具列表缓存（5 分钟 TTL），MCP 服务器故障时优雅降级
 - 不依赖 `@modelcontextprotocol/sdk`，手动实现 HTTP 传输
 
+### F15：OAuth2 登录
+
+- 管理员可在后台配置多个 OAuth2 提供商（名称、ID、授权 URL、Token URL、UserInfo URL、Client ID/Secret、Scopes）
+- OAuth 提供商信息通过 `/api/oauth/providers` 公开暴露（仅 ID 和名称，不暴露密钥）
+- OAuth 登录流程：浏览器跳转提供商授权页 → 回调验证 state（防 CSRF）→ 换取 access_token → 查询 UserInfo
+- 回调路由通过 Referer 头自动推断 SPA 前端 origin（兼容开发代理模式）
+- 已有绑定的 OAuth 身份直接登录，签发 JWT Cookie
+- 已登录用户使用 OAuth 时自动绑定当前账号（无需二次验证）
+- 全新 OAuth 用户进入注册页面，支持两种模式：
+  - **绑定已有账号**（action=link）：提供已有用户名+PIN，验证通过后绑定 OAuth 身份
+  - **创建新账号**（action=create）：提供用户名+PIN，创建账号并绑定
+- OAuth 注册受 `oauth_registration_open` 开关控制，管理员可随时关闭
+- OAuth 绑定以 `(provider_id, provider_user_id)` 唯一约束防止重复绑定
+- 账号被封禁（banned）时禁止 OAuth 登录
+
+### F16：微信绑定
+
+- 用户通过网页端扫码绑定微信个人机器人（基于腾讯 iLink 协议），非群机器人
+- **绑定流程**：网页端发起绑定 → 后端调用 iLink 获取 QR Code → 服务端渲染二维码为 data URI 返回前端 → 用户用微信扫码 → 前端轮询扫码状态 → 确认后保存 bot_token 到数据库
+- **会话锚定**：绑定时可指定目标一对一对话 ID，后续微信消息路由到该对话；未指定则沿用已有绑定的会话
+- **覆盖转移（换绑）**：重新扫码绑定到新会话即完成转移，旧会话不再接收微信消息——路由权威即 `wechat_bindings.conversation_id` 字段本身
+- 会话删除时自动清除绑定（poller 自愈 + 删除时级联清理），防止僵尸绑定
+- 绑定操作受每用户串行锁保护，防止并发扫码覆盖
+- **微信消息接收**：poller 每 5 秒轮询所有已绑定用户的 iLink 消息更新
+- **消息去重**：基于 iLink message_id 的内存去重缓存（5 分钟窗口），防止长轮询重复投递
+- **消息路由**：发送者校验 + 会话存活检查 + 合法性过滤（仅绑定用户的 wechat_user_id 可发消息）
+- **AI 桥接**：微信文本直接送入 `runPiAgentLoop`，历史消息加载、思考过程、后续建议均写入消息记录；不依赖 HTTP/SSE 层
+- **消息回复**：AI 回复通过 iLink sendMessage 发送，带 3 次指数退避重试（1s/2s/4s）；session 过期自动标记 `session_expired`
+- **失败提示**：微信推送失败时（如 token 过期），在对话中插入系统消息 `[WeChat推送失败]` 提醒用户
+- 内置命令 `/clear`、`/new`、`/reset` 直接在微信端响应"会话已重置"
+- 未绑定会话时微信消息回复"尚未绑定会话"提示
+- 解绑 API 支持主动断开微信绑定
+
+### F17：TTS 语音合成
+
+- 支持两种 TTS 引擎后端：**GPT-SoVITS**（默认）和 **CosyVoice**
+- TTS 引擎通过 HTTP API 对接（GPT-SoVITS 端口 9880、CosyVoice 独立端点），服务端负责调用并缓存音频
+- 管理员可在后台配置 TTS 引擎的 API 端点地址和引擎类型
+- **每个 Agent 可独立配置声音**：
+  - 上传声音样本音频（参考录音）
+  - 生成或注册 voice_id/speaker_id
+  - 启用/关闭语音合成
+  - 配置语音参数（语速、音调等）
+- 语音合成在每次 AI 回复后异步执行，按句子分段生成 WAV 音频文件，存于 `data/voice/{agentId}/{messageId}/`
+- 每段语音记录元数据到 manifest.json（文本、段数、完成状态）
+- 前端通过 `/api/voice/segments` 端点查询语音片段列表，按需加载音频播放
+- 音频以 32kHz mono 16bit WAV 格式缓存，时长通过文件大小估算
+
+### F18：多设备实时同步
+
+- 同账号多设备间通过 **SSE 事件总线**（进程内内存态）实现实时数据同步，无需手动刷新
+- 每个已登录设备保持一条到 `/api/events` 的 SSE 长连接
+- **聊天流中继**：用户在一台设备上对话时，聊天流事件（token 流式输出、工具调用、思考过程）实时推送给同账号下的其他设备
+- **来源设备自跳过**：聊天流事件携带 `deviceId`，源设备不重复推送（源设备已通过 POST `/api/chat` 的 fetch 流直接渲染）
+- **会话列表同步**：会话创建/删除/重命名时广播 `conv_sync` 事件，各设备侧边栏自动更新
+- **会话内容变更**：消息回退等操作广播 `conv_changed` 事件，正查看该会话的设备自动重新拉取消息
+- **群成员变更**：群聊成员变动广播 `group_members` 事件
+- 设备重连时自动去重同一 `deviceId` 的旧订阅（防御 React StrictMode 双挂载）
+- 广播时惰性清理已断开的订阅，防止异常断线时内存泄漏
+
+### F19：ask_user 工具
+
+- 向 AI Agent 提供阻塞式用户询问能力——Agent 在需要用户决策时调用此工具暂停执行
+- **核心机制**：`execute()` 返回一个不 resolve 的 Promise，Pi 循环自然等待；通过 `ctx.onUpdate` 触发 `tool_execution_update` SSE 事件，下发 `ask_user` 问题到前端
+- 支持**多问题**：单次调用可提多个问题，每个问题包含标题、完整问题文本、预设选项
+- **预设选项**：每个问题可带 2-4 个选项（label + description），单选/多选可选；选项为空时用户自由输入
+- **超时处理**：120 秒未回答自动拒绝，返回超时错误给 Agent；SSE 断开时同步清理该会话所有挂起问题
+- **回答端点**：`POST /api/chat/:id/answer` 接受 `questionId + answer + selectedOptions`，校验后 resolve 挂起的 Promise
+- 支持 AbortSignal：用户取消对话时自动 reject 挂起问题
+
+### F20：PostgreSQL 远程数据库模式
+
+- 通过 `DATABASE_URL`、`DATABASE_USER`、`DATABASE_SECRET` 三个环境变量同时填写启用远程数据库
+- 系统从 `DATABASE_URL` 的 scheme 自动识别数据库类型（`postgres://` 或 `postgresql://` → PostgreSQL）
+- 未配置或三个变量缺一时使用默认的本地 **sql.js（SQLite 内存持久化）** 模式
+- PostgreSQL 模式使用 `pg`（node-postgres）驱动 + `drizzle-orm/node-postgres` + `schema.pg.ts` 专用 Schema 定义
+- 启动时自动执行 DDL：`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD COLUMN IF NOT EXISTS` 增量迁移
+- 连接池配置：最大 5 个连接
+- 两种模式导出统一的 `db` 对象和表定义，业务层无需感知底层数据库差异
+
+### F21：直连注册开关
+
+- 管理员可通过数据库设置项 `direct_registration_open` 控制直接 PIN 注册的开放状态
+- 关闭后，新用户无法通过用户名+PIN 方式注册——仅已有用户可登录
+- 关闭不影响管理员创建账号、OAuth 注册等替代注册路径
+- 运行时热更新生效，无需重启服务
+
 ## 非功能需求
 
 ### NF1：部署简单
 
-- 单进程部署，无需外部数据库
+- 单进程部署，无需外部数据库（默认）
 - `pnpm build && pnpm start` 即可运行
-- SQLite 单文件存储
+- SQLite 单文件存储（默认）
+- 可选远程 PostgreSQL 替代方案
 
 ### NF2：兼容性
 
@@ -166,12 +254,20 @@ Momoi 是一个**轻量级、可自托管的 Web AI 智能体平台**。它的�
 - 支持 Pi 式并行批执行（同一轮内多工具并发执行 + 顺序回填 + 批量终止）
 - 漂移检测（连续重复工具批次自动终止）
 - 支持多轮工具调用
+- 支持 SQLite（本地 sql.js）和 PostgreSQL 两种数据库后端，业务层无需感知差异
 
 ### NF3：可靠性
 
 - 客户端自动重试（最多 3 次，指数退避）
 - SSE 15 秒心跳保活
 - 60 秒空闲超时
+- 微信消息轮询 5 秒间隔 + 每用户并发守卫（防止同一用户轮询重叠）
+- 微信消息去重缓存（5 分钟窗口），防止 iLink 长轮询重复投递
+- 微信消息回复 3 次指数退避重试（1s/2s/4s），失败时推送 MARKER 系统消息
+- 微信 bot_token 写守卫：并发扫码或 token 轮换时，旧 token 的写入不污染新绑定行
+- 微信绑定轮询器自愈：指向已删除会话的绑定自动清理
+- ask_user 超时自动解除（120 秒），SSE 断线清理挂起问题
+- 数据库每 30 秒自动持久化（SQLite 模式）
 
 ### NF4：安全性
 
@@ -182,10 +278,17 @@ Momoi 是一个**轻量级、可自托管的 Web AI 智能体平台**。它的�
 - Zip slip 攻击防护
 - 对话按用户隔离
 - 时序安全的 PIN 比较（`timingSafeEqual`）
+- OAuth 防 CSRF：state 参数经 HttpOnly Cookie 传递，回调时比对
+- OAuth 账号封禁检查：banned 用户禁止登录
+- OAuth 绑定唯一约束：`(provider_id, provider_user_id)` 防止账号冒用
+- 微信绑定 sender 校验：仅绑定的 wechat_user_id 可发送消息路由到 AI
+- 微信会话验证：目标会话被软删除后绑定自动清除，防止僵尸路由
+- 注册开关：管理员可通过开关控制 OAuth 注册和直接 PIN 注册，控制用户准入
 
 ### NF5：Agent 可扩展性
 
 - 支持多 Agent、多模型、多角色
 - 每个 Agent 独立提示词，互不干扰
+- 每个 Agent 独立声音配置（TTS 语音合成 + 声音样本）
 - 默认 Agent + 中立 Agent 开箱即用
 - 通过管理员面板即可增删 Agent，无需修改代码

@@ -2,16 +2,18 @@
 
 ## 概述
 
-认证分为两层：**用户认证**（用户名 + 4 位 PIN → 用户 JWT）与**管理员授权**（用户 JWT + `ADMIN` 环境变量用户名名单）。没有独立的管理员密钥或管理员 token——管理员端点接受普通用户 JWT，并由 `adminAuthMiddleware` 逐请求校验用户名是否在 `ADMIN` 名单内。
+认证分为两层：**用户认证**（用户名 + 4-8 位 PIN → 用户 JWT）与**管理员授权**（用户 JWT + `ADMIN` 环境变量用户名名单）。没有独立的管理员密钥或管理员 token——管理员端点接受普通用户 JWT，并由 `adminAuthMiddleware` 逐请求校验用户名是否在 `ADMIN` 名单内。
+
+此外支持 **OAuth2 第三方登录**（简要，详细见 `module-oauth.md`）和**微信绑定**（详细见 `module-wechat.md`）。
 
 ## 涉及文件
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/auth.ts` | PIN 哈希/校验 + 用户 JWT 签发验证 + 签名密钥管理 + `isAdmin()`/`adminAuthMiddleware` |
-| `src/server/middleware/userAuth.ts` | 独立的用户 JWT 认证中间件（严格模式，不接受 `X-User` 回退） |
-| `src/server/routes/user.ts` | 用户 PIN 相关端点（状态查询/验证/设置/修改）+ `GET /me`（管理员身份探测） |
-| `src/server/config.ts` | `env.ADMIN` 名单解析、`env.JWT_SECRET` 读取 |
+| `src/server/auth.ts` | PIN 哈希/校验 + 用户 JWT 签发验证 + 签名密钥管理 + `isAdmin()`/`adminAuthMiddleware` + Cookie 操作 |
+| `src/server/middleware/userAuth.ts` | 独立的用户 JWT 认证中间件（严格模式，仅从 HttpOnly Cookie 取 token） |
+| `src/server/routes/user.ts` | 用户端点（状态查询/验证/设置/修改/重命名/OAuth 绑定管理）+ `GET /me` |
+| `src/server/config.ts` | `env.ADMIN` 名单解析、`env.JWT_SECRET` 读取、注册开关（`isDirectRegistrationOpen` / `isOauthRegistrationOpen`） |
 | `src/server/rateLimiter.ts` | IP 速率限制器（PIN 暴力破解防护） |
 | `src/client/components/auth/LoginScreen.tsx` | 三步登录 UI |
 | `src/client/components/settings/ChangePinDialog.tsx` | 修改 PIN 表单 |
@@ -24,8 +26,10 @@
     → 有 → 同源请求自动携带 Cookie，验证成功则直接进入
   → 无 → LoginScreen
     → 步骤 1：输入用户名 → GET /api/user/status（X-User 头）
-    → 步骤 2a（已有 PIN）：输入 4 位 PIN → POST /api/user/verify
-    → 步骤 2b（新用户）：设置 4 位 PIN → POST /api/user/set-pin
+      → 响应包含 has_pin、direct_registration_open、oauth_registration_open
+    → 步骤 2a（已有 PIN）：输入 4-8 位 PIN → POST /api/user/verify
+    → 步骤 2b（新用户，且 registration open）：设置 4-8 位 PIN → POST /api/user/set-pin
+    → 步骤 2c（新用户，registration closed）：显示「注册已关闭」，无法继续
     → 响应 Set-Cookie: momoi_token=<jwt>（HttpOnly）+ { expires_at }
     → localStorage 仅存 username 与 expires_at（均为非机密）→ 进入主界面
 ```
@@ -35,17 +39,49 @@
 - **算法**：PBKDF2，`10000` 次迭代，`sha512`，派生长度 64 字节
 - **盐**：`randomBytes(16).toString('hex')`，每个用户独立随机生成
 - **存储格式**：`{salt}:{hash}`（均为 hex 字符串）
-- **存储位置**：`settings` 表，键为 `pin:{username}`，值为上述哈希串
+- **存储位置**：**`users` 表的 `pin_hash` 列**——不再是 `settings` 表的 `pin:{username}` 键。用户数据（用户名、PIN 哈希、首次登录时间、最近登录时间、封禁状态）集中在 `users` 表中管理。
 - **比较**：`crypto.timingSafeEqual` 防止时序侧信道
+
+```typescript
+// hashPin(pin, salt?) → "salt:hash"
+export function hashPin(pin: string, salt?: string): string {
+  const s = salt || randomBytes(16).toString('hex')
+  const hash = pbkdf2Sync(pin, s, 10000, 64, 'sha512').toString('hex')
+  return `${s}:${hash}`
+}
+
+// verifyPin(pin, stored) → boolean
+export function verifyPin(pin: string, stored: string): boolean {
+  const [salt, hash] = stored.split(':')
+  if (!salt || !hash) return false
+  const check = pbkdf2Sync(pin, salt, 10000, 64, 'sha512')
+  return timingSafeEqual(check, Buffer.from(hash, 'hex'))
+}
+```
+
+## 用户表（users）
+
+PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `users` 表中集中管理：
+
+| 列 | 说明 |
+|---|---|
+| `username` | PK，用户名 |
+| `pin_hash` | PBKDF2 哈希串，空字符串 = 未设置 PIN |
+| `first_login_at` | 首次登录时间戳 |
+| `last_login_at` | 最近登录时间戳 |
+| `banned` | 是否封禁（封禁账号的 token 验证通过但 `/verify` 返回 403） |
+
+`trackUserLogin(username)` 内部：已有用户则 UPDATE `last_login_at`，新用户则 INSERT 空 `pin_hash` 行（纯占位，表示该用户名已被占用）。
 
 ## JWT 实现细节
 
 | 项 | 用户 Token |
 |---|---|
 | 算法 | HS256 |
+| 库 | `jose`（纯 JS JWT 实现，无原生依赖） |
 | Payload | `{ role: 'user', sub: username, iat, exp }` |
 | 有效期 | 14 天（`USER_TOKEN_TTL_SECONDS`） |
-| 签发函数 | `signUserToken(username)`（`/verify`、`/set-pin`、`/refresh` 共用） |
+| 签发函数 | `signUserToken(username)`（`/verify`、`/set-pin`、`/refresh`、`/rename` 共用） |
 | 验证函数 | `verifyUserToken(token)` |
 | 响应字段 | `{ expires_at }`（token 仅经 `Set-Cookie` 下发） |
 
@@ -56,6 +92,36 @@
 - **签名密钥**：`JWT_SECRET` 环境变量（若提供）；否则首次启动生成 32 字节随机密钥并持久化到 `settings` 表（键 `jwt_secret`），重启后复用，用户 token 不因重启失效
 - 验证时除签名外还须匹配 `role === 'user'`，且 `sub` 为字符串
 - 管理员授权与 token 无关：`adminAuthMiddleware` 验证用户 JWT 后检查 `isAdmin(username)`（`env.ADMIN` 名单，进程生命周期内固定）
+
+## 注册开关
+
+两个独立的运行时注册开关（存储在 `settings` 表，可通过 Admin API 热切换，无需重启）：
+
+| 设置键 | 默认值 | 作用 |
+|---|---|---|
+| `direct_registration_open` | `'true'` | 控制 `POST /api/user/set-pin` 是否允许新用户设置 PIN |
+| `oauth_registration_open` | `'true'` | 控制 OAuth 登录是否允许创建新用户（见 `module-oauth.md`） |
+
+**生效逻辑**（`POST /api/user/set-pin` 内）：
+- 已有 `users` 行但 `pin_hash` 为空（从未设过 PIN）：检查 `direct_registration_open`
+- 关闭时返回 `403 Registration is currently closed`
+- `GET /api/user/status` 的响应体中也返回这两个布尔值，前端据此决定是否显示注册入口
+
+## OAuth 认证流程（简要）
+
+> 完整流程见 `module-oauth.md`。
+
+1. 管理员在后台配置 OAuth2 Provider（存储在 `settings` 表的 `oauth_providers` JSON 中）
+2. 前端登录页调用 `GET /api/user/status` 获取 `oauth_registration_open` 决定是否显示 OAuth 按钮
+3. 用户点击「通过 XX 登录」→ 前端调 `GET /api/oauth/:providerId/authorize` 获取重定向 URL
+4. 服务端生成 state token（15 分钟有效期），重定向到 OAuth Provider
+5. 用户授权后回调 `GET /api/oauth/:providerId/callback`
+6. 服务端用 token → userinfo → 查找或创建用户 → 签发 JWT → Set-Cookie → 重定向回前端
+7. 如果是新用户且 `oauth_registration_open` 为 `false`，拒绝创建
+
+**OAuth 绑定管理**：
+- `GET /api/user/oauth-bindings`：返回当前用户的所有 OAuth 绑定
+- `DELETE /api/user/oauth-bindings/:id`：删除一条绑定（需确保至少保留一种登录方式：PIN 或其他 OAuth 绑定）
 
 ## IP 速率限制
 
@@ -78,8 +144,8 @@
 
 | 导出位置 | 是否被路由使用 | 行为 |
 |---|---|---|
-| `src/server/middleware/userAuth.ts`（用户） | ✅ 是（chat / conversations / upload / workspace + user 的 `/me`、`/refresh`） | 从 HttpOnly Cookie `momoi_token` 提取 JWT 并验签 |
-| `src/server/auth.ts` 的 `adminAuthMiddleware`（管理员） | ✅ 是（admin 路由） | 同上取 token，另加 `ADMIN` 名单校验（401/403） |
+| `src/server/middleware/userAuth.ts`（用户） | 是（chat / conversations / upload / workspace + user 的 `/me`、`/refresh`、`/rename`、`/oauth-bindings`） | 从 HttpOnly Cookie `momoi_token` 提取 JWT 并验签 |
+| `src/server/auth.ts` 的 `adminAuthMiddleware`（管理员） | 是（admin 路由） | 同上取 token，另加 `ADMIN` 名单校验（401/403） |
 
 **实际行为**：
 
@@ -95,7 +161,7 @@
 
 查询当前用户名是否已设置 PIN。**此端点用 `X-User` 头识别用户（登录前无 JWT）。**
 
-**响应**：`{ "has_pin": true | false }`
+**响应**：`{ "has_pin": true | false, "direct_registration_open": true | false, "oauth_registration_open": true | false }`
 
 **错误**：缺少 `X-User` → `400 { "error": "Username required" }`
 
@@ -107,7 +173,7 @@
 
 **请求**：
 ```json
-{ "pin": "1234" }
+{ "pin": "123456" }
 ```
 
 **响应**：
@@ -120,9 +186,10 @@
 
 | 情况 | 状态码 |
 |---|---|
-| PIN 非 4 位数字 | 400 `PIN must be 4 digits` |
+| PIN 非 4-8 位数字 | 400 `PIN must be 4-8 digits` |
 | 该用户未设置 PIN | 404 `PIN not set` |
 | PIN 不匹配 | 401 `Invalid PIN` |
+| 账号已被封禁 | 403 `Account is disabled` |
 | 连续 5 次 PIN 错误 | 429 Too many failed attempts |
 
 ### POST /api/user/set-pin
@@ -130,18 +197,24 @@
 首次设置 PIN（无需旧 PIN），成功后直接签发 JWT。
 
 **请求头**：`X-User: 用户名`
-**请求**：`{ "pin": "1234" }`
+**请求**：`{ "pin": "123456" }`
 **响应**：同 `verify`
-**错误**：PIN 非 4 位 → 400；已设置过 → 409 `PIN already set, use change-pin`
+**错误**：
+- PIN 非 4-8 位 → 400 `PIN must be 4-8 digits`
+- 已设置过 → 409 `PIN already set, use change-pin`
+- 注册已关闭（新用户）→ 403 `Registration is currently closed`
+- 账号已被封禁 → 403 `Account is disabled`
+
+> **注册开关生效点**：仅当用户从未设置过 PIN（`pin_hash` 为空）时检查 `direct_registration_open`。已设置 PIN 的用户不受注册开关影响。
 
 ### POST /api/user/change-pin
 
 修改 PIN，需验证旧 PIN。
 
 **请求头**：`X-User: 用户名`
-**请求**：`{ "old_pin": "1234", "new_pin": "5678" }`
+**请求**：`{ "old_pin": "123456", "new_pin": "789012" }`
 **响应**：`{ "success": true }`
-**错误**：任一 PIN 非 4 位 → 400；未设置过 → 404；旧 PIN 不匹配 → 401 `Invalid current PIN`
+**错误**：任一 PIN 非 4-8 位 → 400；未设置过 → 404；旧 PIN 不匹配 → 401 `Invalid current PIN`
 
 ### GET /api/user/me（需用户 JWT）
 
@@ -164,17 +237,43 @@
 
 **响应**：`{ "success": true }` + `Set-Cookie: momoi_token=; Max-Age=0`
 
-> 原端点 `POST /api/admin/auth`（密钥换管理员 JWT）已随 `ADMIN_KEY` 一并废除。
+### POST /api/user/rename（需用户 JWT）
+
+重命名当前用户，级联更新 `users`、`conversations`、`user_oauth_bindings`、`wechat_bindings` 四张表，并重新签发 JWT。
+
+**请求**：`{ "new_username": "新的用户名" }`
+**响应**：`{ "username": "新的用户名", "expires_at": 1702598400 }` + `Set-Cookie`
+**错误**：
+- 缺少 `new_username` → 400 `New username is required`
+- 新用户名与当前相同 → 400 `Same as current username`
+- 新用户名已被占用 → 409 `Username already taken`
+
+### GET /api/user/oauth-bindings（需用户 JWT）
+
+返回当前用户的所有 OAuth 绑定。
+
+**响应**：`{ "bindings": [{ "id": "...", "provider_id": "...", "created_at": 1700000000 }] }`
+
+### DELETE /api/user/oauth-bindings/:id（需用户 JWT）
+
+删除一条 OAuth 绑定。删除前校验：至少保留一种登录方式（PIN 或其他 OAuth 绑定），否则拒绝。
+
+**响应**：`{ "success": true }`
+**错误**：
+- 绑定不存在 → 404
+- 绑定不属于当前用户 → 403
+- 删除后会失去所有登录方式 → 400 `Cannot remove your only login method. Set a PIN or link another account first.`
 
 ## 行为约束
 
 1. 用户 PIN 明文、`JWT_SECRET`、JWT 本体**永不**通过任何 API 响应体或 localStorage 暴露给前端；`ADMIN` 名单也不下发（客户端只能通过 `/me` 得知**自己**是否管理员）
 2. 管理员判定即 `env.ADMIN.includes(username)`，逐请求执行——停机改 `.env` 重启后立即生效（含撤销），不存在残留的管理员 token
-3. PIN 校验一律 `^\d{4}$`，前后端一致
+3. PIN 校验一律 `^\d{4,8}$`，前后端一致
 4. 受保护资源：`/api/chat/*`、`/api/conversations/*`、`/api/upload/*`、`/api/workspace/*` 需用户 JWT；`/api/admin/*` 需用户 JWT 且用户名在 `ADMIN` 名单内（401 未认证 / 403 非管理员）
 5. 管理员端点的保护通过 `adminRoute.use('<path>', adminAuthMiddleware)` 按路径挂载
-   - ⚠️ **Hono 的 `use('/stats', mw)` 只精确匹配 `/stats`，不覆盖 `/stats/conversations` 等子路径**；保护一组端点须同时挂载精确路径与 `/*` 通配（本项目 `skills/*`、`stats` + `stats/*` 均已如此）。这是曾经踩过的坑：`/stats/conversations` 一度完全未鉴权，匿名即可拖取全站对话
+   - Hono 的 `use('/stats', mw)` 只精确匹配 `/stats`，不覆盖 `/stats/conversations` 等子路径；保护一组端点须同时挂载精确路径与 `/*` 通配（本项目 `skills/*`、`stats` + `stats/*` 均已如此）。这是曾经踩过的坑：`/stats/conversations` 一度完全未鉴权，匿名即可拖取全站对话
 6. **认证 ≠ 授权**：JWT 只证明「是谁」，不证明「有权访问这条数据」。所有涉及具体资源的端点必须在 handler 内二次校验 `user_id` 归属（见 `chat.ts`、`conversations.ts` 的 `and(eq(id), eq(user_id, userId))` 查询），越权一律返回 404 而非 403（不泄露资源是否存在）
 7. **401 自动驱逐**：前端 `lib/api.ts` / SSE 层收到 401 时触发 `window.dispatchEvent(new CustomEvent('auth:expired'))`，`App.tsx` 监听该事件→清空本地会话标记（username、过期时间）→回到登录页。HttpOnly Cookie 无法被 JS 清除，由 `/logout` 端点或自然过期处理。403（非管理员）不触发驱逐
 8. **前端路由守卫**：`#/settings` 仅对 `/me` 返回 `is_admin: true` 的用户开放；其他用户（含未登录）访问该 hash 会被 `replaceState` 遣返首页。守卫只是体验层，真正的屏障是第 4 条的服务端鉴权
 9. **续期不等于吊销**：`/refresh` 只换发新 token，旧 token 在其过期前依然有效（无服务端会话表）。需要强制全员下线时，更换 `JWT_SECRET` 或删除 `settings` 表的 `jwt_secret` 行后重启
+10. **封禁用户拦截**：`POST /api/user/verify` 在 PIN 验证通过后、签发 JWT 前检查 `users.banned` 字段，封禁用户返回 `403 Account is disabled`。封禁不阻止 `change-pin`（不影响已登录用户）

@@ -131,6 +131,7 @@
 | `src/server/tools/document-tools.ts` | 文档工具：`read_document`、`write_document` |
 | `src/server/tools/skill-tools.ts` | 技能工具：`load_skill`、`list_skill_files` |
 | `src/server/tools/bash-tool.ts` | Bash 命令执行：`bash`（受限沙盒执行） |
+| `src/server/tools/ask-user-tool.ts` | 阻塞式用户提问：`ask_user`（Promise 挂起机制，120s 超时） |
 | `src/server/tools/group-mention-tool.ts` | @mention 工具：`at_mention`（Agent 间点名调用） |
 | `src/server/tools/mcp-client.ts` | MCP 客户端：HTTP+SSE 连接外部 MCP 服务器，动态注入工具 |
 | `src/server/tools/index.ts` | 统一导出 |
@@ -156,9 +157,26 @@ export interface ToolContext {
   conversationId: string
   userId: string
   workspace: SandboxFS
-  signal?: AbortSignal  // 可选的取消信号
+  signal?: AbortSignal
+  /** Group chat: @mention signal shared between orchestrator and at_mention tool */
+  mentionSignal?: MentionSignal
+  /** Current tool call ID (assigned by Pi loop) */
+  currentToolCallId?: string
+  /** Pi Agent Core 的进度回调，用于 tool_execution_update 事件 */
+  onUpdate?: ToolUpdateCallback
 }
 ```
+
+`ToolUpdateCallback` 类型定义：
+
+```typescript
+export type ToolUpdateCallback = (partialResult: {
+  content?: Array<{ type: string; text?: string }>
+  details?: unknown
+}) => void
+```
+
+用于在工具执行过程中通过 SSE `tool_execution_update` 事件向客户端推送中间状态（如 `ask_user` 的问题卡片）。
 
 ### ToolResult
 
@@ -428,6 +446,69 @@ export class SandboxFS {
 - 缺少参数 → `Error: both agent_name and message are required`
 - 仅群聊模式下可用（通过 `createMentionTool` 动态注入）
 
+### 7. 用户提问工具（`ask-user-tool.ts`）
+
+#### `ask_user`
+
+向用户提问并等待回答。当 Agent 遇到需要用户做决定、补充信息或确认操作的场景时，调用此工具暂停执行，向用户展示问题卡片。用户回答后，答案作为工具结果回传给 LLM，Agent 从中断处继续执行。
+
+**核心机制 —— Promise 挂起而非终止 Agent 循环**：
+
+其他工具调用 `execute()` 后立即返回结果，Agent 循环继续下一轮。`ask_user` 不同：它的 `execute()` 返回一个**永不 resolve 的 Promise**（直到用户回答或超时），Agent 循环在等待工具结果的 `Promise.all` 中自然暂停。用户回答后 `resolveQuestion()` 唤醒 Promise，工具结果回传 LLM，循环无缝继续。
+
+**参数**：
+
+- `questions` (array, required): 问题列表（通常只需 1 个）。每个问题对象包含：
+  - `header` (string, required): 问题的简短标签（如「文件命名」「数据库选择」），最多 12 字符，显示为 chip 标签
+  - `question` (string, required): 完整的、需要用户回答的问题文本
+  - `options` (array, required): 预设选项列表，2-4 个。每个选项包含：
+    - `label` (string, required): 选项的显示文本
+    - `description` (string, optional): 选项的辅助说明文字
+  - `multiSelect` (boolean, required): 是否允许多选（false=单选，true=多选）
+
+**行为流程**：
+
+1. Agent 调用 `ask_user(questions)`
+2. 工具验证问题参数（questions 非空数组、每个 question 有 question 字段、options 2-4 个）
+3. 生成 `questionId`（UUID），通过 `ctx.onUpdate` 发送 SSE `tool_execution_update` 事件（`details.type = 'ask_user'`），携带 `questionId` 和 `questions` 到客户端
+4. 客户端渲染问题卡片（选项按钮 + 自由输入框 + 跳过按钮），等待用户操作
+5. `execute()` 返回一个 Promise，存入全局 `questionMap`（key = questionId），并设置 120s 超时
+6. Agent 循环在 `Promise.all` 中等待此 Promise，所有其他已完成的工具继续执行，但本工具挂起
+
+**用户回答后**：
+
+- 前端调用 `POST /api/chat/:id/answer`，端点调用 `resolveQuestion(questionId, answer, selectedOptions)`
+- `resolveQuestion` 从 `questionMap` 取出对应条目，清除超时，resolve Promise
+- 返回的 `ToolResult.summary` 格式：`用户选择了: {选项}。附加说明: {自由输入}` 或 `{自由输入}` 或 `用户跳过了此问题。`
+- LLM 收到工具结果，从中断处继续推理
+
+**错误与边界情况**：
+
+| 场景 | 行为 |
+|---|---|
+| questions 为空数组 | `Error: questions must be a non-empty array.` |
+| question 缺少 question 字段 | `Error: each question must have a "question" field.` |
+| options 数量不在 2-4 | `Error: options must have 2-4 items.` |
+| 120 秒未回答 | 超时 reject，Promise 抛出 `用户未在 120 秒内回答，问题已过期。` |
+| `ctx.signal` 被 abort | 监听 abort 事件，reject `操作已取消。` |
+| SSE 连接断开 | `cleanupConversationQuestions()` 清理该会话所有挂起问题，reject `SSE 连接已断开` |
+
+**全局函数导出**：
+
+| 函数 | 用途 |
+|---|---|
+| `resolveQuestion(id, answer, selectedOptions?)` | 由 answer 端点调用，接受用户回答并唤醒 Promise |
+| `rejectQuestion(id, reason)` | 由超时/取消/abort 调用，拒绝 Promise |
+| `getPendingQuestion(id)` | 获取挂起问题信息（用于端点验证） |
+| `cleanupConversationQuestions(conversationId)` | 断开时清理指定会话的所有挂起问题 |
+
+**设计意图**：
+
+- 不终止 Agent 循环 —— 利用 Promise pending 自然暂停，用户体验流畅
+- 不额外引入状态机 —— 依赖 JavaScript 原生的 Promise 挂起/唤醒
+- 问题信息通过 SSE 推送 —— 与现有事件体系一致，不新增轮询端点
+- 全局 `questionMap` —— 服务重启时所有挂起问题自然丢失（内存中），避免持久化复杂性
+
 ## 工作区生命周期
 
 ### 创建
@@ -540,6 +621,28 @@ HTTP 工具在发起请求前：
 
 **缓存**：`Cache-Control: private, max-age=3600`（1 小时，因为工作区内容可能变化）
 
+### POST /api/chat/:id/answer
+
+用户回答 `ask_user` 工具提问（需认证）。
+
+**认证**：需用户 JWT（`userAuthMiddleware`）。
+
+**参数**（JSON Body）：
+- `questionId` (string, required): 问题的 UUID
+- `answer` (string, required): 用户的自由文本回答
+- `selectedOptions` (string[], optional): 用户选择的预设选项标签列表
+
+**行为**：
+1. 验证对话所有权
+2. 调用 `resolveQuestion(questionId, answer, selectedOptions)`
+3. `resolveQuestion` 从全局 `questionMap` 中取出挂起的 Promise，清除超时，resolve
+4. Agent 循环中的 `Promise.all` 收到结果，LLM 从中断处继续
+
+**错误**：
+- 对话不存在或无权限 → `404`
+- `questionId` 不在 `questionMap` 中（已过期/已完成/不存在）→ `404 Question not found or already answered`
+- 缺少 `questionId` 或 `answer` → `400`
+
 ## 前端集成
 
 ### SSE 事件
@@ -583,6 +686,23 @@ HTTP 工具在发起请求前：
 }
 ```
 
+#### `tool_execution_update`
+
+工具执行过程中的中间状态更新（通过 `ctx.onUpdate` 回调推送）。目前主要用于 `ask_user` 工具向客户端推送问题卡片。
+
+```typescript
+{
+  type: 'tool_execution_update',
+  id?: string,        // 工具调用 ID
+  name: string,       // 工具名称（如 "ask_user"）
+  details: {
+    type: 'ask_user',   // 更新类型（ask_user 等）
+    questionId: string, // 问题 UUID
+    questions: AskUserQuestion[]  // 问题列表
+  }
+}
+```
+
 ### 消息气泡渲染
 
 `MessageBubble.tsx` 中：
@@ -614,40 +734,45 @@ HTTP 工具在发起请求前：
 11. ✅ `bash` 可以在沙盒内执行 shell 命令
 12. ✅ `dingtalk_token` 可以获取钉钉 access token
 13. ✅ `at_mention` 可以在群聊中 @ 点名其他 Agent
+14. ✅ `ask_user` 可以向用户展示问题并等待回答，回答后 Agent 继续执行
+15. ✅ `ask_user` 120 秒无回答自动超时，Agent 收到超时错误后继续
+16. ✅ `ask_user` 支持预设选项（单选/多选）和自由输入
+17. ✅ `ask_user` SSE 断开时清理该会话所有挂起问题
+18. ✅ `ask_user` questions 参数校验（空数组、缺少字段、options 数量不合法）
 
 ### 安全验收
 
-14. ✅ 路径穿越攻击被拒绝（`../etc/passwd` → `Path traversal blocked`）
-15. ✅ 符号链接被拒绝（指向沙盒外 → `Symlinks not allowed`）
-16. ✅ 保留文件名被拒绝（`CON.txt` → `Reserved filename blocked`）
-17. ✅ SSRF 攻击被拦截（`http://192.168.1.1` → `SSRF blocked`）
-18. ✅ 工作区容量超限时报错（`Workspace quota exceeded`）
-19. ✅ bash 破坏性命令被拦截（`rm -rf /` → `Blocked`）
-20. ✅ bash 超时后强制终止
+19. ✅ 路径穿越攻击被拒绝（`../etc/passwd` → `Path traversal blocked`）
+20. ✅ 符号链接被拒绝（指向沙盒外 → `Symlinks not allowed`）
+21. ✅ 保留文件名被拒绝（`CON.txt` → `Reserved filename blocked`）
+22. ✅ SSRF 攻击被拦截（`http://192.168.1.1` → `SSRF blocked`）
+23. ✅ 工作区容量超限时报错（`Workspace quota exceeded`）
+24. ✅ bash 破坏性命令被拦截（`rm -rf /` → `Blocked`）
+25. ✅ bash 超时后强制终止
 
 ### 循环防护验收（D21 更新）
 
 > 以下验收项中的代码级防护已在 Pi Agent Core 迁移中移除，改为系统提示词硬性规则。Pi Agent Core 内置循环管理确保每条路径都有终态事件。
 
-21. ✅ `write_file` 第一次调用正常执行
-22. ✅ `write_file` 第二次及以后返回温和提示但正常执行（软提醒）
-23. ✅ 漂移检测：提示词中约束反复调用同一工具
-24. ✅ 最大轮数限制：Pi Agent Core 内置管理
-25. ✅ 输出截断：Pi 流式处理自行管理
-26. ✅ 批量终止：Pi Agent Core 内置并行执行策略
-27. ✅ 统一收口：Pi Agent Core 保证每条路径都有终态事件
+26. ✅ `write_file` 第一次调用正常执行
+27. ✅ `write_file` 第二次及以后返回温和提示但正常执行（软提醒）
+28. ✅ 漂移检测：提示词中约束反复调用同一工具
+29. ✅ 最大轮数限制：Pi Agent Core 内置管理
+30. ✅ 输出截断：Pi 流式处理自行管理
+31. ✅ 批量终止：Pi Agent Core 内置并行执行策略
+32. ✅ 统一收口：Pi Agent Core 保证每条路径都有终态事件
 
 ### 生命周期验收
 
-28. ✅ 删除对话时工作区被清理
-29. ✅ 工作区不存在时删除对话不报错
-30. ✅ 新对话首次调用工具时工作区被创建
+33. ✅ 删除对话时工作区被清理
+34. ✅ 工作区不存在时删除对话不报错
+35. ✅ 新对话首次调用工具时工作区被创建
 
 ### 前端集成验收
 
-31. ✅ 工具调用在消息气泡中显示为 `🔧 {name} → {summary}`
-32. ✅ 产物文件显示为下载卡片，点击可下载
-33. ✅ 下载请求携带 JWT，未认证返回 401
+36. ✅ 工具调用在消息气泡中显示为 `🔧 {name} → {summary}`
+37. ✅ 产物文件显示为下载卡片，点击可下载
+38. ✅ 下载请求携带 JWT，未认证返回 401
 
 ## 外部依赖
 

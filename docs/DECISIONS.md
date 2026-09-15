@@ -757,3 +757,321 @@
 - 新增 `src/server/realtime.ts`（内存事件总线）与 `src/server/routes/events.ts`（SSE 通道路由）；`chat.ts` / `conversations.ts` / `group.ts` 在关键写路径广播事件
 - `useChat.ts` 新增草稿态、`device_id` 携带、实时订阅与中继事件应用；`useGroupChat.ts` 群聊草稿化 + 实时群成员刷新；`api.ts` 新增设备 ID 与实时连接管理
 - `shared/types.ts` 新增 `RealtimeEvent` 与 `user_message` 事件；`module-chat.md` spec 同步更新
+
+---
+
+## D35：OAuth2 第三方登录与账号绑定
+
+**日期**：2026-09-10 ~ 2026-09-11
+
+**背景**：项目仅支持用户名 + PIN 登录（D12），但多用户场景下每人需独立注册 PIN，且无法接入已有身份体系。需要引入标准 OAuth2 协议以降低注册门槛，同时允许已有账号绑定 OAuth 身份实现免 PIN 登录。
+
+**决策**：
+1. **OAuth2 多提供商架构**：支持配置任意 OAuth2 提供商（通过 `oauth_providers` 配置数组，管理员面板增删）。每个提供商包含 `id`、`name`、`client_id`、`client_secret`、`authorize_url`、`token_url`、`userinfo_url`、`scopes`。
+2. **三态回调路由 `GET /api/oauth/:providerId/callback`**：
+   - **已有绑定**：OAuth 身份已关联某用户 → 直接签发 JWT，设置 HttpOnly Cookie，重定向到首页（`oauth_user` + `oauth_expires` 查询参数供客户端读取）。
+   - **已登录 + 无绑定**：用户已持有有效 JWT Cookie → 自动将当前 OAuth 身份绑定到当前账号。
+   - **全新用户 + 注册开放**：重定向到首页带 `oauth_register=1` 参数，前端引导完成注册（选"关联已有账号"或"创建新账号"）；注册关闭时直接报错。
+3. **`user_oauth_bindings` 表**：`(provider_id, provider_user_id)` 唯一约束，每 OAuth 身份只绑定一个用户；绑定后可免 PIN 直接登录。
+4. **独立注册开关**：`oauth_registration_open` 设置（默认开启），管理员可独立关闭 OAuth 新用户注册，不影响已有绑定用户登录。
+
+**原因**：
+- 标准 OAuth2 Authorization Code 流程，安全性依赖 state 参数防 CSRF（`randomBytes(32)` 存在 HttpOnly Cookie 中，回调时校验）
+- provider_user_id 优先取 `sub` → `id` → `user_id` → fallback `randomUUID()`，兼容不符合 OIDC 规范的提供商
+- Referer 头推导 SPA 真实 origin（开发模式 Vite 代理下 `c.req.url` 指向后端端口，Referer 才携带前端地址）
+- 三态回调一个端点处理全部情况，减少 URL 管理复杂度
+
+**备选与权衡**：
+- ❌ OIDC 严格模式：需要标准 `openid` scope 和 `/userinfo` 端点格式，大量国内/私有 OAuth 提供商不兼容
+- ❌ 每个提供商独立回调 URL：增加注册复杂度，统一回调可复用 redirect_uri
+- ⚠️ state 仅存 HttpOnly Cookie 10 分钟（`maxAge: 600`），超时后 OAuth 回调 state 校验失败——用户体验为跳回首页带 `oauth_error`，需重新发起登录
+- ⚠️ `remoteId` 解析 fallback 到 `randomUUID()`：非标准提供商每次回调生成不同 ID，会重复触发注册页而非直接登录——属提供商不兼容的必然代价
+
+**影响**：
+- 新增 `src/server/routes/oauth.ts`（三端点：`/providers`、`/:providerId/login`、`/callback`）与 `POST /api/oauth/register`（完成注册端点）
+- `user_oauth_bindings` 表（含 PG 双方言 schema）；`users` 表新增 `banned` 列
+- `AppConfig` 新增 `oauth_providers` 字段；`config.ts` 新增 `isOauthRegistrationOpen` / `setOauthRegistrationOpen`
+- `LoginScreen` 新增 OAuth 登录入口（按提供商列表渲染按钮）与 OAuth 注册流程（`oauth_register` 参数触发）
+- `GET /api/user/status` 新增 `oauth_registration_open` 字段
+
+---
+
+## D36：微信绑定与 iLink Bot 集成
+
+**日期**：2026-09-13 ~ 2026-09-15
+
+**背景**：用户希望在微信中与 Momoi Agent 对话，而非局限于 Web 界面。微信通过 iLink Bot 协议提供接入能力，需要完整的绑定-轮询-消息桥接链路。
+
+**决策**：
+1. **单表 `wechat_bindings` 承载全部状态**：`user_id`（主键，1:1 绑定）、`bot_token`（扫码后获得）、`wechat_user_id`（微信侧用户 ID）、`conversation_id`（路由目标会话）、`pending_conversation_id`（扫码期间暂存的目标会话 ID，确认后写入 `conversation_id`）、`updates_buf`（轮询游标）、`session_expired`（会话过期标记）。
+2. **QR 码绑定流程**：`POST /api/wechat/bind` 调用 iLink `get_bot_qrcode` → 用 `qrcode` 库服务端生成 QR data URI → 前端轮询 `GET /api/wechat/bind/status` 检测扫码状态 → `confirmed` 时写绑定行。支持绑定到已有会话（传 `conv_id`，经验证为有效直接非群聊后锚定）。
+3. **覆盖转移**：重新扫码即自动换绑——新 QR 扫描后 `conversation_id` 写入目标，旧会话自然不再路由。
+4. **iLink 协议客户端**（`ilink.ts`，纯函数、零框架依赖）：`getUpdates()` 长轮询拉取消息、`sendMessage()` 发送文本回复、`parseIncoming()` 解析入站消息，全部使用 Node 18+ 标准库（fetch + crypto）。
+5. **定时轮询器**（`poller.ts`）：每 5 秒遍历所有已绑定用户，逐用户调用 `getUpdates`，解析后桥接到 `handleWechatMessage`。双防护：`busyUsers` Set 防同用户并发轮询；`writeGuard`（`eq(bot_token, 快照值)`）防换绑期间游标/会话过期标记误写入新绑定行。
+6. **消息桥接**（`chat.ts`）：接收微信文本 → 查 `wechat_bindings` 获取目标 `conversation_id` → 校验 sender 身份（合法 sender 即扫码者本人）→ 写入 user message → 调用 `runPiAgentLoop` 生成回复 → 写 assistant message → 通过 iLink `sendMessage` 回复微信。
+
+**原因**：
+- 单表承载全状态避免双表 join 与数据一致性问题（原设计 `bot_tokens` + `bindings` 双表在 57bc339 合并）
+- `pending_conversation_id` 允许用户在扫码期间先选目标会话，扫码完成后自动关联——整个绑定+锚定体验为一次连续操作
+- `writeGuard` 解决换绑竞态：`getUpdates` 是长轮询（35s 超时），期间如果用户重扫 QR 换了 `bot_token`，旧轮询的 cursor 写入或 `session_expired` 标记会误伤新绑定行
+- 轮询器 per-user guard + writeGuard + 会话存活校验三重防御，确保每个用户的绑定状态是自愈的
+- `parseIncoming` 只处理 `message_type === 1`（文本消息），picture/voice/video 等富媒体类型静默跳过
+
+**备选与权衡**：
+- ❌ Webhook 推送模式：iLink 不提供 Webhook 能力，必须客户端长轮询
+- ❌ 全局单轮询器（一次性拉取所有用户消息）：iLink `getupdates` 是 per-bot-token 的，每个 token 独立的 `updates_buf` 游标
+- ❌ 双表分离（bot_tokens + bindings）：游标过期/会话过期需跨表更新，一致性复杂且易出 bug
+- ⚠️ `sendMessage` 失败 3 次重试（指数退避 1s/2s/4s），区分「会话过期」（`errcode=-14`，标记 `session_expired` 不再重试）与「瞬时故障」（HTTP 5xx/fetch failed/timeout，重试后仍失败落 system 消息告知用户）
+- ⚠️ 会话级别自动解绑：当绑定指向的 conversation 被软删除或不存在时，`poller.ts` 主动删除绑定行（自愈），用户侧重新扫码即可
+
+**影响**：
+- 新增 `src/server/wechat/ilink.ts`（iLink 协议纯函数客户端）、`src/server/wechat/chat.ts`（消息桥接与 AI 路由）、`src/server/wechat/poller.ts`（定时轮询器）、`src/server/routes/wechat.ts`（绑定/解绑 HTTP 端点）
+- `wechat_bindings` 表（含 PG 双方言 schema）；`db.ts` 导出
+- `POST /api/wechat/bind`、`GET /api/wechat/bind`、`GET /api/wechat/bind/status`、`DELETE /api/wechat/bind` 四个端点
+- 前端新增微信绑定 UI（QR 码展示 + 扫码状态轮询 + 解绑按钮）
+
+---
+
+## D37：TTS 语音合成 — GPT-SoVITS / CosyVoice 双引擎
+
+**日期**：2026-09-13
+
+**背景**：AI 文字回复对语音交互场景不友好。需要将 Agent 文本回复自动合成为语音，支持多个 TTS 引擎。语音需与 Agent 人格一致（音色注册 → 合成 → 前端播放）。
+
+**决策**：
+
+1. **Phase 分阶段交付**（共 5 阶段）：
+   - Phase 1：`agents` 表新增 `voice_enabled` / `voice_sample_url` / `voice_settings` 三列，管理端 CRUD
+   - Phase 2：流式回复完成后按标点分句，逐句调用 TTS 合成，WAV 落盘 `data/voice/{agentId}/{messageId}/`，生成 `manifest.json`
+   - Phase 3：前端 `VoicePlayButton` 嵌入聊天气泡，`AudioPlaybackManager` 管理播放队列
+   - Phase 4-5：管理端扩展（TTS 接入点/提供商配置）+ i18n 补齐
+2. **双引擎 TTS Provider 接口**（`TtsProvider`）：
+   - `registerVoice(audioPath): Promise<string>` — 上传参考音频注册音色，返回 speakerId
+   - `synthesize(text, speakerId, settings): Promise<Buffer>` — 逐句合成，返回 WAV buffer
+3. **GPT-SoVITS 引擎**：`/set_refer_audio` 注册音色（speakerId 为文件名 stem），`/tts` 合成（参数：`text`、`refer_wav_path`、`speed`、`top_k=5`、`top_p=1`、`temperature=1`）
+4. **CosyVoice 引擎**：`/register_voice` 注册返回 `voice_id`，`/synthesize` 合成（参数：`text`、`voice_id`、`speed`）
+5. **流式后置合成**：AI 回复完整流式结束后，按 `。！？；\n` 分句，逐句异步合成，`voice_segment` SSE 事件实时推送每段音频 URL + 时长给客户端
+6. **TTS 配置**：`tts_api_endpoint` 和 `tts_provider`（`gpt-sovits` / `cosyvoice`）settings 键，管理端 GatewaySettings 标签页配置
+
+**原因**：
+- 双引擎解耦：provider 接口抽象使切换/新增引擎零代码改动，仅配置变更
+- 流式后置而非流式逐 token 合成：token 级合成太碎片化、延迟不可控；按句合成既保证自然停顿又避免延迟爆炸
+- WAV 无损落盘 + CDN 不适用：语音文件体积小（<100KB/句），本地直接 serve 更简单
+- `manifest.json` 记录每句文本与完成状态，支持断点续传与服务端重启后恢复
+
+**备选与权衡**：
+- ❌ 单引擎锁定（仅 GPT-SoVITS）：CosyVoice 音色克隆质量在特定场景更优，双引擎给予用户选择自由
+- ❌ 流式逐 token 合成：Token 级片段太短（<500ms），TTS 引擎调用频率过高，而且 token 合成后无法修改——后续 token 可能改变整句语义
+- ❌ 服务端混音（多句合并为单文件）：播放进度不可控，用户无法跳句
+- ⚠️ TTS 引擎为外部服务依赖（需单独部署），服务不可用时语音功能静默降级（无语音但对话正常）
+- ⚠️ 分句策略简单（按标点），对英文/混合语言可能切分不准——当前项目以中文为主，可接受
+
+**影响**：
+- 新增 `src/server/ai/tts.ts`（TTS provider 接口 + GPT-SoVITS / CosyVoice 实现 + `synthesizeAndSave` / `markVoiceComplete` 辅助函数）
+- `agents` 表新增 `voice_enabled` / `voice_sample_url` / `voice_settings` 三列（含 PG 方言 ADD COLUMN IF NOT EXISTS）
+- `config.ts` 新增 `getTtsConfig()` / `updateTtsConfig()`；`shared/types.ts` 新增 `VoiceSettings` 接口
+- 前端新增 `AudioPlaybackManager`、`VoicePlayButton`、`useVoice` hook；管理端新增 TTS Gateway 配置 + Agent voice 编辑
+- `voice_segment` SSE 事件在流式完成后逐句下发音频 URL
+
+---
+
+## D38：ask_user — 阻塞式 Agent 询问用户工具
+
+**日期**：2026-09-09
+
+**背景**：Agent 在遇到不确定的决策点（文件命名、技术选型、参数选择）时，要么猜测（可能猜错，用户不满意），要么中断对话（需要用户重新输入）。需要一个机制让 Agent 在工具调用过程中暂停、向用户提问、等待回答后继续执行。
+
+**决策**：新增 `ask_user` 内置工具——Agent 调用后通过不 resolve 的 Promise 阻塞 Pi 循环，外部通过 `POST /api/chat/:conversationId/answer` 端点唤醒。整个生命周期：
+1. **Agent 调用 `ask_user`**：传入 `questions` 数组（每项含 `header`、`question`、`options`（2-4 个）、`multiSelect`）
+2. **服务端挂起**：`execute()` 返回永不 resolve 的 Promise（存入 `questionMap`），Pi 循环自然等待
+3. **客户端展示**：通过 `ctx.onUpdate` 触发 `tool_execution_update` 事件，type 为 `ask_user`，客户端弹出 QuestionCard 组件
+4. **用户回答**：客户端调 `POST /api/chat/:id/answer` 传入 `questionId` + `answer` + `selectedOptions`
+5. **唤醒 Agent**：`resolveQuestion()` resolve 挂起的 Promise，结果 `{ answer, selectedOptions }` 作为工具输出回传 LLM 继续推理
+6. **超时兜底**：120 秒无回答 → reject（"用户未在 120 秒内回答，问题已过期。"），Agent 自行处理
+
+**原因**：
+- Promise 阻塞方案而非轮询/事件循环：Pi 循环在工具执行期间自然等待 Promise resolve，无需引入额外的暂停/恢复状态机——现有 Agent 循环的并发模型天然适合
+- questionId（UUID v4）唯一标识每个问题，防止多问题串扰
+- 支持单选/多选/自由文本三种模式：有选项时用户更快决策（点按即答），无选项时（`options: []`）用户自由输入
+- Pi adapter 中 `ask_user` 工具标记为 `executionMode: 'sequential'`——该工具阻塞时其他工具不并发，防止 UI 同时弹出多个问题弹窗
+- SSE 连接断开时自动 `cleanupConversationQuestions()` 清理该会话所有挂起问题
+
+**备选与权衡**：
+- ❌ 客户端事件驱动恢复：需要额外的"继续对话"协议与思考中断/恢复机制，复杂度高
+- ❌ 纯文本追问（Agent 直接用自然语言提问、用户文本回复）：信息结构不足——选项让用户一键作答，避免"回答不符合预期"的来回纠错
+- ❌ 多问题并发展示（同时弹出多个 QuestionCard）：UI 混乱，用户先答哪个不可预期；`sequential` 模式每次只展示一个问题
+- ⚠️ Promise 挂起期间进程内存占用：挂起状态极轻（一个 Promise + timer 引用），不会有内存压力
+- ⚠️ `questionMap` 为内存 Map：重启丢失所有挂起问题——当前为单实例部署，可接受；横向扩容需迁移到共享存储
+
+**影响**：
+- 新增 `src/server/tools/ask-user-tool.ts`（`askUserTool`、`resolveQuestion`、`rejectQuestion`、`getPendingQuestion`、`cleanupConversationQuestions`）
+- `registry.ts` 注册 `askUserTool`
+- `pi-adapter.ts`：`ask_user` 标记 `executionMode: 'sequential'`；`tool_execution_update` 事件处理中识别 `type === 'ask_user'`
+- `chat.ts` 新增 `POST /api/chat/:conversationId/answer` 端点；SSE 断开时调用 `cleanupConversationQuestions`
+- 前端新增 `QuestionCard` 组件（单选/多选/自由文本三种 UI）；`useChat.ts` 处理 `ask_user` SSE 事件
+
+---
+
+## D39：PostgreSQL 远程数据库模式 — sql.js 本地 / PG 远程双后端
+
+**日期**：2026-09-10（初版多数据库支持）→ 2026-09-14（精简为 SQLite + PG 双后端）
+
+**背景**：sql.js（SQLite WASM）零配置轻量，但内存态写入 + 30 秒持久化间隔有数据丢失窗口，且单实例无法横向扩容。需要可选的生产级远程数据库支持。
+
+**决策**：
+1. **双后端架构**：根据 `DATABASE_URL` + `DATABASE_USER` + `DATABASE_SECRET` 三个环境变量自动选择：
+   - 任一缺失 → SQLite（sql.js），保持 D2 的零配置体验，自动创建 `data/momoi.db`
+   - 三者齐全且 URL 为 `postgres://` 或 `postgresql://` → PostgreSQL（`pg` + `drizzle-orm/node-postgres`），连接池 max 5
+2. **双 schema 文件**：`schema.ts` 为 SQLite 方言（`INTEGER` 布尔/`AUTOINCREMENT`），`schema.pg.ts` 为 PG 方言（`SERIAL`/`BOOLEAN`）；`db.ts` 按方言动态导入对应 schema
+3. **迁移策略**：
+   - SQLite：`MIGRATION_SQL` 常量（`CREATE TABLE IF NOT EXISTS`）+ `ADDITIVE_MIGRATIONS` 数组（`ALTER TABLE` 逐条 try/catch）
+   - PG：`pool.query()` 执行完整 DDL（含 `ADD COLUMN IF NOT EXISTS`，原生支持）
+4. **环境变量注入**：`DATABASE_URL` 缺省 `username`/`password` 时，从 `DATABASE_USER`/`DATABASE_SECRET` 补齐
+
+**原因**：
+- SQLite（sql.js）零配置覆盖开发/个人部署；PG 覆盖生产/团队/高可用场景——一个 `DATABASE_URL` 即可切换，不改代码
+- 双 schema 文件而非运行时方言判断：编译期隔离更安全（选错方言不会静默出 bug）且代码更清晰
+- `node-postgres` 而非 `pg-promise`：Drizzle ORM 官方推荐，pool + 原生 SQL 足够
+- SQLite ADDITIVE_MIGRATIONS 每条 try/catch：sql.js 不支持 `IF NOT EXISTS` 的 ALTER TABLE，逐条 try 避免了"迁移失败则库不可用"的一级事故
+- 30 秒自动持久化 + SIGINT/SIGTERM 退出持久化（SQLite 模式）：防止异常断电丢数据，但仍有 30 秒数据丢失窗口（D2 已知限制依旧）
+
+**备选与权衡**：
+- ❌ 单 SQLite（不引入 PG）：被视为性能/部署场景的限制而非 bug——生产部署需求是真实存在的，PG 支持干净地解决了这个问题
+- ❌ ORM 自动迁移（Drizzle Kit）：引入额外工具链 + 迁移文件管理；DDL 常量直接内联 code 更简单，项目表结构稳定，不需要版本化迁移
+- ❌ 保留 MySQL/MariaDB（原 `refactor: 多数据库支持` 中有支持）：2026-09-14 的 5f11714 移除——三个方言维护成本高且 MySQL 用户群体与"轻量自托管"定位重叠度最低
+- ⚠️ `pg` 驱动需额外安装（`pnpm add pg`）：检测到 PG 模式时启动报错并提示安装——首次使用需手动操作一次
+- ⚠️ SQLite ↔ PG schema 差异需人工同步：`schema.ts` 和 `schema.pg.ts` 是两个独立文件，新增字段需两边同步——当前项目 schema 变动频率已很低，可接受
+
+**影响**：
+- `src/server/db.ts` 重写为方言工厂：`detectRemoteDialect()` → `initSqlite()` / `initPg()` 二选一
+- 新增 `src/server/schema.pg.ts`（PG 方言 schema）
+- `package.json` 新增 `pg` 可选依赖；移除 MySQL/MariaDB 相关 schema 与依赖
+- `.env.example` 新增 `DATABASE_URL` / `DATABASE_USER` / `DATABASE_SECRET` 说明
+
+---
+
+## D40：多设备实时同步事件通道（补充 D34）
+
+**日期**：2026-09-14
+
+**背景**：D34 已将多设备同步纳入 SSE 事件通道体系，但未单独记叙事件总线本身的架构细节。此处作为 D34 的技术深度展开：事件总线是草稿态 + 多设备同步的底层基础设施，值得独立记录。
+
+**决策**：
+1. **内存事件总线（`realtime.ts`）**：`Map<userId, Set<RealtimeSubscriber>>` 进程内广播，每个 subscriber 含 `deviceId`、`aborted` 标志、`writeChain`（串行写入链，同 D23 机制防乱序/尾部丢失）、`onEvent` 回调。
+2. **四种事件类型广播**：
+   - `stream`：聊天流实时中继，`broadcastStream(userId, originDeviceId, data)` 跳过来源设备
+   - `conv_sync`：会话列表变更，`broadcastConversationSync(userId)` 无差别广播
+   - `conv_changed`：指定会话内容变更（如消息回退），携带 `conversation_id`，客户端按需重拉
+   - `group_members`：群成员变更，携带 `conversation_id`
+3. **设备自跳过**：`subscribeRealtime` 中同 `deviceId` 重复订阅自动顶掉旧订阅（React StrictMode 双挂载 / 网络重连防护）
+4. **惰性清理**：广播时移除 `aborted` 的 subscriber，防止异常断线时订阅泄漏
+5. **SSE 防缓冲头**：`Cache-Control: no-cache` + `X-Accel-Buffering: no`，阻止 Nginx/CDN 缓冲区攒事件
+6. **统一 data-only 格式**：只发 `data:` 字段不设 `event:` 别名——老内核 WebView（钉钉内置等）的 EventSource 对自定义事件名支持不可靠，仅触发默认 `onmessage`
+
+**原因**：
+- 进程内 Map 对单实例足够简单零依赖；多实例需 Redis pub/sub（列为已知边界）
+- 设备自跳防止同设备收到双份事件：源设备已通过 POST /api/chat 的 fetch 流直接消费，SSE 通道只服务其他设备
+- 惰性清理 + 订阅顶掉双保险：异常断线不会泄漏、React StrictMode 不会双发——都是生产环境真实踩过的坑
+
+**备选与权衡**：
+- ❌ 每个事件类型独立 channel：开销大、维护四套 subscriber 集合；统一总线 + type 字段更简洁
+- ❌ 全设备广播（不跳过来源）：源设备收到双份相同事件，UI 刷新闪烁/重复渲染
+- ⚠️ 多实例需升级为 Redis pub/sub：当前显式排除，横向扩容前必须改造此模块
+
+**影响**：
+- 新增 `src/server/realtime.ts`（内存事件总线 + 四种广播函数）、`src/server/routes/events.ts`（SSE 长连接端点）
+- `chat.ts`、`conversations.ts`、`group.ts` 在关键写路径调用广播函数
+- 前端 `api.ts` 新增 `connectRealtime()` SSE 连接管理；`useChat.ts` / `useGroupChat.ts` 应用事件处理
+
+---
+
+## D41：CDN 外挂图床 — 自动转存 img.scdn.io
+
+**日期**：2026-09-11
+
+**背景**：管理后台允许上传自定义 favicon 和背景图，但这些图片以 base64 data URL 存入 `settings` 表（`app_favicon` / `app_background`），体积大（一张背景图可能 > 2MB）。base64 膨胀 `settings` 表、拖慢 `getConfig()` 读取，且浏览器渲染 base64 图片性能差、无法缓存。
+
+**决策**：引入外部 CDN 图床——管理后台上传图片时自动转为 CDN 永久 URL，`settings` 表仅存 URL 而非 base64。通过 `use_external_image_hosting` 管理员开关（默认关闭）控制。
+
+**原因**：
+- `settings` 表存储的 data URL 字符串长度可达 2-4MB，一条配置撑大整个 SQLite 文件（每条设置都完整序列化到 WASM heap）
+- CDN URL 仅几十字节，对 settings 表几乎无体积影响，getConfig 读取速度也有保障
+- 浏览器可直接以 `<img src>` 加载 CDN URL，利用浏览器缓存、无 base64 解码开销
+- `img.scdn.io` 免费、无需 API key、响应快速（`/api/v1.php` multipart 上传）
+
+**实现细节**：
+- `base64ToBuffer(dataUrl)`：解析 base64 data URL 为 Buffer + MIME type
+- `uploadToCdn(buffer, filename, mimeType)`：multipart/form-data 上传到 `https://img.scdn.io/api/v1.php`，返回公开 URL
+- 内置速率限制（两次请求间隔 >= 1200ms）防触发 CDN 限流（5 次/5s）；429 时等待 5s 重试一次
+- 管理端保存 favicon/background 前检测 `use_external_image_hosting` 开关：开 → 先上传得 CDN URL，关 → 保留 base64 data URL
+
+**备选与权衡**：
+- ❌ 本地 serve 静态文件：需要额外的文件服务端点 + 备份管理，且 `data/` 目录无版本化
+- ❌ 自建图床/MinIO：引入外部服务依赖，与"轻量自托管"定位冲突
+- ❌ CDN 强制开启：外部 URL 泄露 app 自定义资源到公网——部分部署场景不希望外部可见；默认关闭、管理员显式开启
+- ⚠️ CDN 服务可用性不可控：`img.scdn.io` 为第三方免费服务，SLA 无保障。不可用时上传失败返回错误，不影响已生成 URL 的图片（已持久化到 CDN）。用户可自行替换 CDN 端点（修改 `cdn.ts` 中的 URL）
+
+**影响**：
+- 新增 `src/server/cdn.ts`（`base64ToBuffer` + `uploadToCdn`）
+- `config.ts` 新增 `isExternalImageHostingEnabled()`；`AppConfig` 新增 `use_external_image_hosting` 布尔字段
+- 管理端 `BrandingSettings` 在保存时按开关决定调用 CDN 转存流程
+- `GET /api/app-name` 返回 `use_external_image_hosting` 供前端判断
+
+---
+
+## D42：直连注册开关 — 独立控制用户名 + PIN 注册
+
+**日期**：2026-09-11
+
+**背景**：部署者可能希望仅通过 OAuth 登录（如企业微信内部使用），关闭直接注册入口。原无此能力——注册页面始终可用。需与 OAuth 注册开关（见 D35）独立控制——可同时开启、仅 OAuth、仅直接注册、全部关闭。
+
+**决策**：新增 `direct_registration_open` settings 键（默认 `true`），与 D35 的 `oauth_registration_open` 各自独立。`LoginScreen` 注册表单的可见性由 `direct_registration_open` 控制；`GET /api/user/status` 同时返回两者的当前值。
+
+**原因**：
+- 两扇独立门：部署者可按需组合——企业内部全走 OAuth（关直连）、公网双通道（全开）、维护模式（全关）
+- 默认开启保持 D12 的零配置体验（用户名 + PIN 始终可用）
+- 与 `oauth_registration_open` 对称设计：一个模板 `getSetting` / `setSetting` / admin API（`GET + PUT /api/admin/direct-registration`）
+
+**备选与权衡**：
+- ❌ 单一注册总开关（一处关闭所有注册方式）：粒度太粗——关闭全部注册等于关闭应用，不够灵活
+- ❌ 环境变量控制（启动时固定）：无法运行时切换，管理员面板热更新更符合 D7 的双层配置原则
+- ⚠️ 关闭注册不影响已有用户登录：仅隐藏注册 UI + 注册端点校验拒绝——已有账号照常使用
+
+**影响**：
+- `config.ts` 新增 `isDirectRegistrationOpen()` / `setDirectRegistrationOpen()`
+- `routes/admin.ts` 新增 `GET + PUT /api/admin/direct-registration`
+- `GET /api/user/status` 返回 `direct_registration_open`
+- `LoginScreen` 按 `direct_registration_open` 显隐注册表单；`UserManager` 管理界面新增直连注册开关
+
+---
+
+## D43：微信消息去重与会话锁
+
+**日期**：2026-09-13（消息去重）→ 2026-09-15（会话锁完善）
+
+**背景**：iLink 消息投递保障"至少一次"——同一条微信消息可能被 `getUpdates` 多次投递（网络重试、轮询间隔重叠）。缺乏去重会导致同一条用户消息生成多次 AI 回复。同时，每个用户需确保 AI 调用不交叉执行（前一条消息的 AI 回复未完成时后一条消息到达）。
+
+**决策**：
+
+1. **内存级消息去重**（`chat.ts`）：`dedupCache: Map<messageId, timestamp>`——收到消息时按 `messageId`（iLink 原生字段）查重，5 分钟过期窗口（`DEDUP_WINDOW_MS = 5 * 60_000`），命中直接跳过。惰性淘汰：每次查重前遍历清除过期条目。
+2. **并发会话锁**（`chat.ts` + `routes/wechat.ts`）：
+   - `handleWechatMessage`：per-user mutex（`withLock(userId, ...)`）——同一用户的前一条消息处理未完成时，新消息排队等待
+   - `GET /api/wechat/bind/status`：per-user binding lock（`withBindingLock(userId, ...)`）——两个并发的 QR 扫码确认串行化，防止互相 clobber `bot_token` / `conversation_id`
+3. **去重优先于加锁**：`isDuplicate()` 在 `withLock()` 之前执行——重复消息不排队，直接丢弃
+
+**原因**：
+- 去重窗口 5 分钟覆盖 iLink 最长重试周期；惰性淘汰避免内存泄漏（定时器方案会累积）
+- 会话锁防止交叉执行：`handleWechatMessage` 内包含"读 history → AI 生成回复 → 写 DB → sendMessage 微信回复"，完整链条必须在单次执行中完成，并发交叉会导致回复嵌错对话、消息顺序颠倒
+- 去重优先：重复消息无需排队等锁——直接 return，不阻塞后续合法消息
+
+**备选与权衡**：
+- ❌ 持久化去重（DB 列 `message_id` + 唯一约束）：iLink `message_id` 可能跨 bot 实例重复（非全局唯一），且 DB 查询比内存 Map 慢
+- ❌ 单用户全局信号量（`Mutex` from async-mutex）：引入额外依赖；自实现 `Map<string, Promise<void>>` 排队链已足够
+- ❌ 消息队列（如 BullMQ / Redis）：引入外部基础设施，与"轻量自托管"定位冲突
+- ⚠️ 内存锁重启丢失：重启后若两个请求同时到达，排队链重建——`while (locks.has(key)) await locks.get(key)` 保证顺序，不会交叉执行
+- ⚠️ `dedupCache` 无限增长风险：惰性淘汰只在新消息到达时执行——理论上如果长时间无新消息，过期条目不会被清理。实际场景中不会出现（微信轮询每 5s 触发一次，总有新消息触发淘汰）
+
+**影响**：
+- `src/server/wechat/chat.ts`：`isDuplicate()`、`withLock()`、`dedupCache`、`DEDUP_WINDOW_MS`
+- `src/server/routes/wechat.ts`：`bindingLocks`、`withBindingLock()`
+- 消息去重在 `handleWechatMessage` 最外层调用，before lock；会话锁包裹完整 AI 调链路

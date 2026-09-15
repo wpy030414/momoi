@@ -1,14 +1,15 @@
 # Momoi
 
-轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过内置工具执行文件读写、Shell 命令、网络请求、文档处理等任务，通过技能注入系统提示词，支持文件附件多模态交互，管理员由 `.env` 的 `ADMIN` 用户名名单指定。
+轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过内置工具执行文件读写、Shell 命令、网络请求、文档处理等任务，通过技能注入系统提示词，支持文件附件多模态交互，管理员由 `.env` 的 `ADMIN` 用户名名单指定。支持微信绑定、OAuth 登录、TTS 语音合成、多设备实时同步。
 
 ## 核心特性
 
 - **PIN 认证登录** — 用户名 + 4 位 PIN，PBKDF2 安全哈希，JWT 经 HttpOnly Cookie 传输（XSS 不可窃取）+ 14 天滑动续期（应用开着永不过期，超过 14 天未使用需重新登录）
+- **OAuth 登录** — 支持 OAuth2 提供商登录，可绑定已有账号或创建新账号
 - **流式对话** — React + shadcn/ui 聊天界面，SSE 实时流式输出（token、思考过程、工具调用）
 - **思考模式** — 支持 AI 扩展推理（DashScope 兼容 `enable_thinking`），可折叠展示思考过程
 - **文件附件** — 支持图片（多模态）、Excel（转 CSV）、PDF（提取文本）等附件，管理员可开关
-- **内置工具系统** — AI 可执行文件读写、Shell 命令、网络请求、文档处理（DOCX/PPTX/XLSX/PDF），沙盒隔离
+- **内置工具系统** — AI 可执行文件读写、Shell 命令、网络请求、文档处理（DOCX/PPTX/XLSX/PDF），沙盒隔离；支持 `ask_user` 阻塞式询问用户
 - **技能系统** — SKILL.md 摘要注入系统提示词，完整内容通过 `load_skill` 工具按需加载；支持嵌套技能目录递归扫描
 - **Mermaid 图表** — AI 回复中的 mermaid 代码块自动渲染为图表
 - **后续建议** — AI 每次回复末尾自动生成 3 条可点击的追问建议
@@ -17,11 +18,14 @@
 - **统计面板** — 管理员可查看用户/对话/消息统计，浏览所有对话和消息
 - **管理员面板** — 密钥认证 + JWT，在线修改模型、提示词、品牌、技能
 - **白标品牌** — 自定义应用名称、Favicon、聊天背景图
-- **持久化存储** — SQLite 单文件数据库，对话历史自动保存
+- **持久化存储** — SQLite 单文件数据库（或 PostgreSQL 远程模式），对话历史自动保存
 - **国际化** — 中文/英文双语支持
 - **Agent 多智能体** — 每个 Agent 独立模型、提示词、头像，支持创建/编辑/删除
 - **群聊对话** — 多 Agent 串行回复，@mention 点名对话，Agent 身份感知
 - **无限演算模式** — 中立 Agent 自动追问，支持个体聊天和群聊，实现持续对话
+- **TTS 语音合成** — 支持 GPT-SoVITS / CosyVoice 语音合成，Agent 可配置独立声音
+- **微信绑定** — 扫码绑定微信，在微信中与 AI 对话，支持会话锚定与换绑
+- **多设备实时同步** — 同账号多设备登录时，聊天流实时中继，会话列表自动同步
 - **IP 速率限制** — PIN 连续 5 次错误封禁 5 分钟
 
 ## 快速开始
@@ -101,6 +105,7 @@ AI 在对话中可自动调用以下内置工具（沙盒隔离，每对话独�
 | `load_skill` | 按需加载技能完整内容 |
 | `list_skill_files` | 列出技能目录中的文件 |
 | `at_mention` | 群聊中 @ 点名其他 Agent（触发即时应答） |
+| `ask_user` | 阻塞式询问用户，等待用户选择或输入后继续执行 |
 | `{serverName}/{toolName}` | MCP 工具（动态注入，来自外部 MCP 服务器） |
 
 所有工具在 `data/workspaces/{conversationId}/` 沙盒内执行，防止访问宿主文件系统。MCP 工具通过 HTTP+SSE 连接外部 MCP 服务器，工具列表缓存 5 分钟。详见 `docs/specs/module-tool-system.md`。
@@ -134,6 +139,10 @@ AI 在对话中可自动调用以下内置工具（沙盒隔离，每对话独�
 | `group_done` | 群聊结束 |
 | `follow_up` | 无限模式追问 |
 | `infinite_mode_off` | 无限模式关闭 |
+| `ask_user` | 阻塞式询问用户（含问题 ID 和选项） |
+| `voice_segment` | TTS 语音片段 |
+| `voice_done` | TTS 语音合成完成 |
+| `suggestions` | 中立 Agent 补发的追问建议 |
 
 ## 技能开发
 
@@ -182,12 +191,14 @@ pnpm start
 ## 技术栈
 
 - **前端**：React 19 + shadcn/ui（Radix 原语 + Tailwind CSS）+ Vite 8（Rolldown）
-- **后端**：Hono 4 + @libsql/client + Drizzle ORM
+- **后端**：Hono 4 + Drizzle ORM（SQLite sql.js 或 PostgreSQL 远程模式）
 - **实时通信**：SSE（Server-Sent Events）
 - **AI**：Pi Agent Core（@earendil-works/pi-agent-core）+ OpenAI 兼容 API
-- **认证**：PBKDF2 PIN 哈希 + JWT（jose）+ IP 速率限制
-- **数据库**：SQLite（单文件，零配置）
+- **认证**：PBKDF2 PIN 哈希 + JWT（jose）+ HttpOnly Cookie + IP 速率限制 + OAuth2
+- **数据库**：SQLite（单文件，零配置）或 PostgreSQL（远程模式）
 - **文件解析**：xlsx（Excel→CSV）、pdf-parse（PDF→文本）、mammoth（DOCX）、word-extractor（DOC）
+- **TTS**：GPT-SoVITS / CosyVoice 语音合成
+- **微信集成**：iLink 企业微信机器人 API
 
 ## 项目结构
 

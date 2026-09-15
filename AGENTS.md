@@ -40,7 +40,7 @@
 
 - **前端**：React 19 + shadcn/ui（Radix 原语 + Tailwind CSS 3.4），Vite 8（Rolldown 打包）构建为静态文件，由 Hono 在生产模式下托管
 - **后端**：Hono 4（Node.js），SSE 用于实时聊天流，REST API 用于 CRUD
-- **数据库**：SQLite（@libsql/client + Drizzle ORM）—— 单文件 `data/momoi.db`，无需外部数据库
+- **数据库**：SQLite（sql.js + Drizzle ORM，单文件 `data/momoi.db`）为默认模式；支持通过 `DATABASE_URL` 环境变量切换到 PostgreSQL（node-postgres + Drizzle ORM）
 - **AI**：OpenAI 兼容的 Chat Completions API，支持流式输出、function calling、多模态附件、思考模式
 - **技能**：SKILL.md 文件（YAML 前置元数据 + Markdown 内容），注入系统提示词
 - **认证**：用户 4 位 PIN（PBKDF2 哈希 + JWT 14 天滑动续期，经 HttpOnly Cookie 传输）；管理员由 `ADMIN` 环境变量用户名名单授权（复用用户 JWT）
@@ -52,12 +52,14 @@
 | `src/shared/` | 客户端与服务端共享的 TypeScript 类型和常量 |
 | `src/client/` | React 前端（入口：`main.tsx`） |
 | `src/server/` | Hono 后端（入口：`index.ts`） |
-| `src/server/ai/` | Pi Agent Core 适配层（`pi-adapter.ts`）+ 群聊编排（`group-orchestrator.ts`）+ 中立 Agent（`neutral-agent.ts`） |
-| `src/server/tools/` | 内置工具系统（11 个工具：文件/网络/文档/技能/bash/群聊）+ MCP 客户端（`mcp-client.ts`） |
+| `src/server/ai/` | Pi Agent Core 适配层（`pi-adapter.ts`）+ 群聊编排（`group-orchestrator.ts`）+ 中立 Agent（`neutral-agent.ts`）+ TTS 语音合成（`tts.ts`） |
+| `src/server/tools/` | 内置工具系统（13 个工具：文件/网络/文档/技能/bash/群聊/@提及/ask_user）+ MCP 客户端动态工具注入（`mcp-client.ts`） |
 | `src/server/skills/` | 技能加载和注册（`loader.ts` → `registry.ts`） |
 | `src/server/files/` | 文件附件解析（`parser.ts`：图片→base64、xlsx→csv、pdf→text） |
 | `src/server/middleware/` | 用户 JWT 认证中间件（`userAuth.ts`）+ IP 速率限制（`rateLimiter.ts`） |
-| `src/server/routes/` | API 路由：`chat.ts`、`group.ts`、`conversations.ts`、`admin.ts`、`upload.ts`、`user.ts`、`workspace.ts`、`app.ts` |
+| `src/server/routes/` | API 路由：`chat.ts`、`group.ts`、`conversations.ts`、`admin.ts`、`upload.ts`、`user.ts`、`workspace.ts`、`app.ts`、`oauth.ts`、`wechat.ts`、`voice.ts`、`events.ts`、`assets.ts` |
+| `src/server/wechat/` | 微信聊天桥接（`chat.ts`）+ iLink 客户端（`ilink.ts`）+ 消息轮询器（`poller.ts`） |
+| `src/server/realtime.ts` | 同账号多设备 SSE 实时事件总线（进程内内存态） |
 | `skills/` | 已安装的技能目录 |
 | `data/` | SQLite 数据库文件（`momoi.db`）+ 对话工作区（`workspaces/`，含 `__uploads__/` 上传附件） |
 ## 开发
@@ -105,10 +107,19 @@ pnpm start        # 运行生产构建（node dist/index.js）
 
 ## 数据库
 
-- 文件位置：`data/momoi.db`
-- 表：`conversations`（含 `agent_id`、`type`、`deleted_at`）、`messages`（含 `agent_id`、`attachments` 列）、`settings`、`agents`、`group_conversation_agents`
-- 迁移策略：`CREATE TABLE IF NOT EXISTS`，使用 `executeMultiple` 一步到位
-- 时间戳使用 Unix epoch（秒）
+- SQLite（sql.js，本地单文件 `data/momoi.db`）为默认模式；通过 `DATABASE_URL` / `DATABASE_USER` / `DATABASE_SECRET` 环境变量切换到 PostgreSQL（node-postgres）
+- 迁移策略：`CREATE TABLE IF NOT EXISTS` + 增量 `ALTER TABLE ADD COLUMN`（sql.js 和 PG 各有独立迁移逻辑）
+- 时间戳使用 Unix epoch（秒），SQLite 自动持久化至磁盘（每 30s + 优雅退出时写入）
+- 表：
+  - `conversations` — 对话（含 `agent_id`、`type`、`deleted_at`，支持直接对话与群聊）
+  - `messages` — 消息（含 `agent_id`、`attachments`、`thinking`、`tool_calls` 列）
+  - `settings` — 键值配置
+  - `agents` — Agent 定义（含 `voice_enabled`、`voice_sample_url`、`voice_settings`）
+  - `group_conversation_agents` — 群聊 Agent 成员关系
+  - `mcp_servers` — MCP 服务器注册（`id`、`name`、`url`、`enabled`）
+  - `users` — 用户账户（`username`、`pin_hash`、`first_login_at`、`last_login_at`、`banned`）
+  - `user_oauth_bindings` — OAuth 第三方绑定（`provider_id` + `provider_user_id` 唯一）
+  - `wechat_bindings` — 用户微信桥接绑定（`bot_token`、`wechat_user_id`、`conversation_id`、会话级解绑/转移支持）
 
 ## 关键常量（`src/shared/constants.ts`）
 
@@ -123,3 +134,10 @@ pnpm start        # 运行生产构建（node dist/index.js）
 | `DEFAULT_AGENT_NAME` | `Momoi` | 默认 Agent 名称 |
 | `NEUTRAL_AGENT_NAME` | `中立 Agent` | 中立 Agent 名称 |
 | `NEUTRAL_AGENT_ID` | `neutral-agent` | 中立 Agent 固定 ID |
+| `DEFAULT_AGENT_MODEL` | `gpt-4o` | Agent 默认模型 |
+| `DEFAULT_AGENT_SYSTEM_PROMPT` | `''`（空） | Agent 默认系统提示词 |
+| `DEFAULT_TTS_ENDPOINT` | `http://localhost:9880` | TTS 服务默认端点 |
+| `DEFAULT_TTS_PROVIDER` | `gpt-sovits` | TTS 默认提供商 |
+| `THINKING_SEGMENT_OPEN` | `\n\n〔思考片段 ` | 多轮思考链片段起始分隔符 |
+| `THINKING_SEGMENT_CLOSE` | `〕\n` | 多轮思考链片段结束分隔符 |
+| `THINKING_TRUNCATED_MARK` | `\n…（思考被输出长度截断）…` | 思考被 token 上限截断时的标记 |
