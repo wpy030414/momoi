@@ -72,7 +72,7 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
         } catch {
           // Silently continue polling on transient errors
         }
-      }, 5000)
+      }, 1000)
     } catch (err) {
       setState({ phase: 'error', message: err instanceof Error ? err.message : t('common.error') })
     }
