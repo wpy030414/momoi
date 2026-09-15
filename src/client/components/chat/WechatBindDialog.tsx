@@ -13,7 +13,7 @@ interface WechatBindDialogProps {
 
 type BindState =
   | { phase: 'loading' }
-  | { phase: 'already_bound'; wechat_user_id: string; bound_at: number }
+  | { phase: 'already_bound'; wechat_user_id: string; bound_at: number; conversation_id?: string }
   | { phase: 'showing_qr'; qrcode_id: string; qrcode_data_uri: string; expires_at: number }
   | { phase: 'confirmed' }
   | { phase: 'expired' }
@@ -23,6 +23,7 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
   const { t } = useTranslation()
   const [state, setState] = useState<BindState>({ phase: 'loading' })
   const [unbindConfirmOpen, setUnbindConfirmOpen] = useState(false)
+  const [rebindConfirmOpen, setRebindConfirmOpen] = useState(false)
   const [unbinding, setUnbinding] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -33,18 +34,21 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
     }
   }, [])
 
-  const startBind = useCallback(async () => {
+  const startBind = useCallback(async (force = false) => {
     clearPoll()
     setState({ phase: 'loading' })
     try {
-      const info = await api.wechatBindInfo()
-      if (info.bound) {
-        setState({
-          phase: 'already_bound',
-          wechat_user_id: info.wechat_user_id || '',
-          bound_at: info.bound_at || 0,
-        })
-        return
+      if (!force) {
+        const info = await api.wechatBindInfo()
+        if (info.bound) {
+          setState({
+            phase: 'already_bound',
+            wechat_user_id: info.wechat_user_id || '',
+            bound_at: info.bound_at || 0,
+            conversation_id: info.conversation_id || '',
+          })
+          return
+        }
       }
 
       const result = await api.wechatBindStart(convId)
@@ -68,7 +72,7 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
         } catch {
           // Silently continue polling on transient errors
         }
-      }, 2000)
+      }, 5000)
     } catch (err) {
       setState({ phase: 'error', message: err instanceof Error ? err.message : t('common.error') })
     }
@@ -140,14 +144,26 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
                   WeChat ID: {state.wechat_user_id}
                 </p>
               )}
+              {state.conversation_id && state.conversation_id !== convId && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t('wechatBind.boundToOtherConv')}
+                </p>
+              )}
             </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setUnbindConfirmOpen(true)}
-            >
-              {t('wechatBind.unbind')}
-            </Button>
+            <div className="flex gap-2">
+              {state.conversation_id !== convId && (
+                <Button variant="outline" size="sm" onClick={() => setRebindConfirmOpen(true)}>
+                  {t('wechatBind.rebindHere')}
+                </Button>
+              )}
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setUnbindConfirmOpen(true)}
+              >
+                {t('wechatBind.unbind')}
+              </Button>
+            </div>
           </div>
         )
 
@@ -167,7 +183,7 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
               <div className="flex flex-col items-center gap-2 py-6">
                 <AlertCircle className="h-12 w-12 text-amber-500" />
                 <p className="text-sm text-muted-foreground">{t('common.error')}</p>
-                <Button variant="outline" size="sm" onClick={startBind}>
+                <Button variant="outline" size="sm" onClick={() => startBind(false)}>
                   {t('wechatBind.retry')}
                 </Button>
               </div>
@@ -193,7 +209,7 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
           <div className="flex flex-col items-center gap-4 py-6">
             <AlertCircle className="h-12 w-12 text-amber-500" />
             <p className="text-sm text-muted-foreground">{t('wechatBind.expired')}</p>
-            <Button variant="outline" onClick={startBind}>
+            <Button variant="outline" onClick={() => startBind(false)}>
               {t('wechatBind.retry')}
             </Button>
           </div>
@@ -204,7 +220,7 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
           <div className="flex flex-col items-center gap-4 py-6">
             <AlertCircle className="h-12 w-12 text-destructive" />
             <p className="text-sm text-destructive">{state.message}</p>
-            <Button variant="outline" onClick={startBind}>
+            <Button variant="outline" onClick={() => startBind(false)}>
               {t('common.cancel')}
             </Button>
           </div>
@@ -240,6 +256,24 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
             </Button>
             <Button variant="destructive" onClick={handleUnbind} disabled={unbinding}>
               {unbinding ? t('common.loading') : t('wechatBind.unbind')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rebind confirmation — binding will move to this conversation (需求3) */}
+      <Dialog open={rebindConfirmOpen} onOpenChange={(open) => { if (!open) setRebindConfirmOpen(false) }}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>{t('wechatBind.rebindTitle')}</DialogTitle>
+            <DialogDescription>{t('wechatBind.rebindConfirm')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRebindConfirmOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="default" onClick={() => { setRebindConfirmOpen(false); startBind(true) }}>
+              {t('wechatBind.rebindHere')}
             </Button>
           </DialogFooter>
         </DialogContent>

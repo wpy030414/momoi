@@ -258,6 +258,10 @@
     "successDesc": "You have successfully bound your WeChat account. You can now continue conversations on WeChat.",
     "alreadyBound": "Already bound",
     "alreadyBoundDesc": "Your account is already bound to WeChat",
+    "boundToOtherConv": "This WeChat is currently bound to another conversation. Rebinding here will automatically unbind the old conversation.",
+    "rebindHere": "Bind to this conversation",
+    "rebindTitle": "Rebind to this conversation",
+    "rebindConfirm": "Move the WeChat binding to this conversation? The old conversation's binding will be automatically removed.",
     "unbind": "Unbind",
     "unbindConfirm": "Are you sure you want to unbind WeChat?"
   },

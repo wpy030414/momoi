@@ -258,6 +258,10 @@
     "successDesc": "你已成功绑定微信，现在可以在微信上继续对话了。",
     "alreadyBound": "已绑定微信",
     "alreadyBoundDesc": "你的账号已绑定微信",
+    "boundToOtherConv": "该微信当前绑定在其他会话，重新绑定将自动解除旧会话绑定。",
+    "rebindHere": "绑定到此会话",
+    "rebindTitle": "重新绑定到此会话",
+    "rebindConfirm": "确定要将微信绑定转移到当前会话吗？原会话的绑定将自动解除。",
     "unbind": "解除绑定",
     "unbindConfirm": "确定要解除微信绑定吗？"
   },

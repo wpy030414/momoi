@@ -258,6 +258,10 @@
     "successDesc": "WeChat との連携が完了しました。WeChat で会話を続けることができます。",
     "alreadyBound": "連携済み",
     "alreadyBoundDesc": "アカウントは既に WeChat と連携されています",
+    "boundToOtherConv": "この WeChat は別の会話に連携されています。ここに再連携すると、古い会話の連携は自動的に解除されます。",
+    "rebindHere": "この会話に連携",
+    "rebindTitle": "この会話に再連携",
+    "rebindConfirm": "WeChat 連携をこの会話に移しますか？元の会話の連携は自動的に解除されます。",
     "unbind": "連携解除",
     "unbindConfirm": "WeChat 連携を解除してもよろしいですか？"
   },

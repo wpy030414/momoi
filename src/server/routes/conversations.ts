@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { db, conversations, messages, groupConversationAgents, agents } from '../db.js'
+import { db, conversations, messages, groupConversationAgents, agents, userWechatBindings, wechatSessions } from '../db.js'
 import { eq, and, desc, gte, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
@@ -8,6 +8,27 @@ import { broadcastConversationSync, broadcastConversationChanged } from '../real
 
 function getUserId(c: any): string {
   return c.get('userId') || ''
+}
+
+/**
+ * 解除某个会话的微信绑定（软删会话 / 硬删会话共用）。
+ * - 删除该会话对应的 wechat_sessions 映射（消息不再路由到该会话）
+ * - 若 user_wechat_bindings 绑定指向该会话，则删除绑定行（bot_token 一并清除，
+ *   重新绑定需重新扫码）
+ */
+export async function unbindConversationWechat(userId: string, conversationId: string): Promise<void> {
+  await db.delete(wechatSessions).where(
+    and(
+      eq(wechatSessions.user_id, userId),
+      eq(wechatSessions.conversation_id, conversationId),
+    ),
+  ).run()
+
+  const binding = await db.select().from(userWechatBindings)
+    .where(eq(userWechatBindings.user_id, userId)).get()
+  if (binding && binding.conversation_id === conversationId) {
+    await db.delete(userWechatBindings).where(eq(userWechatBindings.user_id, userId)).run()
+  }
 }
 
 export const conversationsRoute = new Hono()
@@ -121,6 +142,9 @@ conversationsRoute.delete('/:id', async (c) => {
     .set({ deleted_at: now, updated_at: now })
     .where(and(eq(conversations.id, id), eq(conversations.user_id, userId)))
     .run()
+
+  // 软删会话 → 自动解除微信绑定（删除 wechat_sessions 映射 + 清 user_wechat_bindings）
+  await unbindConversationWechat(userId, id)
 
   // 侧边栏删除记录实时同步到同账号其他设备
   broadcastConversationSync(userId)

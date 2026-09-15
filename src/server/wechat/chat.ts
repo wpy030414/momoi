@@ -3,9 +3,8 @@
  * 不依赖 HTTP 层，直接调用 runPiAgentLoop；避免 cookie 认证问题。
  */
 import { db, conversations, messages, wechatSessions, userWechatBindings } from '../db.js'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
-import { listAgents } from '../config.js'
 import { sendMessage, WECHAT_BASE_URL, type WechatCredentials } from './ilink.js'
 import { randomUUID } from 'crypto'
 
@@ -84,34 +83,47 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
 
   if (session) {
     convId = session.conversation_id
-  } else {
-    // Check if user had a pending conversation anchor (set when QR was scanned)
-    const pendingConvId = binding?.pending_conv_id
-    console.log('[wechat-chat] new sender', senderId, 'pending_conv_id:', pendingConvId || '(none)')
+    // 权威路由目标必须是绑定会话（需求1/3）：若映射指向的会话已被删除，
+    // 或该 sender 的映射落在非绑定会话上（迁移残留 / 历史多 sender 映射），
+    // 则删除映射并重新锚定到绑定会话。
+    const boundConvId = binding?.conversation_id || ''
+    const convStillValid = convId && (await db.select().from(conversations)
+      .where(and(eq(conversations.id, convId), sql`${conversations.deleted_at} IS NULL`)).get())
+    if (!convStillValid || (boundConvId && convId !== boundConvId)) {
+      await db.delete(wechatSessions).where(eq(wechatSessions.id, session.id)).run()
+      convId = ''
+    }
+  }
 
-    if (pendingConvId) {
+  if (!convId) {
+    // ---- 微信 sender 自动转移（需求3） ----
+    // 若该 sender 已在其他会话有 wechat_sessions 映射（会话被删后残留，或
+    // 重新绑定产生的新映射），先删除旧映射，再建立新绑定。
+    // 权威路由目标：user_wechat_bindings.conversation_id（绑定微信的会话）。
+    const boundConvId = binding?.conversation_id || ''
+    console.log('[wechat-chat] new sender', senderId, 'bound_conv_id:', boundConvId || '(none)')
+
+    if (boundConvId) {
+      // 校验绑定会话仍然存在且未被删除
       const existingConv = await db.select().from(conversations)
-        .where(eq(conversations.id, pendingConvId)).get()
+        .where(and(eq(conversations.id, boundConvId), sql`${conversations.deleted_at} IS NULL`)).get()
       if (existingConv) {
-        convId = pendingConvId
-        console.log('[wechat-chat] anchored to existing conversation:', convId)
-        await db.update(userWechatBindings)
-          .set({ pending_conv_id: '' })
-          .where(eq(userWechatBindings.user_id, userId)).run()
+        convId = boundConvId
+        // 若该 sender 旧映射指向别处（残留），清除它 —— 确保「一会话一微信」
+        await db.delete(wechatSessions).where(
+          and(
+            eq(wechatSessions.user_id, userId),
+            eq(wechatSessions.wechat_sender_id, senderId),
+          ),
+        ).run()
+        console.log('[wechat-chat] anchored to bound conversation:', convId)
       }
     }
 
     if (!convId) {
-      convId = randomUUID()
-      const now = Math.floor(Date.now() / 1000)
-      const agents = await listAgents()
-      const agentId = agents.find((a) => a.role !== 'neutral')?.id || agents[0]?.id || ''
-      const title = text.slice(0, 40) || 'New Chat'
-      await db.insert(conversations).values({
-        id: convId, user_id: userId, title,
-        agent_id: agentId, type: 'direct',
-        created_at: now, updated_at: now,
-      }).run()
+      // 无有效绑定 → 提示用户先绑定，不回退到新建会话
+      await sendMessage(creds, senderId, '尚未绑定会话，请在网页端选择会话并绑定微信后重试。')
+      return
     }
 
     const now = Math.floor(Date.now() / 1000)
@@ -151,7 +163,7 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
     userMessage: text,
     history,
     send: () => {}, // no-op — 无 SSE 客户端
-    thinkingMode: false,
+    thinkingMode: true,
     conversationId: convId,
     userId,
     agentId,

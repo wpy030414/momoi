@@ -78,6 +78,7 @@ export const userOauthBindings = pgTable('user_oauth_bindings', {
 export const userWechatBindings = pgTable('user_wechat_bindings', {
   id: text('id').primaryKey(),
   user_id: text('user_id').notNull().unique(),
+  conversation_id: text('conversation_id').notNull().default(''),
   bot_token: text('bot_token').notNull(),
   ilink_user_id: text('ilink_user_id').notNull().default(''),
   wechat_user_id: text('wechat_user_id').notNull().default(''),
