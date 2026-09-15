@@ -341,7 +341,7 @@ export const api = {
 
   // WeChat binding
   wechatBindInfo: () =>
-    request<{ bound: boolean; wechat_user_id?: string; bound_at?: number; conversation_id?: string }>(
+    request<{ bound: boolean; wechat_user_id?: string; bound_at?: number; conversation_id?: string; session_expired?: boolean }>(
       '/api/wechat/bind'
     ),
 

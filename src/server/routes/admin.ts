@@ -8,7 +8,7 @@ import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '../../shared/constants.js'
 import fs from 'fs'
 import path from 'path'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
-import { db, conversations, messages, users, userOauthBindings, agents, userWechatBindings, wechatSessions } from '../db.js'
+import { db, conversations, messages, users, userOauthBindings, agents, wechatBindings } from '../db.js'
 import { skillRegistry } from '../skills/loader.js'
 import AdmZip from 'adm-zip'
 
@@ -312,10 +312,9 @@ adminRoute.delete('/users/:username', async (c) => {
 
   // Delete all conversations (cascades to messages, group_conversation_agents)
   await db.delete(conversations).where(eq(conversations.user_id, username)).run()
-  // Delete WeChat bindings & sessions (sql.js has foreign_keys OFF by default,
+  // Delete WeChat binding (sql.js has foreign_keys OFF by default,
   // so cascade cannot be relied on — clean up explicitly).
-  await db.delete(wechatSessions).where(eq(wechatSessions.user_id, username)).run()
-  await db.delete(userWechatBindings).where(eq(userWechatBindings.user_id, username)).run()
+  await db.delete(wechatBindings).where(eq(wechatBindings.user_id, username)).run()
   // Delete user record
   await db.delete(users).where(eq(users.username, username)).run()
 

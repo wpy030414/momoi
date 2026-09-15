@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { db, users, userOauthBindings, userWechatBindings, wechatSessions, conversations } from '../db.js'
+import { db, users, userOauthBindings, wechatBindings, conversations } from '../db.js'
 import { eq, and } from 'drizzle-orm'
 import { hashPin, verifyPin, signUserToken, isAdmin, setAuthCookie, clearAuthCookie } from '../auth.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
@@ -187,8 +187,7 @@ userRoute.post('/rename', userAuthMiddleware, async (c) => {
   await db.update(users).set({ username: newName, last_login_at: now }).where(eq(users.username, oldUsername)).run()
   await db.update(conversations).set({ user_id: newName }).where(eq(conversations.user_id, oldUsername)).run()
   await db.update(userOauthBindings).set({ user_id: newName }).where(eq(userOauthBindings.user_id, oldUsername)).run()
-  await db.update(userWechatBindings).set({ user_id: newName }).where(eq(userWechatBindings.user_id, oldUsername)).run()
-  await db.update(wechatSessions).set({ user_id: newName }).where(eq(wechatSessions.user_id, oldUsername)).run()
+  await db.update(wechatBindings).set({ user_id: newName }).where(eq(wechatBindings.user_id, oldUsername)).run()
 
   const result = await signUserToken(newName)
   setAuthCookie(c, result.token)

@@ -1,8 +1,8 @@
 /**
  * 微信消息轮询器：定时遍历所有已绑定用户，拉取新消息并桥接处理。
- * polling cursor 已合入 userWechatBindings 表（updates_buf / last_poll_at）。
+ * 通道状态（updates_buf / session_expired）都在 wechat_bindings 表。
  */
-import { db, conversations, userWechatBindings, wechatSessions } from '../db.js'
+import { db, conversations, wechatBindings } from '../db.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { getUpdates, WECHAT_BASE_URL, DEFAULT_POLL_TIMEOUT_MS, parseIncoming, type WechatCredentials } from './ilink.js'
 import { handleWechatMessage } from './chat.js'
@@ -12,17 +12,17 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null
 /** Per-user guard: prevents overlapping getUpdates for the same user across cycles */
 const busyUsers = new Set<string>()
 
-type BindingRow = typeof userWechatBindings.$inferSelect
+type BindingRow = typeof wechatBindings.$inferSelect
 
 /** 仅轮询「已绑定到未删除会话」的行；未绑定会话 / 绑定会话已删的跳过 */
 async function pollAll(): Promise<void> {
   const cycleStart = Date.now()
-  const bindings = await db.select().from(userWechatBindings).all()
+  const bindings = await db.select().from(wechatBindings).all()
   if (bindings.length === 0) return
 
   // Resolve which bound conversations are still alive (not soft-deleted)
   const active = bindings.filter(
-    (b: BindingRow) => b.updates_buf !== 'SESSION_EXPIRED' && !!b.bot_token,
+    (b: BindingRow) => !b.session_expired && !!b.bot_token,
   )
   const convChecks = await Promise.all(
     active.map(async (b: BindingRow) => {
@@ -34,10 +34,9 @@ async function pollAll(): Promise<void> {
         )).get()
       if (!conv) {
         // Binding points at a deleted conversation — self-heal (B3):
-        // remove the binding and its session mappings so the user can rebind.
+        // remove the binding so the user can rebind.
         console.log(`[wechat-poller] Binding for user ${b.user_id} points at deleted conversation ${b.conversation_id}, clearing`)
-        await db.delete(wechatSessions).where(eq(wechatSessions.user_id, b.user_id)).run()
-        await db.delete(userWechatBindings).where(eq(userWechatBindings.user_id, b.user_id)).run()
+        await db.delete(wechatBindings).where(eq(wechatBindings.user_id, b.user_id)).run()
         return false
       }
       return true
@@ -71,16 +70,16 @@ async function pollUser(binding: BindingRow): Promise<void> {
   // Token-generation guard (A1): the pollUser closure holds a snapshot of this
   // binding taken at cycle start. If the user re-bound (bot_token replaced by a
   // new QR scan) while getUpdates was in flight, this write must NOT touch the
-  // new binding row — otherwise a stale -14/updates_buf would poison the fresh
-  // binding (SESSION_EXPIRED loop / cursor clobber). Scope every write by the
+  // new binding row — otherwise a stale -14/cursor would poison the fresh
+  // binding (expiry loop / cursor clobber). Scope every write by the
   // exact bot_token we actually polled.
-  const writeGuard = eq(userWechatBindings.bot_token, binding.bot_token)
+  const writeGuard = eq(wechatBindings.bot_token, binding.bot_token)
 
   if (res.errcode === -14) {
     console.error(`[wechat-poller] Session expired for user ${binding.user_id}`)
-    await db.update(userWechatBindings)
-      .set({ updates_buf: 'SESSION_EXPIRED' })
-      .where(and(eq(userWechatBindings.user_id, binding.user_id), writeGuard)).run()
+    await db.update(wechatBindings)
+      .set({ session_expired: true })
+      .where(and(eq(wechatBindings.user_id, binding.user_id), writeGuard)).run()
     return
   }
 
@@ -105,15 +104,10 @@ async function pollUser(binding: BindingRow): Promise<void> {
   }
 
   // Save cursor after all messages processed
-  const now = Math.floor(Date.now() / 1000)
   if (res.updatesBuf !== undefined) {
-    await db.update(userWechatBindings)
-      .set({ updates_buf: res.updatesBuf, last_poll_at: now })
-      .where(and(eq(userWechatBindings.user_id, binding.user_id), writeGuard)).run()
-  } else {
-    await db.update(userWechatBindings)
-      .set({ last_poll_at: now })
-      .where(and(eq(userWechatBindings.user_id, binding.user_id), writeGuard)).run()
+    await db.update(wechatBindings)
+      .set({ updates_buf: res.updatesBuf })
+      .where(and(eq(wechatBindings.user_id, binding.user_id), writeGuard)).run()
   }
 }
 

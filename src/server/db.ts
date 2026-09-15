@@ -103,26 +103,15 @@ const MIGRATION_SQL = `
     UNIQUE(provider_id, provider_user_id)
   );
 
-  CREATE TABLE IF NOT EXISTS user_wechat_bindings (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL UNIQUE,
-    conversation_id TEXT NOT NULL DEFAULT '',
-    bot_token TEXT NOT NULL,
-    ilink_user_id TEXT NOT NULL DEFAULT '',
+  CREATE TABLE IF NOT EXISTS wechat_bindings (
+    user_id TEXT PRIMARY KEY,
+    bot_token TEXT NOT NULL DEFAULT '',
     wechat_user_id TEXT NOT NULL DEFAULT '',
+    conversation_id TEXT NOT NULL DEFAULT '',
+    pending_conversation_id TEXT NOT NULL DEFAULT '',
     updates_buf TEXT NOT NULL DEFAULT '',
-    last_poll_at INTEGER NOT NULL DEFAULT 0,
-    pending_conv_id TEXT NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS wechat_sessions (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    wechat_sender_id TEXT NOT NULL,
-    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    created_at INTEGER NOT NULL,
-    UNIQUE(user_id, wechat_sender_id)
+    session_expired INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
   );`
 
 // ---- SQLite (sql.js) local mode ----
@@ -156,37 +145,10 @@ async function initSqlite() {
     `ALTER TABLE agents ADD COLUMN voice_enabled INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE agents ADD COLUMN voice_sample_url TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE agents ADD COLUMN voice_settings TEXT NOT NULL DEFAULT '{}'`,
-    `ALTER TABLE user_wechat_bindings ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''`,
   ]
   for (const stmt of ADDITIVE_MIGRATIONS) {
     try { sqlDb.run(stmt) } catch { /* column already exists */ }
   }
-
-  // Backfill: existing bindings should claim the conversation their WeChat
-  // sender(s) were already routed to (from wechat_sessions), falling back to
-  // the legacy pending_conv_id anchor. Without this, pre-migration bindings
-  // would have conversation_id = '' and messages would stop routing.
-  try {
-    // 1) Claim the conversation from existing wechat_sessions mappings
-    const sessRows = sqlDb.exec(`
-      SELECT uwb.id, MIN(ws.conversation_id) AS conv_id
-      FROM user_wechat_bindings uwb
-      JOIN wechat_sessions ws ON ws.user_id = uwb.user_id
-      WHERE uwb.conversation_id = ''
-      GROUP BY uwb.id
-    `) as any
-    const sessStmts = sessRows[0]?.values ?? []
-    for (const [id, convId] of sessStmts) {
-      sqlDb.run(`UPDATE user_wechat_bindings SET conversation_id = ? WHERE id = ?`, [convId, id])
-    }
-
-    // 2) Fall back to the legacy pending_conv_id anchor (no sessions yet)
-    const pendRows = sqlDb.exec(`SELECT id, pending_conv_id FROM user_wechat_bindings WHERE conversation_id = '' AND pending_conv_id != ''`) as any
-    const pendStmts = pendRows[0]?.values ?? []
-    for (const [id, pendingConvId] of pendStmts) {
-      sqlDb.run(`UPDATE user_wechat_bindings SET conversation_id = ? WHERE id = ?`, [pendingConvId, id])
-    }
-  } catch { /* best-effort backfill */ }
 
   persist()
 
@@ -310,26 +272,15 @@ async function initPg(dbUrl: string, user: string, password: string) {
       UNIQUE(provider_id, provider_user_id)
     );
 
-    CREATE TABLE IF NOT EXISTS user_wechat_bindings (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL UNIQUE,
-      conversation_id TEXT NOT NULL DEFAULT '',
-      bot_token TEXT NOT NULL,
-      ilink_user_id TEXT NOT NULL DEFAULT '',
+    CREATE TABLE IF NOT EXISTS wechat_bindings (
+      user_id TEXT PRIMARY KEY,
+      bot_token TEXT NOT NULL DEFAULT '',
       wechat_user_id TEXT NOT NULL DEFAULT '',
+      conversation_id TEXT NOT NULL DEFAULT '',
+      pending_conversation_id TEXT NOT NULL DEFAULT '',
       updates_buf TEXT NOT NULL DEFAULT '',
-      last_poll_at INTEGER NOT NULL DEFAULT 0,
-      pending_conv_id TEXT NOT NULL DEFAULT '',
+      session_expired BOOLEAN NOT NULL DEFAULT FALSE,
       created_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS wechat_sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      wechat_sender_id TEXT NOT NULL,
-      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      created_at INTEGER NOT NULL,
-      UNIQUE(user_id, wechat_sender_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
@@ -340,29 +291,7 @@ async function initPg(dbUrl: string, user: string, password: string) {
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_enabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_sample_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_settings TEXT NOT NULL DEFAULT '{}';
-    ALTER TABLE user_wechat_bindings ADD COLUMN IF NOT EXISTS conversation_id TEXT NOT NULL DEFAULT '';
   `)
-
-  // Backfill conversation_id for pre-existing bindings (see SQLite migration above)
-  try {
-    await pool.query(`
-      UPDATE user_wechat_bindings uwb
-      SET conversation_id = s.conv_id
-      FROM (
-        SELECT ws.user_id, MIN(ws.conversation_id) AS conv_id
-        FROM wechat_sessions ws
-        GROUP BY ws.user_id
-      ) s
-      WHERE s.user_id = uwb.user_id AND uwb.conversation_id = ''
-    `)
-    await pool.query(`
-      UPDATE user_wechat_bindings uwb
-      SET conversation_id = uwb.pending_conv_id
-      WHERE uwb.conversation_id = '' AND uwb.pending_conv_id != ''
-    `)
-  } catch (err) {
-    console.error('[db] WeChat backfill failed (non-fatal):', (err as Error).message)
-  }
 
   const db = drizzlePg(pool, { schema }) as any
   console.log('[db] PostgreSQL ready')
@@ -386,6 +315,5 @@ export const {
   mcpServers,
   users,
   userOauthBindings,
-  userWechatBindings,
-  wechatSessions,
+  wechatBindings,
 } = result.schema

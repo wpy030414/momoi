@@ -1,8 +1,7 @@
 import { Hono } from 'hono'
-import { db, conversations, userWechatBindings, wechatSessions } from '../db.js'
+import { db, conversations, wechatBindings } from '../db.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
-import { randomUUID } from 'crypto'
 import QRCode from 'qrcode'
 
 export const wechatRoute = new Hono()
@@ -37,8 +36,8 @@ function wechatHeaders(): Record<string, string> {
 // GET /api/wechat/bind — check current user's binding status
 wechatRoute.get('/bind', userAuthMiddleware, async (c) => {
   const userId = (c as any).get('userId') as string
-  const binding = await db.select().from(userWechatBindings)
-    .where(eq(userWechatBindings.user_id, userId)).get()
+  const binding = await db.select().from(wechatBindings)
+    .where(eq(wechatBindings.user_id, userId)).get()
 
   // A row with empty bot_token is a placeholder created by POST /bind that has
   // not been scanned yet — treat it as unbound so the UI shows the QR flow.
@@ -51,6 +50,7 @@ wechatRoute.get('/bind', userAuthMiddleware, async (c) => {
     wechat_user_id: binding.wechat_user_id,
     bound_at: binding.created_at,
     conversation_id: binding.conversation_id || undefined,
+    session_expired: binding.session_expired,
   })
 })
 
@@ -91,26 +91,23 @@ wechatRoute.post('/bind', userAuthMiddleware, async (c) => {
 
   // Store the conversation ID we want to bind to, so that when the first
   // WeChat message arrives after scanning, it continues in this conversation.
-  const existing = await db.select().from(userWechatBindings)
-    .where(eq(userWechatBindings.user_id, userId)).get()
+  const existing = await db.select().from(wechatBindings)
+    .where(eq(wechatBindings.user_id, userId)).get()
   const now = Math.floor(Date.now() / 1000)
   if (existing) {
     // Track whether an existing binding is being re-bound to a new conversation.
-    // pending_conv_id holds the *intended* target while the QR is being scanned.
-    await db.update(userWechatBindings)
-      .set({ pending_conv_id: targetConvId })
-      .where(eq(userWechatBindings.user_id, userId)).run()
+    // pending_conversation_id holds the *intended* target while the QR is being scanned.
+    await db.update(wechatBindings)
+      .set({ pending_conversation_id: targetConvId })
+      .where(eq(wechatBindings.user_id, userId)).run()
   } else {
     // Binding row doesn't exist yet — create a placeholder with the anchor
-    await db.insert(userWechatBindings).values({
-      id: randomUUID(),
+    await db.insert(wechatBindings).values({
       user_id: userId,
       bot_token: '',
       wechat_user_id: '',
       conversation_id: '',
-      updates_buf: '',
-      last_poll_at: now,
-      pending_conv_id: targetConvId,
+      pending_conversation_id: targetConvId,
       created_at: now,
     }).run()
   }
@@ -166,19 +163,19 @@ wechatRoute.get('/bind/status', userAuthMiddleware, async (c) => {
     // Serialize per-user — prevents two concurrent QR scans from clobbering
     // each other's bot_token / conversation_id (A2).
     return withBindingLock(userId, async () => {
-      const existing = await db.select().from(userWechatBindings)
-        .where(eq(userWechatBindings.user_id, userId)).get()
+      const existing = await db.select().from(wechatBindings)
+        .where(eq(wechatBindings.user_id, userId)).get()
 
       const now = Math.floor(Date.now() / 1000)
 
       if (existing) {
         // The conversation this binding should attach to:
-        // pending_conv_id was set during POST /bind; fall back to the existing
-        // conversation_id (re-scan without re-anchoring keeps the old target).
-        const targetConvId = existing.pending_conv_id || existing.conversation_id || ''
+        // pending_conversation_id was set during POST /bind; fall back to the
+        // existing conversation_id (re-scan without re-anchoring keeps the old target).
+        const targetConvId = existing.pending_conversation_id || existing.conversation_id || ''
 
         // Validate the target conversation is still alive and owned by this user.
-        // A stale pending_conv_id (target soft-deleted mid-scan) must not bind.
+        // A stale pending target (target soft-deleted mid-scan) must not bind.
         if (targetConvId) {
           const targetConv = await db.select().from(conversations)
             .where(and(
@@ -191,30 +188,19 @@ wechatRoute.get('/bind/status', userAuthMiddleware, async (c) => {
           }
         }
 
-        // ---- Override semantics (需求3): if the old binding pointed at a
-        // different conversation, clear the wechat_sessions mapping for that
-        // conversation so messages no longer route there. ----
-        if (existing.conversation_id && existing.conversation_id !== targetConvId) {
-          await db.delete(wechatSessions).where(
-            and(
-              eq(wechatSessions.user_id, userId),
-              eq(wechatSessions.conversation_id, existing.conversation_id),
-            ),
-          ).run()
-        }
-
-        await db.update(userWechatBindings)
+        // 覆盖转移（需求3）：路由权威就是 binding.conversation_id 本身，
+        // 换绑写入新目标即完成转移，旧会话不再收到消息。
+        await db.update(wechatBindings)
           .set({
             bot_token: data.bot_token,
-            ilink_user_id: data.ilink_user_id || existing.ilink_user_id || '',
             wechat_user_id: data.ilink_user_id || existing.wechat_user_id || '',
             conversation_id: targetConvId,
             updates_buf: '',
-            last_poll_at: now,
-            pending_conv_id: '',
+            session_expired: false,
+            pending_conversation_id: '',
             created_at: now,
           })
-          .where(eq(userWechatBindings.user_id, userId)).run()
+          .where(eq(wechatBindings.user_id, userId)).run()
       } else {
         // No binding row — the placeholder was created by POST /bind but is
         // gone (e.g. the target conversation was soft-deleted while the QR was
@@ -238,7 +224,6 @@ wechatRoute.get('/bind/status', userAuthMiddleware, async (c) => {
 // DELETE /api/wechat/bind — unbind
 wechatRoute.delete('/bind', userAuthMiddleware, async (c) => {
   const userId = (c as any).get('userId') as string
-  await db.delete(userWechatBindings).where(eq(userWechatBindings.user_id, userId)).run()
-  await db.delete(wechatSessions).where(eq(wechatSessions.user_id, userId)).run()
+  await db.delete(wechatBindings).where(eq(wechatBindings.user_id, userId)).run()
   return c.json({ success: true })
 })

@@ -2,11 +2,10 @@
  * WeChat → Momoi 聊天桥接：接收微信文本，路由到 AI 并回复。
  * 不依赖 HTTP 层，直接调用 runPiAgentLoop；避免 cookie 认证问题。
  */
-import { db, conversations, messages, wechatSessions, userWechatBindings } from '../db.js'
+import { db, conversations, messages, wechatBindings } from '../db.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { sendMessage, WECHAT_BASE_URL, type WechatCredentials } from './ilink.js'
-import { randomUUID } from 'crypto'
 
 export interface WechatChatOptions {
   userId: string
@@ -62,76 +61,35 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
   const { userId, senderId, text, botToken, contextToken, language } = opts
   const creds: WechatCredentials = { baseUrl: WECHAT_BASE_URL, token: botToken }
 
-  // Resolve bot's own binding record for conversation anchoring and diagnostics
-  const binding = await db.select().from(userWechatBindings)
-    .where(eq(userWechatBindings.user_id, userId)).get()
+  const NOT_BOUND_HINT = '尚未绑定会话，请在网页端选择会话并绑定微信后重试。'
+
+  // 绑定行即路由权威：sender 合法性与目标会话都在这一行里
+  const binding = await db.select().from(wechatBindings)
+    .where(eq(wechatBindings.user_id, userId)).get()
+  if (!binding || !binding.conversation_id) {
+    await sendMessage(creds, senderId, NOT_BOUND_HINT)
+    return
+  }
+
+  // Sender 校验：扫码生成的 bot 通道是用户专属 1v1 通道，合法 sender 即扫码者本人
+  if (binding.wechat_user_id && senderId !== binding.wechat_user_id) {
+    console.log(`[wechat-chat] Ignoring unknown sender ${senderId} for user ${userId}`)
+    return
+  }
 
   // ---- Built-in commands ----
   if (text === '/clear' || text === '/new' || text === '/reset' || text === '／clear') {
-    await db.delete(wechatSessions).where(
-      and(eq(wechatSessions.user_id, userId), eq(wechatSessions.wechat_sender_id, senderId)),
-    ).run()
     await sendMessage(creds, senderId, '会话已重置。')
     return
   }
 
-  // ---- Find or create session & conversation ----
-  let convId = ''
-  const session = await db.select().from(wechatSessions).where(
-    and(eq(wechatSessions.user_id, userId), eq(wechatSessions.wechat_sender_id, senderId)),
-  ).get()
-
-  if (session) {
-    convId = session.conversation_id
-    // 权威路由目标必须是绑定会话（需求1/3）：若映射指向的会话已被删除，
-    // 或该 sender 的映射落在非绑定会话上（迁移残留 / 历史多 sender 映射），
-    // 则删除映射并重新锚定到绑定会话。
-    const boundConvId = binding?.conversation_id || ''
-    const convStillValid = convId && (await db.select().from(conversations)
-      .where(and(eq(conversations.id, convId), sql`${conversations.deleted_at} IS NULL`)).get())
-    if (!convStillValid || (boundConvId && convId !== boundConvId)) {
-      await db.delete(wechatSessions).where(eq(wechatSessions.id, session.id)).run()
-      convId = ''
-    }
-  }
-
-  if (!convId) {
-    // ---- 微信 sender 自动转移（需求3） ----
-    // 若该 sender 已在其他会话有 wechat_sessions 映射（会话被删后残留，或
-    // 重新绑定产生的新映射），先删除旧映射，再建立新绑定。
-    // 权威路由目标：user_wechat_bindings.conversation_id（绑定微信的会话）。
-    const boundConvId = binding?.conversation_id || ''
-    console.log('[wechat-chat] new sender', senderId, 'bound_conv_id:', boundConvId || '(none)')
-
-    if (boundConvId) {
-      // 校验绑定会话仍然存在且未被删除
-      const existingConv = await db.select().from(conversations)
-        .where(and(eq(conversations.id, boundConvId), sql`${conversations.deleted_at} IS NULL`)).get()
-      if (existingConv) {
-        convId = boundConvId
-        // 若该 sender 旧映射指向别处（残留），清除它 —— 确保「一会话一微信」
-        await db.delete(wechatSessions).where(
-          and(
-            eq(wechatSessions.user_id, userId),
-            eq(wechatSessions.wechat_sender_id, senderId),
-          ),
-        ).run()
-        console.log('[wechat-chat] anchored to bound conversation:', convId)
-      }
-    }
-
-    if (!convId) {
-      // 无有效绑定 → 提示用户先绑定，不回退到新建会话
-      await sendMessage(creds, senderId, '尚未绑定会话，请在网页端选择会话并绑定微信后重试。')
-      return
-    }
-
-    const now = Math.floor(Date.now() / 1000)
-    await db.insert(wechatSessions).values({
-      id: randomUUID(), user_id: userId,
-      wechat_sender_id: senderId, conversation_id: convId,
-      created_at: now,
-    }).run()
+  // ---- Route to the anchored conversation (must still be alive) ----
+  const convId = binding.conversation_id
+  const conv = await db.select().from(conversations)
+    .where(and(eq(conversations.id, convId), sql`${conversations.deleted_at} IS NULL`)).get()
+  if (!conv) {
+    await sendMessage(creds, senderId, NOT_BOUND_HINT)
+    return
   }
 
   // ---- Save user message ----
@@ -142,9 +100,8 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
   }).run()
   await db.update(conversations).set({ updated_at: now }).where(eq(conversations.id, convId)).run()
 
-  // ---- Load conversation for agent anchor ----
-  const conv = await db.select().from(conversations).where(eq(conversations.id, convId)).get()
-  const agentId = conv?.agent_id || ''
+  // Agent anchor: derived from the conversation loaded during route validation
+  const agentId = conv.agent_id || ''
 
   // ---- Load history ----
   const historyMsgs = await db.select().from(messages)
@@ -208,11 +165,11 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
 
       // Session expired — mark in DB, don't retry
       if (isSessionExpired) {
-        console.error(`[wechat-chat] Session expired for user ${userId}, marking SESSION_EXPIRED`)
+        console.error(`[wechat-chat] Session expired for user ${userId}, marking session_expired`)
         try {
-          await db.update(userWechatBindings)
-            .set({ updates_buf: 'SESSION_EXPIRED' })
-            .where(eq(userWechatBindings.user_id, userId)).run()
+          await db.update(wechatBindings)
+            .set({ session_expired: true })
+            .where(eq(wechatBindings.user_id, userId)).run()
         } catch (_) { /* best-effort */ }
         break
       }
