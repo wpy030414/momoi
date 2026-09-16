@@ -122,3 +122,13 @@
          transition-colors hover:bg-accent hover:text-accent-foreground cursor-pointer;
   background-color: hsl(var(--background) / 0.66);
 }
+
+/* ---- Sidebar conversation list ---- */
+
+/* Radix ScrollArea 的 Viewport 内层包了个 display:table 的匿名 div（内联样式），
+   会让长 nowrap 标题把内容按 max-content 撑宽——行内右侧的菜单按钮被顶出
+   侧栏可视区（overflow:hidden 裁掉），且 flex 截断完全失效。
+   这里改回普通块布局；保留其内联的 min-width:100%，窄内容仍能撑满视口。 */
+.sidebar-scroll-area [data-radix-scroll-area-viewport] > div {
+  display: block !important;
+}
