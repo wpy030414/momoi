@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageContent } from './MessageContent'
 import { ThinkingBlock } from './ThinkingBlock'
 import { AttachmentCard, AttachmentList } from './AttachmentCard'
 import { VoicePlayButton } from '../voice/VoicePlayButton'
-import { User, Bot, Undo2, Check, X } from 'lucide-react'
+import { User, Bot, Undo2, Check, X, ChevronRight } from 'lucide-react'
 import type { Attachment, ThinkingSegment, TraceEntry } from '@/shared/types'
 
 interface ChatMessage {
@@ -35,9 +35,11 @@ interface MessageBubbleProps {
   voiceEnabled?: boolean
   /** Active agent ID (for voice audio URL resolution) */
   activeAgentId?: string
+  /** Show thinking blocks (controlled by parent verbose toggle) */
+  verbose?: boolean
 }
 
-export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, agentAvatar, agentName, voiceEnabled, activeAgentId }: MessageBubbleProps) {
+export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, agentAvatar, agentName, voiceEnabled, activeAgentId, verbose }: MessageBubbleProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const [confirmingRevert, setConfirmingRevert] = useState(false)
@@ -70,49 +72,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
               Falls back to legacy grouped rendering if trace is absent (defensive). */}
           {!isUser && message.trace && message.trace.length > 0 ? (
             <>
-              {message.trace.map((entry, idx) => {
-                if (entry.type === 'thinking') {
-                  return (
-                    <ThinkingBlock
-                      key={`thinking-${idx}`}
-                      content={entry.text}
-                      segments={[{ round: 0, text: entry.text }]}
-                      done={!message.streaming}
-                    />
-                  )
-                }
-                if (entry.type === 'text') {
-                  return (
-                    <div key={`text-${idx}`} className={`inline-block rounded-lg px-4 py-1 bg-card/75 border mb-1`}>
-                      <MessageContent content={entry.text} streaming={message.streaming && idx === message.trace!.length - 1} isUser={false} />
-                    </div>
-                  )
-                }
-                // tool_call
-                return (
-                  <div key={`tool-${entry.id || idx}`} className="mb-1">
-                    <div className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0">
-                      <span className="font-medium truncate">{entry.name}</span>
-                      {entry.status === 'running' && (
-                        <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block flex-shrink-0" />
-                      )}
-                      {entry.result && <span className="text-muted-foreground ml-1 truncate">{entry.result}</span>}
-                    </div>
-                    {entry.artifacts && entry.artifacts.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {entry.artifacts.map((art, i) => (
-                          <AttachmentCard key={i} attachment={{
-                            url: art.downloadUrl,
-                            name: art.displayName,
-                            size: 0,
-                            type: art.mimeType,
-                          }} />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+              {groupAndRenderTrace(message.trace, message.streaming, verbose)}
             </>
           ) : !isUser ? (
             /* Legacy fallback: grouped rendering for messages without trace */
@@ -122,6 +82,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
                   content={message.thinking}
                   segments={message.thinkingSegments}
                   done={!message.streaming}
+                  verbose={verbose}
                 />
               )}
               {message.toolCalls && message.toolCalls.length > 0 && (
@@ -252,6 +213,138 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/** Group consecutive tool_call entries into stacks; render trace with verbose-controlled thinking. */
+function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?: boolean): React.ReactNode {
+  const elements: React.ReactNode[] = []
+  let i = 0
+  while (i < trace.length) {
+    const entry = trace[i]
+    if (entry.type === 'tool_call') {
+      // Collect consecutive tool_call entries
+      const stack: TraceEntry[] = [entry]
+      let j = i + 1
+      while (j < trace.length && trace[j].type === 'tool_call') {
+        stack.push(trace[j])
+        j++
+      }
+      if (stack.length >= 2) {
+        elements.push(<ToolCallStack key={`stack-${i}`} entries={stack} streaming={streaming} />)
+      } else {
+        elements.push(renderToolCall(entry, i))
+      }
+      i = j
+    } else if (entry.type === 'thinking') {
+      elements.push(
+        <ThinkingBlock
+          key={`thinking-${i}`}
+          content={entry.text}
+          segments={[{ round: 0, text: entry.text }]}
+          done={!streaming}
+          verbose={verbose}
+        />
+      )
+      i++
+    } else {
+      // text
+      elements.push(
+        <div key={`text-${i}`} className={`inline-block rounded-lg px-4 py-1 bg-card/75 border mb-1`}>
+          <MessageContent content={entry.text} streaming={streaming && i === trace.length - 1} isUser={false} />
+        </div>
+      )
+      i++
+    }
+  }
+  return elements
+}
+
+function renderToolCall(entry: TraceEntry, idx: number): React.ReactNode {
+  if (entry.type !== 'tool_call') return null
+  return (
+    <div key={`tool-${entry.id || idx}`} className="mb-1">
+      <div className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0">
+        <span className="font-medium truncate">{entry.name}</span>
+        {entry.status === 'running' && (
+          <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block flex-shrink-0" />
+        )}
+        {entry.result && <span className="text-muted-foreground ml-1 truncate">{entry.result}</span>}
+      </div>
+      {entry.artifacts && entry.artifacts.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-1">
+          {entry.artifacts.map((art, i) => (
+            <AttachmentCard key={i} attachment={{
+              url: art.downloadUrl,
+              name: art.displayName,
+              size: 0,
+              type: art.mimeType,
+            }} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolCallStack({ entries, streaming }: { entries: TraceEntry[]; streaming?: boolean }) {
+  const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(false)
+
+  const toolCalls = entries.filter(
+    (e): e is Extract<TraceEntry, { type: 'tool_call' }> => e.type === 'tool_call'
+  )
+  if (toolCalls.length === 0) return null
+
+  const allDone = toolCalls.every((tc) => tc.status === 'done' || tc.status === 'error')
+  const runningCount = toolCalls.filter((tc) => tc.status === 'running').length
+
+  return (
+    <div className="mb-1">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0 hover:bg-muted/80 transition-colors w-full text-left"
+      >
+        <ChevronRight className={`h-3 w-3 transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`} />
+        <span className="font-medium">
+          {toolCalls.length} {t('chat.toolsUsed', { count: toolCalls.length })}
+        </span>
+        {runningCount > 0 && (
+          <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+        )}
+        {allDone && !streaming && (
+          <span className="text-muted-foreground ml-auto">{t('chat.completed')}</span>
+        )}
+      </button>
+
+      {expanded && (
+        <div className="mt-1 space-y-1 pl-4">
+          {toolCalls.map((tc, idx) => (
+            <div key={tc.id || idx}>
+              <div className="text-xs bg-muted/50 rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0">
+                <span className="font-medium truncate">{tc.name}</span>
+                {tc.status === 'running' && (
+                  <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                )}
+                {tc.result && <span className="text-muted-foreground ml-1 truncate">{tc.result}</span>}
+              </div>
+              {tc.artifacts && tc.artifacts.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {tc.artifacts.map((art, i) => (
+                    <AttachmentCard key={i} attachment={{
+                      url: art.downloadUrl,
+                      name: art.displayName,
+                      size: 0,
+                      type: art.mimeType,
+                    }} />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

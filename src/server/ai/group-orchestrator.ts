@@ -4,7 +4,7 @@
 
 import { runPiAgentLoop } from './pi-adapter.js'
 import type { ChatMessage, ContentPart } from './provider.js'
-import type { ServerMessage, Agent } from '../../shared/types.js'
+import type { ServerMessage, Agent, TraceEntry } from '../../shared/types.js'
 import type { ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
 import { getAgent, getConfig } from '../config.js'
@@ -33,6 +33,7 @@ interface GroupOrchestratorOptions {
     thinking: string,
     suggestions: string[],
     artifacts?: ToolArtifact[],
+    trace?: TraceEntry[],
   ) => Promise<void>
 }
 
@@ -312,7 +313,7 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         ? agentNameById.get(protagonistAgentId)
         : undefined
 
-      const { reply, suggestions, thinking, artifacts } = await runPiAgentLoop({
+      const { reply, suggestions, thinking, artifacts, trace } = await runPiAgentLoop({
         userMessage,
         history: perAgentHistory,
         send: (msg: ServerMessage) => {
@@ -337,7 +338,7 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
 
       // Save the agent's message to DB
       if (reply) {
-        await saveMessage(agentId, agent.name, reply, thinking, suggestions, artifacts)
+        await saveMessage(agentId, agent.name, reply, thinking, suggestions, artifacts, trace)
       }
 
       // Record this agent's reply so subsequent agents see it

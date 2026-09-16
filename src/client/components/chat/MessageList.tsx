@@ -34,9 +34,11 @@ interface MessageListProps {
   agentVoiceEnabled?: boolean
   /** All agents voice_enabled lookup (group chat) */
   agentVoiceMap?: Map<string, boolean>
+  /** Show thinking details in messages */
+  verbose?: boolean
 }
 
-export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap }: MessageListProps) {
+export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose }: MessageListProps) {
   // Only the last assistant message shows its suggestion chips — older ones
   // were for a past turn and are meaningless as "what to ask next".
   const lastAssistantIdx = [...messages]
@@ -81,6 +83,7 @@ export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, age
             agentName={msgAgentName || msg.agent_name || fallbackAgentName}
             voiceEnabled={msgVoiceEnabled}
             activeAgentId={msgAgentId}
+            verbose={verbose}
           />
         )
       })}

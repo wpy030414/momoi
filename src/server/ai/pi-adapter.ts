@@ -37,7 +37,7 @@ import type {
 import { Type } from '@sinclair/typebox'
 import type { TSchema } from '@sinclair/typebox'
 
-import type { AppConfig, Agent, ServerMessage, ToolDefinition } from '../../shared/types.js'
+import type { AppConfig, Agent, ServerMessage, ToolDefinition, TraceEntry } from '../../shared/types.js'
 import {
   SUGGESTIONS_FENCE,
   THINKING_SEGMENT_OPEN,
@@ -594,6 +594,7 @@ interface SSEState {
   lastRoundHadThinking: boolean
   producedArtifacts: ToolArtifact[]
   toolCallCount: number
+  trace: TraceEntry[]
 }
 
 function createEventEmitter(state: SSEState, conversationId: string): (event: AgentEvent) => Promise<void> {
@@ -614,6 +615,14 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
           case 'text_delta': {
             const token = sub.delta
             state.fullText += token
+
+            // Trace: append to last text entry or create new one
+            const lastT = state.trace[state.trace.length - 1]
+            if (lastT?.type === 'text') {
+              lastT.text += token
+            } else {
+              state.trace.push({ type: 'text', text: token })
+            }
 
             if (state.suggestionsSeen) break
 
@@ -637,15 +646,25 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
           case 'thinking_delta': {
             const t = sub.delta
             if (!t) break
+            const isNewRound = state.emittedSegmentRound !== state.toolCallCount
             // 每轮第一条 thinking 前注入分隔符
-            if (state.emittedSegmentRound !== state.toolCallCount) {
+            if (isNewRound) {
               state.emittedSegmentRound = state.toolCallCount
               const header = THINKING_SEGMENT_OPEN + (state.toolCallCount + 1) + THINKING_SEGMENT_CLOSE
               state.fullThinking += header
               state.send({ type: 'thinking', text: header, round: state.toolCallCount })
+              // Trace: new thinking entry for new round
+              state.trace.push({ type: 'thinking', text: '' })
             }
             state.fullThinking += t
             state.send({ type: 'thinking', text: t, round: state.toolCallCount })
+            // Trace: append to last thinking entry
+            const lastTh = state.trace[state.trace.length - 1]
+            if (lastTh?.type === 'thinking') {
+              lastTh.text += t
+            } else {
+              state.trace.push({ type: 'thinking', text: t })
+            }
             state.lastRoundHadThinking = true
             break
           }
@@ -657,6 +676,7 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
       case 'tool_execution_start': {
         const input = typeof event.args === 'object' && event.args !== null ? event.args as Record<string, unknown> : {}
         state.send({ type: 'tool_execution_start', id: event.toolCallId, name: event.toolName, input })
+        state.trace.push({ type: 'tool_call', id: event.toolCallId, name: event.toolName, input, status: 'running' })
         break
       }
 
@@ -671,18 +691,32 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
           state.producedArtifacts.push(...artifacts)
         }
 
+        const artifactMeta = artifacts?.map((a) => ({
+          filename: a.filename,
+          displayName: a.displayName,
+          mimeType: a.mimeType,
+          downloadUrl: a.downloadUrl,
+        }))
+
         state.send({
           type: 'tool_result',
           id: event.toolCallId,
           name: event.toolName,
           summary,
-          artifacts: artifacts?.map((a) => ({
-            filename: a.filename,
-            displayName: a.displayName,
-            mimeType: a.mimeType,
-            downloadUrl: a.downloadUrl,
-          })),
+          artifacts: artifactMeta,
         })
+
+        // Trace: update matching tool_call entry by id
+        const isError = !!event.isError || summary?.startsWith('Tool error') || summary?.startsWith('BLOCKED')
+        for (let i = state.trace.length - 1; i >= 0; i--) {
+          const e = state.trace[i]
+          if (e.type === 'tool_call' && e.id === event.toolCallId) {
+            e.status = isError ? 'error' : 'done'
+            e.result = summary
+            if (artifactMeta?.length) e.artifacts = artifactMeta
+            break
+          }
+        }
         break
       }
 
@@ -874,7 +908,7 @@ export interface RunPiAgentLoopOptions {
 }
 
 // ---- 入口函数 ----
-export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[]; agentId?: string }> {
+export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[]; agentId?: string; trace?: TraceEntry[] }> {
   const {
     userMessage, history, send, signal,
     thinkingMode = true, conversationId, userId, agentId,
@@ -954,6 +988,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     lastRoundHadThinking: false,
     producedArtifacts: [],
     toolCallCount: 0,
+    trace: [],
   }
 
   // 9. 事件发射器
@@ -971,7 +1006,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     )
   } catch (err) {
     send({ type: 'error', message: err instanceof Error ? err.message : 'Unknown error' })
-    return { reply: '', suggestions: [], thinking: sseState.fullThinking, agentId: resolvedAgentId }
+    return { reply: '', suggestions: [], thinking: sseState.fullThinking, agentId: resolvedAgentId, trace: sseState.trace.length > 0 ? sseState.trace : undefined }
   }
 
   // 11. 解析最终回复
@@ -983,5 +1018,6 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     thinking: sseState.fullThinking,
     artifacts: sseState.producedArtifacts.length > 0 ? sseState.producedArtifacts : undefined,
     agentId: resolvedAgentId,
+    trace: sseState.trace.length > 0 ? sseState.trace : undefined,
   }
 }

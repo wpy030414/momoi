@@ -81,6 +81,7 @@ conversationsRoute.get('/:id', async (c) => {
       tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : null,
       suggestions: m.suggestions ? JSON.parse(m.suggestions) : null,
       attachments: m.attachments ? JSON.parse(m.attachments) : null,
+      trace: m.trace ? JSON.parse(m.trace) : null,
     })),
     agents: groupAgents,
   })

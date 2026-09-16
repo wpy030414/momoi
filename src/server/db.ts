@@ -42,6 +42,7 @@ const MIGRATION_SQL = `
     content TEXT NOT NULL DEFAULT '',
     thinking TEXT,
     tool_calls TEXT,
+    trace TEXT,
     tool_call_id TEXT,
     suggestions TEXT,
     attachments TEXT,
@@ -145,6 +146,7 @@ async function initSqlite() {
     `ALTER TABLE agents ADD COLUMN voice_enabled INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE agents ADD COLUMN voice_sample_url TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE agents ADD COLUMN voice_settings TEXT NOT NULL DEFAULT '{}'`,
+    `ALTER TABLE messages ADD COLUMN trace TEXT`,
   ]
   for (const stmt of ADDITIVE_MIGRATIONS) {
     try { sqlDb.run(stmt) } catch { /* column already exists */ }
@@ -215,6 +217,7 @@ async function initPg(dbUrl: string, user: string, password: string) {
       content TEXT NOT NULL DEFAULT '',
       thinking TEXT,
       tool_calls TEXT,
+      trace TEXT,
       tool_call_id TEXT,
       suggestions TEXT,
       attachments TEXT,
@@ -291,6 +294,7 @@ async function initPg(dbUrl: string, user: string, password: string) {
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_enabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_sample_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_settings TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS trace TEXT;
   `)
 
   const db = drizzlePg(pool, { schema }) as any

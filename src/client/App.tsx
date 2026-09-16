@@ -28,7 +28,7 @@ import type { SkillManagerHandle } from './components/admin/tabs/SkillManager'
 import type { UserManagerHandle } from './components/admin/tabs/UserManager'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
-import { PanelLeft, X, Check, Plus, RotateCcw, Upload, Server } from 'lucide-react'
+import { PanelLeft, X, Check, Plus, RotateCcw, Upload, Server, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 
 export function App() {
@@ -36,6 +36,12 @@ export function App() {
   const chat = useGroupChat()
   const { theme, setTheme } = useTheme()
   const [adminViewOpen, setAdminViewOpen] = useState(false)
+  const [verbose, setVerbose] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('momoi_verbose') === 'true'
+    }
+    return false
+  })
   // Active tab in the admin management sidebar
   const [adminTab, setAdminTab] = useState<string>(ADMIN_TABS[0].value)
   // Refs to tab action-triggers (exposed via useImperativeHandle)
@@ -582,6 +588,24 @@ export function App() {
             >
               <PanelLeft className="h-4 w-4" />
             </Button>
+            {/* Verbose toggle button */}
+            {chat.messages.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute top-[14px] right-3 z-30 h-8 w-8 hover:bg-accent/50"
+                onClick={() => {
+                  const newVerbose = !verbose
+                  setVerbose(newVerbose)
+                  if (typeof window !== 'undefined') {
+                    localStorage.setItem('momoi_verbose', String(newVerbose))
+                  }
+                }}
+                title={verbose ? t('chat.hideThinking') : t('chat.showThinking')}
+              >
+                {verbose ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              </Button>
+            )}
             {/* Chat area */}
             <ChatPanel
               messages={chat.messages}
@@ -592,6 +616,7 @@ export function App() {
               backgroundImage={backgroundImage}
               supportAttachments={supportAttachments}
               supportInfiniteMode={supportInfiniteMode}
+              verbose={verbose}
               agents={agents}
               agentsLoading={agentsLoading}
               selectedAgentId={selectedAgentId}

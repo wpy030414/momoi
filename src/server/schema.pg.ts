@@ -18,6 +18,7 @@ export const messages = pgTable('messages', {
   content: text('content').notNull().default(''),
   thinking: text('thinking'),
   tool_calls: text('tool_calls'),
+  trace: text('trace'),
   tool_call_id: text('tool_call_id'),
   suggestions: text('suggestions'),
   attachments: text('attachments'),

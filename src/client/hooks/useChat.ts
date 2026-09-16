@@ -115,9 +115,13 @@ function buildTraceFromHistory(
 }
 
 /** 服务端 Message → 本地 ChatMessage 映射（历史加载 / 收尾 refetch / 会话切换共用） */
-function mapServerMessage(m: { id: number; role: string; content: string; thinking?: string | null; tool_calls?: unknown; suggestions?: unknown; attachments?: unknown; agent_id?: string | null }): ChatMessage {
+function mapServerMessage(m: { id: number; role: string; content: string; thinking?: string | null; tool_calls?: unknown; suggestions?: unknown; attachments?: unknown; agent_id?: string | null; trace?: unknown }): ChatMessage {
   const thinkingSegments = decodeThinkingToSegments(m.thinking)
   const toolCalls = m.tool_calls as any || undefined
+  const dbTrace = m.trace as any
+  const trace = Array.isArray(dbTrace) && dbTrace.length > 0
+    ? dbTrace as TraceEntry[]
+    : buildTraceFromHistory(thinkingSegments, toolCalls, m.content)
   return {
     id: m.id,
     role: m.role as 'user' | 'assistant',
@@ -125,7 +129,7 @@ function mapServerMessage(m: { id: number; role: string; content: string; thinki
     thinking: m.thinking || undefined,
     thinkingSegments,
     toolCalls,
-    trace: buildTraceFromHistory(thinkingSegments, toolCalls, m.content),
+    trace,
     suggestions: m.suggestions as any || undefined,
     attachments: m.attachments as any || undefined,
     agent_id: m.agent_id ?? null,

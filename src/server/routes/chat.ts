@@ -8,7 +8,7 @@ import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
 import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutral-agent.js'
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
-import type { ServerMessage, Attachment } from '../../shared/types.js'
+import type { ServerMessage, Attachment, TraceEntry } from '../../shared/types.js'
 import { randomUUID } from 'crypto'
 import { getConfig, listAgents, getAgent } from '../config.js'
 import { resolveQuestion, getPendingQuestion } from '../tools/ask-user-tool.js'
@@ -400,7 +400,7 @@ chatRoute.post('/', async (c) => {
       let lastAssistantHadSuggestions = false
 
       // Helper: save assistant message to DB
-      const saveAssistantMsg = async (content: string, thinking: string | null, suggestionsList: string[], artifactsLocal?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }>, agentId?: string) => {
+      const saveAssistantMsg = async (content: string, thinking: string | null, suggestionsList: string[], artifactsLocal?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }>, agentId?: string, trace?: TraceEntry[]) => {
         const replyNow = Math.floor(Date.now() / 1000)
         let msgAttachments: string | null = null
         if (artifactsLocal && artifactsLocal.length > 0) {
@@ -416,6 +416,7 @@ chatRoute.post('/', async (c) => {
           suggestions: suggestionsList.length > 0 ? JSON.stringify(suggestionsList) : null,
           attachments: msgAttachments,
           agent_id: agentId || null,
+          trace: trace ? JSON.stringify(trace) : null,
           created_at: replyNow,
         }).returning({ id: messages.id })
         lastAssistantMsgId = Number(result[0]?.id ?? 0)
@@ -529,12 +530,12 @@ chatRoute.post('/', async (c) => {
           userId,
           agentIds: groupAgentIds,
           language,
-          saveMessage: async (agentId, agentName, reply, thinking, suggestions, artifacts) => {
-            await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId)
+          saveMessage: async (agentId, agentName, reply, thinking, suggestions, artifacts, trace) => {
+            await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId, trace)
           },
         })
       } else {
-        const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId } = await runPiAgentLoop({
+        const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId, trace } = await runPiAgentLoop({
           userMessage: currentPrompt,
           history: currentHistory,
           send,
@@ -546,7 +547,7 @@ chatRoute.post('/', async (c) => {
           language,
         })
         if (reply) {
-          await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId)
+          await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)
         }
       }
 
@@ -580,12 +581,12 @@ chatRoute.post('/', async (c) => {
             userId,
             agentIds: groupAgentIds,
             language,
-            saveMessage: async (agentId, agentName, reply, thinking, suggestions, artifacts) => {
-              await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId)
+            saveMessage: async (agentId, agentName, reply, thinking, suggestions, artifacts, trace) => {
+              await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId, trace)
             },
           })
         } else {
-          const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId } = await runPiAgentLoop({
+          const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId, trace } = await runPiAgentLoop({
             userMessage: currentPrompt,
             history: currentHistory,
             send,
@@ -597,7 +598,7 @@ chatRoute.post('/', async (c) => {
             language,
           })
           if (reply) {
-            await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId)
+            await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)
           } else {
             // Agent returned empty reply — stop
             infiniteState.delete(convId)

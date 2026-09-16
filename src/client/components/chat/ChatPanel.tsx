@@ -59,6 +59,8 @@ interface ChatPanelProps {
   conversationId?: string | null
   /** Called when upload needs a conversation but none exists yet */
   onEnsureConversation?: () => Promise<string>
+  /** Show thinking details in messages (controlled by App.tsx) */
+  verbose?: boolean
 }
 
 export function ChatPanel({
@@ -69,6 +71,7 @@ export function ChatPanel({
   pendingQuestion, onSendAnswer, onSkipAnswer,
   recommendedQuestions,
   conversationId, onEnsureConversation,
+  verbose,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -250,6 +253,7 @@ export function ChatPanel({
             fallbackAgentName={isGroup ? undefined : directAgent?.name}
             agentVoiceEnabled={isGroup ? false : directAgentVoiceEnabled}
             agentVoiceMap={agentVoiceMap}
+            verbose={verbose}
           />
         )}
       </div>
