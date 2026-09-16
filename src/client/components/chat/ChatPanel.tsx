@@ -172,7 +172,7 @@ export function ChatPanel({
       )}
 
       {/* Messages area */}
-      <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 py-4 relative z-10">
+      <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 pb-4 pt-[76px] relative z-10">
         {!hasMessages ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-full max-w-3xl">

@@ -579,33 +579,34 @@ export function App() {
           </div>
         ) : (
           <div className="flex-1 flex flex-col min-w-0 relative">
-            {/* Sidebar toggle button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute top-[14px] left-3 z-30 h-8 w-8 hover:bg-accent/50"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-            >
-              <PanelLeft className="h-4 w-4" />
-            </Button>
-            {/* Verbose toggle button */}
-            {chat.messages.length > 0 && (
+            {/* Top bar — gradient background, bottom aligned with sidebar top-bar */}
+            <div className="absolute inset-x-0 top-0 z-30 flex items-center justify-between px-3 shrink-0" style={{ height: '60px', background: 'linear-gradient(to bottom, hsl(var(--background)), transparent)' }}>
               <Button
                 variant="ghost"
                 size="icon"
-                className="absolute top-[14px] right-3 z-30 h-8 w-8 hover:bg-accent/50"
-                onClick={() => {
-                  const newVerbose = !verbose
-                  setVerbose(newVerbose)
-                  if (typeof window !== 'undefined') {
-                    localStorage.setItem('momoi_verbose', String(newVerbose))
-                  }
-                }}
-                title={verbose ? t('chat.hideThinking') : t('chat.showThinking')}
+                className="h-8 w-8 hover:bg-accent/50"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
               >
-                {verbose ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                <PanelLeft className="h-4 w-4" />
               </Button>
-            )}
+              {chat.messages.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 hover:bg-accent/50"
+                  onClick={() => {
+                    const newVerbose = !verbose
+                    setVerbose(newVerbose)
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('momoi_verbose', String(newVerbose))
+                    }
+                  }}
+                  title={verbose ? t('chat.hideThinking') : t('chat.showThinking')}
+                >
+                  {verbose ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                </Button>
+              )}
+            </div>
             {/* Chat area */}
             <ChatPanel
               messages={chat.messages}

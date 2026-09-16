@@ -4,7 +4,7 @@ import { MessageContent } from './MessageContent'
 import { ThinkingBlock } from './ThinkingBlock'
 import { AttachmentCard, AttachmentList } from './AttachmentCard'
 import { VoicePlayButton } from '../voice/VoicePlayButton'
-import { User, Bot, Undo2, Check, X, ChevronRight } from 'lucide-react'
+import { Bot, Undo2, Check, X, ChevronRight } from 'lucide-react'
 import type { Attachment, ThinkingSegment, TraceEntry } from '@/shared/types'
 
 interface ChatMessage {
@@ -46,18 +46,16 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''} group`}>
-      {/* Avatar */}
-      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center overflow-hidden ${
-        isUser ? 'bg-primary text-primary-foreground' : 'bg-secondary'
-      }`}>
-        {isUser ? (
-          <User className="h-4 w-4" />
-        ) : agentAvatar ? (
-          <img src={agentAvatar} alt={t('common.altAgentAvatar')} className="h-full w-full object-cover" />
-        ) : (
-          <Bot className="h-4 w-4" />
-        )}
-      </div>
+      {/* Avatar — only show for assistant messages */}
+      {!isUser && (
+        <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center overflow-hidden bg-secondary">
+          {agentAvatar ? (
+            <img src={agentAvatar} alt={t('common.altAgentAvatar')} className="h-full w-full object-cover" />
+          ) : (
+            <Bot className="h-4 w-4" />
+          )}
+        </div>
+      )}
 
       {/* Content wrapper — groups content column + revert row as one flex item */}
       <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-row-reverse gap-2' : ''}`}>
