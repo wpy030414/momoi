@@ -224,18 +224,14 @@ function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?:
   while (i < trace.length) {
     const entry = trace[i]
     if (entry.type === 'tool_call') {
-      // Collect consecutive tool_call entries
+      // Collect consecutive tool_call entries - always collapse, even if just 1
       const stack: TraceEntry[] = [entry]
       let j = i + 1
       while (j < trace.length && trace[j].type === 'tool_call') {
         stack.push(trace[j])
         j++
       }
-      if (stack.length >= 2) {
-        elements.push(<ToolCallStack key={`stack-${i}`} entries={stack} streaming={streaming} />)
-      } else {
-        elements.push(renderToolCall(entry, i))
-      }
+      elements.push(<ToolCallStack key={`stack-${i}`} entries={stack} streaming={streaming} />)
       i = j
     } else if (entry.type === 'thinking') {
       elements.push(
@@ -297,7 +293,6 @@ function ToolCallStack({ entries, streaming }: { entries: TraceEntry[]; streamin
   )
   if (toolCalls.length === 0) return null
 
-  const allDone = toolCalls.every((tc) => tc.status === 'done' || tc.status === 'error')
   const runningCount = toolCalls.filter((tc) => tc.status === 'running').length
 
   return (
@@ -308,40 +303,56 @@ function ToolCallStack({ entries, streaming }: { entries: TraceEntry[]; streamin
       >
         <ChevronRight className={`h-3 w-3 transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`} />
         <span className="font-medium">
-          {toolCalls.length} {t('chat.toolsUsed', { count: toolCalls.length })}
+          {t('chat.toolsUsed', { count: toolCalls.length })}
         </span>
         {runningCount > 0 && (
           <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
-        )}
-        {allDone && !streaming && (
-          <span className="text-muted-foreground ml-auto">{t('chat.completed')}</span>
         )}
       </button>
 
       {expanded && (
         <div className="mt-1 space-y-1 pl-4">
           {toolCalls.map((tc, idx) => (
-            <div key={tc.id || idx}>
-              <div className="text-xs bg-muted/50 rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0">
-                <span className="font-medium truncate">{tc.name}</span>
-                {tc.status === 'running' && (
-                  <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                )}
-                {tc.result && <span className="text-muted-foreground ml-1 truncate">{tc.result}</span>}
-              </div>
-              {tc.artifacts && tc.artifacts.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-1">
-                  {tc.artifacts.map((art, i) => (
-                    <AttachmentCard key={i} attachment={{
-                      url: art.downloadUrl,
-                      name: art.displayName,
-                      size: 0,
-                      type: art.mimeType,
-                    }} />
-                  ))}
-                </div>
-              )}
-            </div>
+            <ToolCallDetail key={tc.id || idx} tc={tc} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolCallDetail({ tc }: { tc: Extract<TraceEntry, { type: 'tool_call' }> }) {
+  const [showFull, setShowFull] = useState(false)
+
+  return (
+    <div>
+      <div
+        className="text-xs bg-muted/50 rounded-md px-3 py-1.5 min-w-0 cursor-pointer"
+        onClick={() => tc.result && setShowFull(!showFull)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="font-medium break-all">{tc.name}</span>
+          {tc.status === 'running' && (
+            <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+          )}
+        </div>
+        {tc.result && (
+          showFull ? (
+            <div className="text-muted-foreground mt-0.5 break-all whitespace-pre-wrap">{tc.result}</div>
+          ) : (
+            <div className="text-muted-foreground truncate">{tc.result}</div>
+          )
+        )}
+      </div>
+      {tc.artifacts && tc.artifacts.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-1">
+          {tc.artifacts.map((art, i) => (
+            <AttachmentCard key={i} attachment={{
+              url: art.downloadUrl,
+              name: art.displayName,
+              size: 0,
+              type: art.mimeType,
+            }} />
           ))}
         </div>
       )}
