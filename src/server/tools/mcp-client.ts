@@ -155,6 +155,27 @@ class McpClient {
   }
 }
 
+// ---- Session Expiry Detection ----
+
+function isSessionExpiredError(err: unknown): boolean {
+  const msg = (err as Error).message || ''
+  // HTTP 400/403/404 when a session ID was sent means the server rejected the session
+  if (
+    msg.includes('MCP HTTP 400') ||
+    msg.includes('MCP HTTP 403') ||
+    msg.includes('MCP HTTP 404') ||
+    msg.includes('MCP HTTP 410')
+  ) {
+    return true
+  }
+  // JSON-RPC error codes that indicate the session/server is in an invalid state:
+  // -32001: Server not initialized (session lost / server restarted)
+  if (msg.includes('MCP error -32001')) {
+    return true
+  }
+  return false
+}
+
 // ---- Persistent Session Cache ----
 
 interface SessionEntry {
@@ -277,7 +298,24 @@ export async function callMcpTool(
     entry = result
   }
 
-  return entry.client.callTool(toolName, args)
+  try {
+    return await entry.client.callTool(toolName, args)
+  } catch (err) {
+    // 检测 session 过期：清缓存 → 重连 → 重试一次
+    if (isSessionExpiredError(err)) {
+      console.warn(`[mcp] Session expired for "${serverName}" during tool call "${toolName}", reconnecting...`)
+      sessions.delete(key)
+
+      const result = await connectToServer(serverId, serverName, serverUrl)
+      if (!result) {
+        throw new Error(
+          `MCP server "${serverName}" is unavailable (reconnect after session expiry failed)`,
+        )
+      }
+      return result.client.callTool(toolName, args)
+    }
+    throw err
+  }
 }
 
 export async function refreshMcpTools(): Promise<void> {
