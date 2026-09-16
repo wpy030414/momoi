@@ -6,6 +6,7 @@ import { db, conversations, messages, wechatBindings } from '../db.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { sendMessage, WECHAT_BASE_URL, type WechatCredentials } from './ilink.js'
+import { broadcastStream, broadcastConversationChanged, broadcastConversationSync } from '../realtime.js'
 
 export interface WechatChatOptions {
   userId: string
@@ -94,11 +95,19 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
 
   // ---- Save user message ----
   const now = Math.floor(Date.now() / 1000)
-  await db.insert(messages).values({
+  const userMsgResult = await db.insert(messages).values({
     conversation_id: convId, role: 'user',
     content: text, created_at: now,
-  }).run()
+  }).returning({ id: messages.id })
+  const userMsgId = Number(userMsgResult[0]?.id ?? 0)
   await db.update(conversations).set({ updated_at: now }).where(eq(conversations.id, convId)).run()
+
+  // ---- Realtime: 通知同账号其他设备（网页端等）有新用户消息 ----
+  // WeChat 来源无 device_id，跳过设备 ID 为空字符串 → 所有订阅设备均收到
+  broadcastStream(userId, '', {
+    conversation_id: convId,
+    event: { type: 'user_message', id: userMsgId, content: text },
+  })
 
   // Agent anchor: derived from the conversation loaded during route validation
   const agentId = conv.agent_id || ''
@@ -115,11 +124,18 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
     agent_id: m.agent_id || null,
   }))
 
-  // ---- Run AI ----
+  // ---- Run AI (with realtime broadcast to other devices) ----
+  // send 回调同时承担两个职责：
+  //   1. 将流事件实时中继到同账号其他设备（网页端 SSE 通道）
+  //   2. 收集完整回复用于后续落库（reply / thinking / suggestions 仍由
+  //      runPiAgentLoop 返回，此处仅广播）
   const { reply, suggestions, thinking } = await runPiAgentLoop({
     userMessage: text,
     history,
-    send: () => {}, // no-op — 无 SSE 客户端
+    send: (msg) => {
+      // 实时中继到网页端：每个 token / thinking / tool_call / done 事件都广播
+      broadcastStream(userId, '', { conversation_id: convId, event: msg })
+    },
     thinkingMode: true,
     conversationId: convId,
     userId,
@@ -141,6 +157,11 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
       created_at: replyNow,
     }).run()
   }
+
+  // ---- Realtime: 会话内容落库完毕，通知其他设备对齐（兜底重拉）----
+  broadcastConversationChanged(userId, convId)
+  // 侧边栏最后一条消息预览 + 时间戳也需刷新
+  broadcastConversationSync(userId)
 
   // ---- Send reply via iLink with retry ----
   console.log('[wechat-chat] Sending reply: toUserId=', senderId,
