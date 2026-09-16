@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, getUser, clearSession, notifyAuthExpired, getDeviceIdForRequest, subscribeRealtime, connectRealtime } from '../lib/api'
-import type { Conversation, Attachment } from '@/shared/types'
+import type { Conversation, Attachment, TraceEntry } from '@/shared/types'
 import type { ThinkingSegment } from '@/shared/thinking'
 import { decodeThinkingToSegments, thinkingSegmentHeader } from '@/shared/thinking'
 
@@ -20,6 +20,9 @@ interface ChatMessage {
   /** 结构化分块：按工具轮 round 分组。优先于 thinking 渲染。 */
   thinkingSegments?: ThinkingSegment[]
   toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
+  /** 时间线：按实际发生顺序交织排列思考与工具调用。
+   *  流式时逐条追加；历史消息由 mapServerMessage 从 segments+toolCalls 重建。 */
+  trace?: TraceEntry[]
   suggestions?: string[]
   attachments?: Attachment[]
   streaming?: boolean
@@ -47,15 +50,82 @@ const isDraftKey = (k: string) => k.startsWith(DRAFT_PREFIX)
  *  超过本地也会放弃的时长，才视为结束。 */
 const REMOTE_STREAM_TTL_MS = 60_000
 
+/** 从历史消息的 segments + toolCalls 重建时间线。
+ *  DB 不存交织顺序，只能按 segments 顺序插入对应 round 的工具调用。
+ *  单段思考（历史纯文本）退化为 trace 里一个 thinking 条目。
+ *  content（最终回复文本）作为最后一个 text 条目追加。 */
+function buildTraceFromHistory(
+  segments: ThinkingSegment[],
+  toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>,
+  content?: string,
+): TraceEntry[] {
+  const trace: TraceEntry[] = []
+  // 按 round 分组的工具调用（round = segments 中的位置索引，最后一个 thinking 后面的 tool 归入末尾）
+  const tcByRound: Array<typeof toolCalls> = []
+  if (toolCalls && toolCalls.length > 0) {
+    // 简单策略：工具调用按数组顺序均匀分配到 segments 之间
+    // round 0 = 第 1 段思考之后，round 1 = 第 2 段思考之后，...
+    // 如果工具比思考多（少见），多余的归入最后一段
+    const segCount = Math.max(segments.length, 1)
+    for (let i = 0; i < segCount; i++) {
+      tcByRound.push([])
+    }
+    toolCalls.forEach((tc, idx) => {
+      const bucket = Math.min(idx, segCount - 1)
+      const arr = tcByRound[bucket]
+      if (arr) arr.push(tc)
+    })
+  }
+
+  if (segments.length === 0) {
+    // 无思考但有工具
+    if (toolCalls && toolCalls.length > 0) {
+      for (const tc of toolCalls) {
+        trace.push({ type: 'tool_call', ...tc })
+      }
+    }
+    // 追加最终文本
+    if (content) trace.push({ type: 'text', text: content })
+    return trace
+  }
+
+  for (let i = 0; i < segments.length; i++) {
+    trace.push({ type: 'thinking', text: segments[i].text })
+    const tcs = tcByRound[i] || []
+    for (const tc of tcs) {
+      trace.push({ type: 'tool_call', ...tc })
+    }
+  }
+  // 如果工具调用比思考段多（极端情况），剩余的工具追加到末尾
+  if (toolCalls && toolCalls.length > trace.filter((e) => e.type === 'tool_call').length) {
+    const usedIds = new Set(
+      trace
+        .filter((e): e is Extract<TraceEntry, { type: 'tool_call' }> => e.type === 'tool_call' && !!e.id)
+        .map((e) => e.id!),
+    )
+    for (const tc of toolCalls) {
+      if (!tc.id || !usedIds.has(tc.id)) {
+        trace.push({ type: 'tool_call', ...tc })
+      }
+    }
+  }
+  // 追加最终文本
+  if (content) trace.push({ type: 'text', text: content })
+  return trace
+}
+
 /** 服务端 Message → 本地 ChatMessage 映射（历史加载 / 收尾 refetch / 会话切换共用） */
 function mapServerMessage(m: { id: number; role: string; content: string; thinking?: string | null; tool_calls?: unknown; suggestions?: unknown; attachments?: unknown; agent_id?: string | null }): ChatMessage {
+  const thinkingSegments = decodeThinkingToSegments(m.thinking)
+  const toolCalls = m.tool_calls as any || undefined
   return {
     id: m.id,
     role: m.role as 'user' | 'assistant',
     content: m.content,
     thinking: m.thinking || undefined,
-    thinkingSegments: decodeThinkingToSegments(m.thinking),
-    toolCalls: m.tool_calls as any || undefined,
+    thinkingSegments,
+    toolCalls,
+    trace: buildTraceFromHistory(thinkingSegments, toolCalls, m.content),
     suggestions: m.suggestions as any || undefined,
     attachments: m.attachments as any || undefined,
     agent_id: m.agent_id ?? null,
@@ -383,7 +453,7 @@ export function useChat() {
     tracer('send:start', streamKey, activeIdRef.current, draftKeyRef.current, activeKeyRef.current)
 
     const userMsg: ChatMessage = { role: 'user', content: text, attachments }
-    const assistantMsg: ChatMessage = { role: 'assistant', content: '', streaming: true, thinkingSegments: [] }
+    const assistantMsg: ChatMessage = { role: 'assistant', content: '', streaming: true, thinkingSegments: [], trace: [] }
     updateMessages(streamKey, (prev) => [...prev, userMsg, ...(groupMode ? [] : [assistantMsg])])
 
     const entry: LocalStream = { abort: new AbortController(), infinite: !!infiniteMode, group: !!groupMode }
@@ -627,7 +697,7 @@ export function useChat() {
           return [
             ...prev,
             userBubble,
-            { role: 'assistant' as const, content: '', streaming: true, thinkingSegments: [] },
+            { role: 'assistant' as const, content: '', streaming: true, thinkingSegments: [], trace: [] },
           ]
         })
         break
@@ -637,12 +707,24 @@ export function useChat() {
         updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
+          const newContent = last.content + msg.text
+          // 同步 trace：追加到最后一个 text 条目，或新建一个
+          const trace = last.trace || []
+          const lastEntry = trace[trace.length - 1]
+          let newTrace: TraceEntry[]
+          if (lastEntry && lastEntry.type === 'text') {
+            const updated = [...trace]
+            updated[updated.length - 1] = { ...lastEntry, text: lastEntry.text + msg.text }
+            newTrace = updated
+          } else {
+            newTrace = [...trace, { type: 'text' as const, text: msg.text }]
+          }
           // 远程流恢复：尾部气泡曾被 DB 快照整体覆盖（判活 TTL 过期所致），
           // 重新置为流式让后续 token 继续追加，而不是静默丢流
           if (remote && !last.streaming) {
-            return [...prev.slice(0, -1), { ...last, content: last.content + msg.text, streaming: true }]
+            return [...prev.slice(0, -1), { ...last, content: newContent, streaming: true, trace: newTrace }]
           }
-          return [...prev.slice(0, -1), { ...last, content: last.content + msg.text }]
+          return [...prev.slice(0, -1), { ...last, content: newContent, trace: newTrace }]
         })
         break
 
@@ -666,7 +748,21 @@ export function useChat() {
             updated[updated.length - 1] = { ...updated[updated.length - 1], text: updated[updated.length - 1].text + msg.text }
             segments = updated
           }
-          return [...prev.slice(0, -1), { ...last, thinking: newThinking, thinkingSegments: segments, ...(remote && !last.streaming ? { streaming: true } : {}) }]
+          // 同步 trace：分隔符 = 新开 thinking 条目；正文 = 追加到最后一个 thinking 条目
+          let trace = last.trace || []
+          if (isSegmentHeader) {
+            trace = [...trace, { type: 'thinking' as const, text: '' }]
+          } else if (trace.length === 0 || trace[trace.length - 1].type !== 'thinking') {
+            trace = [...trace, { type: 'thinking' as const, text: msg.text }]
+          } else {
+            const updated = [...trace]
+            const lastEntry = updated[updated.length - 1]
+            if (lastEntry.type === 'thinking') {
+              updated[updated.length - 1] = { ...lastEntry, text: lastEntry.text + msg.text }
+            }
+            trace = updated
+          }
+          return [...prev.slice(0, -1), { ...last, thinking: newThinking, thinkingSegments: segments, trace, ...(remote && !last.streaming ? { streaming: true } : {}) }]
         })
         break
       }
@@ -676,9 +772,12 @@ export function useChat() {
         updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
+          const newToolCall = { id: msg.id, name: msg.name, input: msg.input, status: 'running' as const }
+          const trace = [...(last.trace || []), { type: 'tool_call' as const, ...newToolCall }]
           return [...prev.slice(0, -1), {
             ...last,
-            toolCalls: [...(last.toolCalls || []), { id: msg.id, name: msg.name, input: msg.input, status: 'running' }],
+            toolCalls: [...(last.toolCalls || []), newToolCall],
+            trace,
           }]
         })
         break
@@ -697,13 +796,29 @@ export function useChat() {
             }
           }
           if (idx === -1) idx = calls.length - 1
+          const isError = msg.summary?.startsWith('Tool error') || msg.summary?.startsWith('BLOCKED')
           calls[idx] = {
             ...calls[idx],
-            status: msg.summary?.startsWith('Tool error') || msg.summary?.startsWith('BLOCKED') ? 'error' : 'done',
+            status: isError ? 'error' : 'done',
             result: msg.summary,
             artifacts: msg.artifacts || calls[idx].artifacts,
           }
-          return [...prev.slice(0, -1), { ...last, toolCalls: calls }]
+          // 同步 trace：按 id / name 定位并更新对应条目
+          const trace = [...(last.trace || [])]
+          let traceIdx = -1
+          if (msg.id) traceIdx = trace.findIndex((e) => e.type === 'tool_call' && e.id === msg.id)
+          if (traceIdx === -1) {
+            for (let i = trace.length - 1; i >= 0; i--) {
+              const e = trace[i]
+              if (e.type === 'tool_call' && e.name === msg.name && e.status !== 'done') { traceIdx = i; break }
+            }
+          }
+          if (traceIdx === -1) traceIdx = trace.length - 1
+          const traceEntry = trace[traceIdx]
+          if (traceEntry && traceEntry.type === 'tool_call') {
+            trace[traceIdx] = { ...traceEntry, status: isError ? 'error' : 'done', result: msg.summary, artifacts: msg.artifacts || traceEntry.artifacts }
+          }
+          return [...prev.slice(0, -1), { ...last, toolCalls: calls, trace }]
         })
         // 如果 pendingQuestion 的 tool_call_id 匹配，清除问题卡片（限本会话）
         if (pendingRef.current[key] && msg.id && pendingRef.current[key]!.tool_call_id === msg.id) {
@@ -779,6 +894,7 @@ export function useChat() {
             agent_id: msg.agent_id,
             agent_name: msg.agent_name,
             thinkingSegments: [],
+            trace: [],
           },
         ])
         break
@@ -856,7 +972,7 @@ export function useChat() {
           }
           // For direct chat: also create the streaming assistant bubble
           if (!isGroupChat) {
-            updated.push({ role: 'assistant' as const, content: '', streaming: true, thinkingSegments: [] })
+            updated.push({ role: 'assistant' as const, content: '', streaming: true, thinkingSegments: [], trace: [] })
           }
           return updated
         })

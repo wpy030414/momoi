@@ -5,7 +5,7 @@ import { ThinkingBlock } from './ThinkingBlock'
 import { AttachmentCard, AttachmentList } from './AttachmentCard'
 import { VoicePlayButton } from '../voice/VoicePlayButton'
 import { User, Bot, Undo2, Check, X } from 'lucide-react'
-import type { Attachment, ThinkingSegment } from '@/shared/types'
+import type { Attachment, ThinkingSegment, TraceEntry } from '@/shared/types'
 
 interface ChatMessage {
   id?: number
@@ -14,6 +14,7 @@ interface ChatMessage {
   thinking?: string
   thinkingSegments?: ThinkingSegment[]
   toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
+  trace?: TraceEntry[]
   suggestions?: string[]
   attachments?: Attachment[]
   streaming?: boolean
@@ -64,44 +65,106 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
           {!isUser && agentName && (
             <div className="text-xs text-muted-foreground mb-1 ml-1">{agentName}</div>
           )}
-          {/* Thinking block — 优先按分段展示（多轮思考），否则回退到整段 */}
 
-          {message.thinking && (
-            <ThinkingBlock
-              content={message.thinking}
-              segments={message.thinkingSegments}
-              done={!message.streaming}
-            />
-          )}
-
-          {/* Tool calls */}
-          {message.toolCalls && message.toolCalls.length > 0 && (
-            <div className="mb-2 space-y-1">
-              {message.toolCalls.map((tc, idx) => (
-                <div key={tc.id || idx}>
-                  <div className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0">
-                    <span className="font-medium truncate">{tc.name}</span>
-                    {tc.status === 'running' && (
-                      <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block flex-shrink-0" />
-                    )}
-                    {tc.result && <span className="text-muted-foreground ml-1 truncate">{tc.result}</span>}
-                  </div>
-                  {tc.artifacts && tc.artifacts.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-1">
-                      {tc.artifacts.map((art, i) => (
-                        <AttachmentCard key={i} attachment={{
-                          url: art.downloadUrl,
-                          name: art.displayName,
-                          size: 0,
-                          type: art.mimeType,
-                        }} />
-                      ))}
+          {/* Trace-driven rendering: thinking + text + tool calls in chronological order.
+              Falls back to legacy grouped rendering if trace is absent (defensive). */}
+          {!isUser && message.trace && message.trace.length > 0 ? (
+            <>
+              {message.trace.map((entry, idx) => {
+                if (entry.type === 'thinking') {
+                  return (
+                    <ThinkingBlock
+                      key={`thinking-${idx}`}
+                      content={entry.text}
+                      segments={[{ round: 0, text: entry.text }]}
+                      done={!message.streaming}
+                    />
+                  )
+                }
+                if (entry.type === 'text') {
+                  return (
+                    <div key={`text-${idx}`} className={`inline-block rounded-lg px-4 py-1 bg-card/75 border mb-1`}>
+                      <MessageContent content={entry.text} streaming={message.streaming && idx === message.trace!.length - 1} isUser={false} />
                     </div>
-                  )}
+                  )
+                }
+                // tool_call
+                return (
+                  <div key={`tool-${entry.id || idx}`} className="mb-1">
+                    <div className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0">
+                      <span className="font-medium truncate">{entry.name}</span>
+                      {entry.status === 'running' && (
+                        <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block flex-shrink-0" />
+                      )}
+                      {entry.result && <span className="text-muted-foreground ml-1 truncate">{entry.result}</span>}
+                    </div>
+                    {entry.artifacts && entry.artifacts.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {entry.artifacts.map((art, i) => (
+                          <AttachmentCard key={i} attachment={{
+                            url: art.downloadUrl,
+                            name: art.displayName,
+                            size: 0,
+                            type: art.mimeType,
+                          }} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </>
+          ) : !isUser ? (
+            /* Legacy fallback: grouped rendering for messages without trace */
+            <>
+              {message.thinking && (
+                <ThinkingBlock
+                  content={message.thinking}
+                  segments={message.thinkingSegments}
+                  done={!message.streaming}
+                />
+              )}
+              {message.toolCalls && message.toolCalls.length > 0 && (
+                <div className="mb-2 space-y-1">
+                  {message.toolCalls.map((tc, idx) => (
+                    <div key={tc.id || idx}>
+                      <div className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0">
+                        <span className="font-medium truncate">{tc.name}</span>
+                        {tc.status === 'running' && (
+                          <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block flex-shrink-0" />
+                        )}
+                        {tc.result && <span className="text-muted-foreground ml-1 truncate">{tc.result}</span>}
+                      </div>
+                      {tc.artifacts && tc.artifacts.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {tc.artifacts.map((art, i) => (
+                            <AttachmentCard key={i} attachment={{
+                              url: art.downloadUrl,
+                              name: art.displayName,
+                              size: 0,
+                              type: art.mimeType,
+                            }} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
+              {/* Content block — only shown in legacy path (no trace) */}
+              <div className={`inline-block rounded-lg px-4 py-1 bg-card/75 border`}>
+                {message.streaming && !message.content ? (
+                  <div className="flex gap-1">
+                    <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                ) : (
+                  <MessageContent content={message.content} streaming={message.streaming} isUser={false} />
+                )}
+              </div>
+            </>
+          ) : null}
 
           {/* Attachments */}
           {message.attachments && message.attachments.length > 0 && (
@@ -120,20 +183,20 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
             />
           )}
 
-          {/* Message content */}
-          <div className={`inline-block rounded-lg px-4 py-1 ${
-            isUser ? 'bg-primary/75 text-primary-foreground text-left' : 'bg-card/75 border'
-          }`}>
-            {message.streaming && !message.content ? (
-              <div className="flex gap-1">
-                <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-            ) : (
-              <MessageContent content={message.content} streaming={message.streaming} isUser={isUser} />
-            )}
-          </div>
+          {/* Message content — user messages only (assistant text is rendered via trace or legacy path above) */}
+          {isUser && (
+            <div className={`inline-block rounded-lg px-4 py-1 bg-primary/75 text-primary-foreground text-left`}>
+              {message.streaming && !message.content ? (
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              ) : (
+                <MessageContent content={message.content} streaming={message.streaming} isUser={isUser} />
+              )}
+            </div>
+          )}
 
           {/* Suggestions — only on the last assistant message */}
           {showSuggestions && message.suggestions && message.suggestions.length > 0 && (

@@ -43,6 +43,23 @@ export interface ToolCall {
   result?: unknown
 }
 
+// ---- Trace（时间线渲染）----
+
+/** Agent 处理链路的时间线条目：按实际发生顺序排列思考、文本输出与工具调用。
+ *  前端流式接收 SSE 事件时逐条追加；历史消息从 thinkingSegments + toolCalls 重建。 */
+export type TraceEntry =
+  | { type: 'thinking'; text: string }
+  | { type: 'text'; text: string }
+  | {
+      type: 'tool_call'
+      id?: string
+      name: string
+      input: Record<string, unknown>
+      status?: 'running' | 'done' | 'error'
+      result?: string
+      artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }>
+    }
+
 // ---- Config ----
 
 export interface OAuth2Provider {
