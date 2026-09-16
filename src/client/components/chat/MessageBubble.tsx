@@ -222,11 +222,16 @@ function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?:
   while (i < trace.length) {
     const entry = trace[i]
     if (entry.type === 'tool_call') {
-      // Collect consecutive tool_call entries - always collapse, even if just 1
+      // Collect consecutive tool_call entries.
+      // When thinking is hidden (EyeOff), merge tool-call groups that are
+      // separated only by thinking blocks into a single collapsed stack to
+      // avoid multiple "Used N tools" labels stacking without visible gaps.
       const stack: TraceEntry[] = [entry]
       let j = i + 1
-      while (j < trace.length && trace[j].type === 'tool_call') {
-        stack.push(trace[j])
+      while (j < trace.length && (trace[j].type === 'tool_call' || (trace[j].type === 'thinking' && !verbose))) {
+        if (trace[j].type === 'tool_call') {
+          stack.push(trace[j])
+        }
         j++
       }
       elements.push(<ToolCallStack key={`stack-${i}`} entries={stack} streaming={streaming} />)
