@@ -588,8 +588,6 @@ interface SSEState {
   send: SendFn
   fullThinking: string
   fullText: string
-  pending: string
-  suggestionsSeen: boolean
   emittedSegmentRound: number
   lastRoundHadThinking: boolean
   producedArtifacts: ToolArtifact[]
@@ -624,23 +622,7 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
               state.trace.push({ type: 'text', text: token })
             }
 
-            if (state.suggestionsSeen) break
-
-            state.pending += token
-            const fenceIdx = state.pending.indexOf(SUGGESTIONS_FENCE)
-            if (fenceIdx !== -1) {
-              state.suggestionsSeen = true
-              const beforeFence = state.pending.slice(0, fenceIdx)
-              if (beforeFence) state.send({ type: 'token', text: beforeFence })
-              state.pending = ''
-              break
-            }
-
-            if (state.pending.length > SUGGESTIONS_FENCE.length) {
-              const safeLen = state.pending.length - SUGGESTIONS_FENCE.length
-              state.send({ type: 'token', text: state.pending.slice(0, safeLen) })
-              state.pending = state.pending.slice(safeLen)
-            }
+            state.send({ type: 'token', text: token })
             break
           }
           case 'thinking_delta': {
@@ -734,17 +716,6 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
             .filter((c): c is TextContent => c.type === 'text')
             .map((c) => c.text)
             .join('')
-        }
-
-        // Flush pending buffer
-        if (state.pending.length > 0) {
-          const fenceIdx = state.pending.indexOf(SUGGESTIONS_FENCE)
-          if (fenceIdx > 0) {
-            state.send({ type: 'token', text: state.pending.slice(0, fenceIdx) })
-          } else if (fenceIdx === -1) {
-            state.send({ type: 'token', text: state.pending })
-          }
-          state.pending = ''
         }
 
         const { reply, suggestions } = parseSuggestions(replyText || state.fullText)
@@ -982,8 +953,6 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     send,
     fullThinking: '',
     fullText: '',
-    pending: '',
-    suggestionsSeen: false,
     emittedSegmentRound: -1,
     lastRoundHadThinking: false,
     producedArtifacts: [],
