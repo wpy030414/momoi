@@ -1075,3 +1075,38 @@
 - `src/server/wechat/chat.ts`：`isDuplicate()`、`withLock()`、`dedupCache`、`DEDUP_WINDOW_MS`
 - `src/server/routes/wechat.ts`：`bindingLocks`、`withBindingLock()`
 - 消息去重在 `handleWechatMessage` 最外层调用，before lock；会话锁包裹完整 AI 调链路
+
+## D44：QQ 渠道接入（手写最小协议客户端 + 双渠道正交绑定）
+
+**日期**：2026-09-17
+
+**背景**：微信绑定（D36）为单一硬编码渠道。需求：「在微信上继续」升级为「在 IM 上继续」（渠道选择 Dialog），新增 QQ 渠道——用户仅需提供自己在 q.qq.com 创建的机器人的 AppID + AppSecret；一个会话可同时绑定微信与 QQ（完全正交）。
+
+**决策**：
+
+1. **手写最小协议客户端，不集成 `@tencent-connect/qqbot-nodejs` SDK**：`src/server/qq/{api,gateway,manager,chat}.ts` 平行于 `src/server/wechat/` 实现，协议事实逆向自 SDK v1.0.4 源码（token / C2C 发送 / stream_messages / WS 网关）。唯一新增依赖 `ws`（已在依赖树中，经 `@hono/node-ws` 传递）。
+2. **无认领模型**：QQ 个人机器人未发布态只有创建者本人能私聊（1 用户 : 1 机器人 : 1 会话），发送者必然是用户本人——不存储、不校验 openid 归属。
+3. **C2C 流式回复 + 降级**：AI 回复经 `stream_messages` 以打字机效果呈现（replace 全量帧、800ms 节流、频控退避、suggestions 围栏截断）；流式链路故障降级 `sendText` 分片（>4000 字符），最终失败写 system 消息。
+4. **凭证保留式解绑**：软删会话仅清 `qq_bindings.conversation_id`，保留凭证与连接（AppSecret 遗失需重新生成，成本远高于微信重扫码）；显式解绑才删行断连。
+5. **跨渠道共享用户锁**：抽取 `src/server/im/locks.ts`（原 wechat/chat.ts 与 routes/wechat.ts 各一份的重复实现），微信与 QQ 消息处理共用裸 userId 锁——双渠道绑同一会话时 AI 调用串行，防历史交叉。
+6. **状态落库阈值**：DB `status='error'` 仅由凭证校验失败 / 启动失败 / 致命关闭码（4914/4915）触发；瞬时 WS 错误仅日志 + 自动重连（退避 [1s..60s]、快断保护），防状态抖动。
+
+**原因**：
+- 弃 SDK：完整框架（中间件系统 / webhook 传输 / 媒体上传 / 频道群聊支持）对 Momoi 所需子集（token、C2C、流式、WS）过重；微信渠道 `ilink.ts` 已确立"纯函数手写协议客户端"的先例与风格
+- `ws` 而非原生 WebSocket：无法在原生 API 上自定义 User-Agent 头（QQ 网关可能要求）；且 `ws` 已在依赖树中，零新增下载，tsup 外置即可
+- 跨渠道锁是正确性需求而非风格偏好：两渠道绑定正交可指向同一会话，独立锁会导致并发 `runPiAgentLoop` 写同一会话
+
+**备选与权衡**：
+- ❌ `@tencent-connect/qqbot-nodejs` SDK：重（框架级）；协议细节黑盒，排障依赖上游
+- ❌ `@tencent-connect/openclaw-qqbot` 插件：为 OpenClaw 框架设计（peer 依赖 openclaw），不可独立使用
+- ❌ Webhook 传输：需公网 IP 与签名校验，与"轻量自托管"冲突；WS 出站连接零网络要求
+- ❌ 认领流程（验证码 / 首条消息认领 openid）：个人机器人语义下多余（私聊者必然是本人）
+- ❌ 原生 WebSocket（Node ≥ 22 零依赖）：无法设置 UA 头，网关兼容性未知
+- ⚠️ 手写协议的维护责任：平台协议变更需自行跟进（微信 iLink 同模式，风险已接受）
+- ⚠️ WS 会话状态仅内存：重启后放弃 RESUME 重新 IDENTIFY，停机期间消息丢失（与微信轮询停机同级语义）
+- ⚠️ app_secret 明文入库：与 `wechat_bindings.bot_token` 同威胁模型；API 永不回显、日志不打
+
+**影响**：
+- 新增：`src/server/qq/{api,gateway,manager,chat}.ts`、`src/server/im/locks.ts`、`src/server/routes/qq.ts`、`qq_bindings` 表、`ImBindDialog.tsx`、`QqBindPanel.tsx`
+- 重构：`WechatBindDialog` → `WechatBindPanel`（去 Dialog 壳）、wechat 侧锁实现改用共享模块、侧栏入口改「在 IM 上继续」
+- 契约：`docs/specs/module-qq.md`

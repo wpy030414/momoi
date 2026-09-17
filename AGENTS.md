@@ -57,8 +57,10 @@
 | `src/server/skills/` | 技能加载和注册（`loader.ts` → `registry.ts`） |
 | `src/server/files/` | 文件附件解析（`parser.ts`：图片→base64、xlsx→csv、pdf→text） |
 | `src/server/middleware/` | 用户 JWT 认证中间件（`userAuth.ts`）+ IP 速率限制（`rateLimiter.ts`） |
-| `src/server/routes/` | API 路由：`chat.ts`、`group.ts`、`conversations.ts`、`admin.ts`、`upload.ts`、`user.ts`、`workspace.ts`、`app.ts`、`oauth.ts`、`wechat.ts`、`voice.ts`、`events.ts`、`assets.ts` |
+| `src/server/routes/` | API 路由：`chat.ts`、`group.ts`、`conversations.ts`、`admin.ts`、`upload.ts`、`user.ts`、`workspace.ts`、`app.ts`、`oauth.ts`、`wechat.ts`、`qq.ts`、`voice.ts`、`events.ts`、`assets.ts` |
 | `src/server/wechat/` | 微信聊天桥接（`chat.ts`）+ iLink 客户端（`ilink.ts`）+ 消息轮询器（`poller.ts`） |
+| `src/server/qq/` | QQ 聊天桥接（`chat.ts`，流式回发）+ REST 协议客户端（`api.ts`）+ WS 网关连接（`gateway.ts`）+ per-user 连接注册表（`manager.ts`） |
+| `src/server/im/` | 跨渠道共享 per-user 锁（`locks.ts`）——微信/QQ 消息处理串行化 |
 | `src/server/realtime.ts` | 同账号多设备 SSE 实时事件总线（进程内内存态） |
 | `skills/` | 已安装的技能目录 |
 | `data/` | SQLite 数据库文件（`momoi.db`）+ 对话工作区（`workspaces/`，含 `__uploads__/` 上传附件） |
@@ -120,6 +122,7 @@ pnpm start        # 运行生产构建（node dist/index.js）
   - `users` — 用户账户（`username`、`pin_hash`、`first_login_at`、`last_login_at`、`banned`）
   - `user_oauth_bindings` — OAuth 第三方绑定（`provider_id` + `provider_user_id` 唯一）
   - `wechat_bindings` — 用户微信桥接绑定（`bot_token`、`wechat_user_id`、`conversation_id`、会话级解绑/转移支持）
+  - `qq_bindings` — 用户 QQ 机器人绑定（`app_id`、`app_secret`、`conversation_id`、`status`；软删会话仅清路由保留凭证）
 
 ## 关键常量（`src/shared/constants.ts`）
 

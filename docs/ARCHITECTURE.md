@@ -22,10 +22,10 @@
 │  │  │chat.ts │ │conversat. │ │group  │ │admin   │ │upload│ │oauth   │  │  │
 │  │  │SSE 聊天 │ │ 对话 CRUD │ │群聊API │ │管理API  │ │文件  │ │OAuth2  │  │  │
 │  │  └────────┘ └───────────┘ └───────┘ └────────┘ └──────┘ └────────┘  │  │
-│  │  ┌────────┐ ┌───────────┐ ┌────────┐ ┌────────┐ ┌────────┐          │  │
-│  │  │workspace│ │  app.ts  │ │user.ts │ │voice.ts│ │wechat  │          │  │
-│  │  │工作区下载│ │ 应用名称  │ │PIN认证 │ │语音片段│ │微信绑定│          │  │
-│  │  └────────┘ └───────────┘ └────────┘ └────────┘ └────────┘          │  │
+│  │  ┌────────┐ ┌───────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌───────┐ │  │
+│  │  │workspace│ │  app.ts  │ │user.ts │ │voice.ts│ │wechat  │ │ qq.ts │ │  │
+│  │  │工作区下载│ │ 应用名称  │ │PIN认证 │ │语音片段│ │微信绑定│ │QQ绑定 │ │  │
+│  │  └────────┘ └───────────┘ └────────┘ └────────┘ └────────┘ └───────┘ │  │
 │  │  ┌──────────┐ ┌───────────┐                                          │  │
 │  │  │assets.ts │ │events.ts  │                                          │  │
 │  │  │静态资源  │ │SSE 事件流 │                                          │  │
@@ -63,6 +63,10 @@
 │  │  │  微信消息→AI→回复桥接     微信消息轮询器       iLink API 客户端 │   │  │
 │  │  └────────────────────────────────────────────────────────────────┘   │  │
 │  │  ┌────────────────────────────────────────────────────────────────┐   │  │
+│  │  │  qq/gateway.ts + manager.ts    qq/api.ts          qq/chat.ts   │   │  │
+│  │  │  QQ WS网关连接+注册表          QQ REST协议客户端  QQ消息→AI桥接 │   │  │
+│  │  └────────────────────────────────────────────────────────────────┘   │  │
+│  │  ┌────────────────────────────────────────────────────────────────┐   │  │
 │  │  │  ai/tts.ts               realtime.ts                            │   │  │
 │  │  │  TTS 引擎（GPT-SoVITS /  同账号多设备实时事件总线                  │   │  │
 │  │  │   CosyVoice 双 Provider） (进程内发布-订阅)                       │   │  │
@@ -75,7 +79,7 @@
 │  │  │  PostgreSQL (pg + Drizzle ORM, DATABASE_URL 环境变量切换)       │    │  │
 │  │  │  conversations | messages | settings | agents                 │    │  │
 │  │  │  group_conversation_agents | mcp_servers | users              │    │  │
-│  │  │  user_oauth_bindings | wechat_bindings                        │    │  │
+│  │  │  user_oauth_bindings | wechat_bindings | qq_bindings           │    │  │
 │  │  │  + data/workspaces/{conversationId}/ (工具沙盒)                 │    │  │
 │  │  │  + data/voice/{agentId}/{messageId}/ (TTS 音频缓存)            │    │  │
 │  │  └────────────────────────────────────────────────────────────────┘    │  │
@@ -138,6 +142,27 @@ startWechatPoller()（进程启动时自动开始，定时轮询）
     → sendMessage()（iLink API，含指数退避重试，最多 3 次）
       → 会话过期检测：errcode=-14 → 标记 session_expired
       → 发送失败：写入系统消息通知用户
+```
+
+### QQ 消息流（WS 网关推送 + 流式桥接）
+
+```
+initQqBots()（进程启动时恢复所有已绑定用户的连接）
+  → qq/manager.ts per-user 注册表（幂等启停，锁串行化防双连接）
+  → qq/gateway.ts QQGatewayConnection
+    → qq/api.ts getAccessToken + /gateway → WS 出站连接（无需公网 IP）
+    → HELLO → 心跳；IDENTIFY/RESUME；关闭码策略重连（4914/4915 致命停连）
+    → DISPATCH: C2C_MESSAGE_CREATE → handleQqMessage()
+      → 重复消息去重（messageId + 5 分钟窗口）
+      → 跨渠道用户级锁（withUserImLock，与微信共享——双渠道可绑同一会话）
+      → 新鲜度守卫：重读绑定行，app_id 不符即丢弃（换凭证后在飞消息）
+      → 处理内置命令（/clear /new /reset）
+      → 加载绑定会话 → 保存用户消息 → 加载历史
+      → runPiAgentLoop()（token 增量喂 QqStreamSender，SSE 同步网页端）
+      → 保存助手回复到 DB
+      → QqStreamSender：stream_messages 打字机流式（800ms 节流，replace 全量帧）
+        → 失败降级 sendText 分片（>4000 字符切片，瞬时错误退避重试）
+        → 最终失败：写入系统消息通知用户
 ```
 
 ### OAuth 认证流
@@ -312,6 +337,12 @@ routes/wechat.ts
   ├── middleware/userAuth.ts
   └── qrcode（QR 码生成）
 
+routes/qq.ts
+  ├── db.ts + schema.ts（conversations, qqBindings）
+  ├── middleware/userAuth.ts
+  ├── im/locks.ts（withNamedLock 绑定串行化）
+  └── qq/api.ts（getAccessToken 凭证校验）+ qq/manager.ts（连接重启/停止）
+
 routes/assets.ts
   └── 静态文件服务（voice 音频, user 资源等）
 
@@ -331,6 +362,25 @@ wechat/poller.ts（轮询器）
 
 wechat/ilink.ts（iLink 微信通道 API 客户端）
   └── 独立的 fetch 封装（sendMessage, 轮询新消息等）
+
+qq/api.ts（QQ 开放平台 REST 协议客户端，手写最小实现）
+  ├── token 缓存（per-appId 单飞 + 提前刷新）
+  └── sendC2CText / sendStreamFrame / getGatewayUrl（fetch 封装）
+
+qq/gateway.ts（QQ WS 网关连接状态机）
+  ├── qq/api.ts（token, /gateway）
+  └── ws（唯一新增依赖，外置于 tsup bundle）
+
+qq/manager.ts（per-user 连接注册表）
+  ├── db.ts + schema.ts（qqBindings）
+  ├── qq/gateway.ts + qq/chat.ts
+  └── im/locks.ts（restart 串行化）
+
+qq/chat.ts（QQ 消息→AI 桥接 + 流式回发）
+  ├── db.ts + schema.ts（conversations, messages, qqBindings）
+  ├── ai/pi-adapter.ts（runPiAgentLoop）
+  ├── qq/api.ts（sendC2CText, sendStreamFrame）
+  └── im/locks.ts（withUserImLock 跨渠道锁）
 
 realtime.ts（进程内事件总线）
   └── 纯内存态（Map<userId, Set<RealtimeSubscriber>>），无外部依赖
@@ -428,6 +478,16 @@ wechat_bindings
 ├── updates_buf TEXT               -- 待处理的消息更新缓冲
 ├── session_expired INTEGER/BOOLEAN-- iLink 会话是否过期
 └── created_at INTEGER             -- Unix epoch (秒)
+
+qq_bindings
+├── user_id TEXT PRIMARY KEY       -- 本地用户名（一个用户一个 QQ 绑定，与微信正交）
+├── app_id TEXT                    -- QQ 开放平台机器人 AppID
+├── app_secret TEXT                -- 机器人 AppSecret（明文，API 永不回显）
+├── conversation_id TEXT           -- 绑定的对话 ID（路由权威；软删会话仅清此列，保留凭证）
+├── status TEXT                    -- 'connected' | 'error'（仅凭证/致命错误触发，防抖动）
+├── error TEXT                     -- 最近一次错误信息
+├── created_at INTEGER             -- Unix epoch (秒)
+└── updated_at INTEGER             -- Unix epoch (秒)
 ```
 
 ### PostgreSQL 模式索引
