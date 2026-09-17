@@ -122,9 +122,20 @@ const MIGRATION_SQL = `
     conversation_id TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'connected',
     error TEXT NOT NULL DEFAULT '',
+    group_enabled INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-  );`
+  );
+
+  CREATE TABLE IF NOT EXISTS qq_group_conversations (
+    app_id TEXT NOT NULL,
+    group_openid TEXT NOT NULL,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (app_id, group_openid)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);`
 
 // ---- SQLite (sql.js) local mode ----
 
@@ -158,6 +169,7 @@ async function initSqlite() {
     `ALTER TABLE agents ADD COLUMN voice_sample_url TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE agents ADD COLUMN voice_settings TEXT NOT NULL DEFAULT '{}'`,
     `ALTER TABLE messages ADD COLUMN trace TEXT`,
+    `ALTER TABLE qq_bindings ADD COLUMN group_enabled INTEGER NOT NULL DEFAULT 0`,
   ]
   for (const stmt of ADDITIVE_MIGRATIONS) {
     try { sqlDb.run(stmt) } catch { /* column already exists */ }
@@ -304,9 +316,20 @@ async function initPg(dbUrl: string, user: string, password: string) {
       conversation_id TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'connected',
       error TEXT NOT NULL DEFAULT '',
+      group_enabled BOOLEAN NOT NULL DEFAULT FALSE,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS qq_group_conversations (
+      app_id TEXT NOT NULL,
+      group_openid TEXT NOT NULL,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (app_id, group_openid)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
 
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
@@ -317,6 +340,7 @@ async function initPg(dbUrl: string, user: string, password: string) {
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_sample_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_settings TEXT NOT NULL DEFAULT '{}';
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS trace TEXT;
+    ALTER TABLE qq_bindings ADD COLUMN IF NOT EXISTS group_enabled BOOLEAN NOT NULL DEFAULT FALSE;
   `)
 
   const db = drizzlePg(pool, { schema }) as any
@@ -343,4 +367,5 @@ export const {
   userOauthBindings,
   wechatBindings,
   qqBindings,
+  qqGroupConversations,
 } = result.schema

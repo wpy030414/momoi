@@ -94,6 +94,16 @@ export const qqBindings = pgTable('qq_bindings', {
   conversation_id: text('conversation_id').notNull().default(''),
   status: text('status').notNull().default('connected'),
   error: text('error').notNull().default(''),
+  group_enabled: boolean('group_enabled').notNull().default(false),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
 })
+
+export const qqGroupConversations = pgTable('qq_group_conversations', {
+  app_id: text('app_id').notNull(),
+  group_openid: text('group_openid').notNull(),
+  conversation_id: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.app_id, table.group_openid] }),
+}))
