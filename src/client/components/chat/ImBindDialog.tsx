@@ -43,7 +43,8 @@ export function ImBindDialog({ open, onOpenChange, convId }: ImBindDialogProps) 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
-        <DialogHeader>
+        {/* 渠道面板视图下左上角有返回按钮，标题右移避让 */}
+        <DialogHeader className={channel !== 'select' ? 'pl-8' : undefined}>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
         </DialogHeader>
