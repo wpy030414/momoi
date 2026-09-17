@@ -148,6 +148,21 @@ export async function sendC2CText(
   })
 }
 
+/** 发送群聊文本（被动回复：带 msgId 配额高、窗口 5 分钟）；失败 throw */
+export async function sendGroupText(
+  creds: QqCredentials,
+  groupOpenid: string,
+  opts: { msgId?: string; msgSeq?: number; content: string },
+): Promise<void> {
+  const token = await getAccessToken(creds)
+  await qqApiFetch(token, 'POST', `/v2/groups/${groupOpenid}/messages`, {
+    content: opts.content,
+    msg_type: 0,
+    msg_seq: opts.msgSeq ?? getNextMsgSeq(),
+    ...(opts.msgId ? { msg_id: opts.msgId } : {}),
+  })
+}
+
 /** 获取 WebSocket 网关地址（wss://） */
 export async function getGatewayUrl(creds: QqCredentials): Promise<string> {
   const token = await getAccessToken(creds)

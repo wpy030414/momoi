@@ -19,11 +19,22 @@ export interface QqInboundMessage {
   timestamp?: string
 }
 
+export interface QqGroupInboundMessage {
+  messageId: string
+  groupOpenid: string
+  authorOpenid: string
+  authorUsername: string
+  content: string
+  timestamp?: string
+}
+
 export interface QqGatewayOpts {
   userId: string
   creds: QqCredentials
   /** C2C_MESSAGE_CREATE 入站消息 */
   onMessage: (msg: QqInboundMessage) => void
+  /** GROUP_AT_MESSAGE_CREATE 入站群消息（仅 group_enabled 开启时处理） */
+  onGroupMessage?: (msg: QqGroupInboundMessage) => void
   /** READY 或 RESUMED —— 连接可用 */
   onReady: () => void
   /** 凭证级错误（token 获取失败等）—— 连接仍会退避重试，由上层决定落库 */
@@ -250,8 +261,21 @@ export class QQGatewayConnection {
         content: content.trim(),
         timestamp: d?.timestamp,
       })
+      return
     }
-    // 群/频道/生命周期等事件静默忽略 —— 仅处理 C2C
+    if (t === 'GROUP_AT_MESSAGE_CREATE' && this.opts.onGroupMessage) {
+      const content = typeof d?.content === 'string' ? d.content : ''
+      this.opts.onGroupMessage({
+        messageId: String(d?.id ?? ''),
+        groupOpenid: String(d?.group_openid ?? ''),
+        authorOpenid: String(d?.author?.member_openid ?? ''),
+        authorUsername: String(d?.author?.username ?? 'QQ用户'),
+        content: content.trim(),
+        timestamp: d?.timestamp,
+      })
+      return
+    }
+    // 频道/生命周期等事件静默忽略
   }
 
   // ---- 关闭码策略与重连 ----
