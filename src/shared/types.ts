@@ -18,6 +18,8 @@ export interface Conversation {
   agent_id: string
   type: 'direct' | 'group'
   agent_count?: number  // 群组内 Agent 数量（不含中立 Agent，不含用户）
+  wechat_bound?: number  // 1 if this conversation is bound to WeChat
+  qq_bound?: number      // 1 if this conversation is bound to QQ (C2C or group)
   created_at: number
   updated_at: number
 }

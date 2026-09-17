@@ -71,6 +71,8 @@ conversationsRoute.get('/', async (c) => {
     updated_at: conversations.updated_at,
     deleted_at: conversations.deleted_at,
     agent_count: sql<number>`COALESCE((SELECT COUNT(*) FROM group_conversation_agents WHERE group_conversation_agents.conversation_id = ${conversations.id}), 0)`,
+    wechat_bound: sql<number>`EXISTS (SELECT 1 FROM wechat_bindings WHERE wechat_bindings.user_id = ${conversations.user_id} AND wechat_bindings.conversation_id = ${conversations.id})`,
+    qq_bound: sql<number>`EXISTS (SELECT 1 FROM qq_bindings WHERE qq_bindings.user_id = ${conversations.user_id} AND qq_bindings.conversation_id = ${conversations.id}) OR EXISTS (SELECT 1 FROM qq_group_conversations WHERE qq_group_conversations.conversation_id = ${conversations.id})`,
   }).from(conversations).where(and(eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).orderBy(desc(conversations.updated_at)).all()
   return c.json({ conversations: list })
 })

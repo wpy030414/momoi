@@ -243,18 +243,29 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
           {conversations.map((conv) => (
             <div
               key={conv.id}
-              className={`group flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors ${
+              className={`group flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors relative ${
                 activeId === conv.id
                   ? 'bg-accent text-accent-foreground'
                   : 'hover:bg-accent/50'
               }`}
               onClick={() => { if (renamingId !== conv.id) onSelect(conv.id) }}
             >
-              {(conv as any).type === 'group' ? (
-                <MessagesSquare className="h-4 w-4 flex-shrink-0" />
-              ) : (
-                <MessageSquare className="h-4 w-4 flex-shrink-0" />
-              )}
+              {/* IM 绑定指示灯：相对图标容器定位，正下方居中 */}
+              <span className="relative flex-shrink-0">
+                {(conv as any).type === 'group' ? (
+                  <MessagesSquare className="h-4 w-4" />
+                ) : (
+                  <MessageSquare className="h-4 w-4" />
+                )}
+                <span className="absolute left-1/2 -translate-x-1/2 top-full -mt-0.5 flex justify-center gap-px">
+                  {(conv.wechat_bound === 1) && (
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500" title="微信" />
+                  )}
+                  {(conv.qq_bound === 1) && (
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" title="QQ" />
+                  )}
+                </span>
+              </span>
               {renamingId === conv.id ? (
                 <input
                   ref={inputRef}
