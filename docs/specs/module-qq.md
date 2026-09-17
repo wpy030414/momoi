@@ -1,4 +1,4 @@
-# Spec -- QQ 绑定与聊天（QQ Bot Binding & Chat）
+# Spec — QQ 绑定与聊天（QQ Bot Binding & Chat）
 
 ## 概述
 

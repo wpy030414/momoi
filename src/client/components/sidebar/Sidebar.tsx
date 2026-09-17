@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
+import { MarqueeText } from '../ui/MarqueeText'
 import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen } from 'lucide-react'
 import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -40,73 +41,7 @@ interface MenuState {
   anchorRect: DOMRect
 }
 
-/**
- * 会话标题：默认严格限长、溢出省略；光标悬停且确实溢出时循环滚动展示全文——
- * 悬停即以每秒 2 个中文字符的速度匀速滚到末尾，停 3 秒，瞬间回到开头再停 1 秒，循环。
- *
- * 省略号必须画在内层自身的文本上（Chromium 的 text-overflow 不作用于不限宽的
- * inline-block 原子盒溢出），故内层 idle 时 max-w-full + ellipsis，悬停测量/滚动时
- * 才放开 max-width。滚动距离/时长按实测溢出量计算，用 WAAPI 驱动（各段占比随
- * 距离变化，CSS 关键帧无法参数化）。
- */
-function ConversationTitle({ title }: { title: string }) {
-  const containerRef = useRef<HTMLSpanElement>(null)
-  const innerRef = useRef<HTMLSpanElement>(null)
-  const animRef = useRef<Animation | null>(null)
-
-  const stopMarquee = useCallback(() => {
-    animRef.current?.cancel()
-    animRef.current = null
-    if (innerRef.current) innerRef.current.style.maxWidth = ''
-  }, [])
-
-  const startMarquee = useCallback(() => {
-    const container = containerRef.current
-    const inner = innerRef.current
-    if (!container || !inner) return
-    inner.style.maxWidth = 'none'
-    const dist = inner.offsetWidth - container.clientWidth
-    if (dist <= 1) {
-      inner.style.maxWidth = ''
-      return
-    }
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      inner.style.maxWidth = ''
-      return
-    }
-    // 全角字符宽度 ≈ font-size，故每秒 2 个中文字符 ≈ 2 × font-size px/s
-    const speed = 2 * parseFloat(getComputedStyle(inner).fontSize)
-    const travelMs = (dist / speed) * 1000
-    const endHoldMs = 3000
-    const startHoldMs = 1000
-    const totalMs = travelMs + endHoldMs + startHoldMs
-    // 同一 offset 放两个关键帧 = 瞬移：滚到 -dist 停 3s 后跳回 0，开头再停 1s 进入下一圈
-    animRef.current = inner.animate(
-      [
-        { transform: 'translateX(0)' },
-        { transform: `translateX(${-dist}px)`, offset: travelMs / totalMs },
-        { transform: `translateX(${-dist}px)`, offset: (travelMs + endHoldMs) / totalMs },
-        { transform: 'translateX(0)', offset: (travelMs + endHoldMs) / totalMs },
-        { transform: 'translateX(0)' },
-      ],
-      { duration: totalMs, easing: 'linear', iterations: Infinity },
-    )
-  }, [])
-
-  // 卸载（如进入重命名态）时停止动画
-  useEffect(() => stopMarquee, [stopMarquee])
-
-  return (
-    <span
-      ref={containerRef}
-      className="flex-1 min-w-0 overflow-hidden whitespace-nowrap text-sm"
-      onMouseEnter={startMarquee}
-      onMouseLeave={stopMarquee}
-    >
-      <span ref={innerRef} className="inline-block max-w-full overflow-hidden text-ellipsis">{title}</span>
-    </span>
-  )
-}
+// ConversationTitle is now MarqueeText from ../ui/MarqueeText
 
 export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs }: SidebarProps) {
   const { t, i18n } = useTranslation()
@@ -282,7 +217,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <ConversationTitle title={conv.title === 'New Chat' ? t('sidebar.newChat') : conv.title} />
+                <MarqueeText text={conv.title === "New Chat" ? t("sidebar.newChat") : conv.title} />
               )}
               {(conv as any).type === 'group' && (conv as any).agent_count > 0 && (
                 <span className="text-xs text-muted-foreground/60 flex-shrink-0">

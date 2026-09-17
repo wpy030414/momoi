@@ -1,4 +1,4 @@
-# Spec -- 群聊系统（Group Chat）
+# Spec — 群聊系统（Group Chat）
 
 ## 概述
 

@@ -6,7 +6,7 @@ import { Sidebar } from './components/sidebar/Sidebar'
 import { AdminSidebar, ADMIN_TABS } from './components/admin/AdminSidebar'
 import { DocsSidebar } from './components/docs/DocsSidebar'
 import type { DocEntry } from './components/docs/DocsSidebar'
-import { DocsViewer } from './components/docs/DocsViewer'
+import { DocsViewer, TocItem } from './components/docs/DocsViewer'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
@@ -31,7 +31,7 @@ import type { SkillManagerHandle } from './components/admin/tabs/SkillManager'
 import type { UserManagerHandle } from './components/admin/tabs/UserManager'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
-import { PanelLeft, X, Check, Plus, RotateCcw, Upload, Server, Eye, EyeOff } from 'lucide-react'
+import { PanelLeft, X, Check, Plus, RotateCcw, Upload, Server, Eye, EyeOff, List } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 
 export function App() {
@@ -43,6 +43,27 @@ export function App() {
   const [docsViewOpen, setDocsViewOpen] = useState(false)
   const [docsEntries, setDocsEntries] = useState<DocEntry[]>([])
   const [activeDoc, setActiveDoc] = useState<string | null>(null)
+  // Docs TOC（由 DocsViewer 渲染后回传）
+  const [docToc, setDocToc] = useState<TocItem[]>([])
+  const [tocOpen, setTocOpen] = useState(false)
+  const tocWrapRef = useRef<HTMLDivElement>(null)
+
+  // 目录气泡：点击外部 / Esc 关闭
+  useEffect(() => {
+    if (!tocOpen) return
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (!tocWrapRef.current?.contains(e.target as Node)) setTocOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTocOpen(false) }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [tocOpen])
   const [verbose, setVerbose] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('momoi_verbose') === 'true'
@@ -686,9 +707,54 @@ export function App() {
             </div>
           </div>
         ) : docsViewOpen ? (
-          <DocsViewer
-            docPath={activeDoc}
-          />
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Top bar */}
+            <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 hover:bg-accent/50"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+              >
+                <PanelLeft className="h-4 w-4" />
+              </Button>
+              <div className="relative" ref={tocWrapRef}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 hover:bg-accent/50"
+                  onClick={() => setTocOpen(v => !v)}
+                  title="目录"
+                >
+                  <List className="h-4 w-4" />
+                </Button>
+                {tocOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-64 rounded-md border bg-popover p-1 shadow-md z-50">
+                    <div className="max-h-[60vh] overflow-y-auto">
+                      {docToc.length === 0 ? (
+                        <p className="px-2 py-3 text-sm text-muted-foreground text-center">暂无章节</p>
+                      ) : docToc.map((h) => (
+                        <button
+                          key={h.id}
+                          className={`w-full text-left rounded-sm py-1.5 pr-2 text-sm truncate hover:bg-accent/60 transition-colors ${
+                            h.level === 1 ? 'font-medium' : 'text-muted-foreground'
+                          }`}
+                          style={{ paddingLeft: `${(h.level - 1) * 14 + 8}px` }}
+                          onClick={() => {
+                            setTocOpen(false)
+                            document.getElementById(h.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                          }}
+                        >
+                          {h.text}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <DocsViewer docPath={activeDoc} onTocChange={setDocToc} />
+          </div>
         ) : (
           <div className="flex-1 flex flex-col min-w-0 relative">
             {/* Top bar — gradient background, bottom aligned with sidebar top-bar */}

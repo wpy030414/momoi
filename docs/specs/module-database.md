@@ -1,4 +1,4 @@
-# Spec -- 数据库与数据层（Database & Data Layer）
+# Spec — 数据库与数据层（Database & Data Layer）
 
 ## 概述
 

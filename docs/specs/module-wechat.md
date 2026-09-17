@@ -1,4 +1,4 @@
-# Spec -- 微信绑定与聊天（WeChat Binding & Chat）
+# Spec — 微信绑定与聊天（WeChat Binding & Chat）
 
 ## 概述
 

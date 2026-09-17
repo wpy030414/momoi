@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, FileText } from 'lucide-react'
 import { ScrollArea } from '../ui/scroll-area'
+import { MarqueeText } from '../ui/MarqueeText'
 
 export interface DocEntry {
   title: string
@@ -52,8 +53,8 @@ export function DocsSidebar({ docs, activeDoc, onSelect, onBack }: DocsSidebarPr
       </div>
 
       {/* Doc tree */}
-      <ScrollArea className="flex-1">
-        <div className="p-2 space-y-3">
+      <ScrollArea className="flex-1 sidebar-scroll-area">
+        <div className="p-2 space-y-3 w-full">
           {groups.map((group) => (
             <div key={group.label}>
               <h3 className="px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
@@ -63,7 +64,7 @@ export function DocsSidebar({ docs, activeDoc, onSelect, onBack }: DocsSidebarPr
                 {group.items.map((doc) => (
                   <button
                     key={doc.path}
-                    className={`w-full flex items-center gap-2.5 h-9 px-3 rounded-sm text-sm font-normal transition-colors min-w-0 ${
+                    className={`w-full flex items-center gap-2.5 h-9 px-3 rounded-sm text-sm font-normal transition-colors min-w-0 overflow-hidden text-left ${
                       activeDoc === doc.path
                         ? 'bg-accent text-accent-foreground'
                         : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
@@ -71,7 +72,7 @@ export function DocsSidebar({ docs, activeDoc, onSelect, onBack }: DocsSidebarPr
                     onClick={() => onSelect(doc.path)}
                   >
                   <FileText className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{doc.title}</span>
+                    <MarqueeText text={doc.title} />
                   </button>
                 ))}
               </div>
