@@ -91,7 +91,6 @@ export function DocsViewer({ docPath, onTocChange }: DocsViewerProps) {
     return (
       <div className="flex-1 flex items-center justify-center bg-background">
         <div className="text-center text-muted-foreground">
-          <p className="text-lg mb-2">📖</p>
           <p className="text-sm">从侧边栏选择一篇文档查看</p>
         </div>
       </div>

@@ -1,11 +1,29 @@
 import { Hono } from 'hono'
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { existsSync } from 'node:fs'
+import { join, relative, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import path from 'node:path'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const docsDir = join(__dirname, '..', '..', '..', 'docs')
+// Resolve docs/ relative to this file's location.
+//   dev  (tsx):  import.meta.url → src/server/routes/docs.ts  →  ../../../docs = <root>/docs
+//   prod (tsup): import.meta.url → dist/index.js              →  ../docs     = <root>/dist/docs
+// We try both candidates and pick the first that exists.
+const _filename = fileURLToPath(import.meta.url)
+const _dirname = dirname(_filename)
+
+function resolveDocsDir(): string {
+  const candidates = [
+    resolve(_dirname, '..', '..', '..', 'docs'), // dev:  src/server/routes → root/docs
+    resolve(_dirname, 'docs'),                   // prod: dist/             → dist/docs
+  ]
+  for (const c of candidates) {
+    if (existsSync(c)) return c
+  }
+  // Fallback: prefer cwd-based (preserves old behaviour as last resort)
+  return join(process.cwd(), 'docs')
+}
+
+const docsDir = resolveDocsDir()
 
 interface DocEntry {
   title: string

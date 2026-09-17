@@ -83,7 +83,7 @@ export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanel
     } catch (err) {
       setState({ phase: 'form', appId, error: err instanceof Error ? err.message : t('common.error') })
     }
-  }, [appId, appSecret, convId, agentId, t])
+  }, [appId, appSecret, convId, agentId, groupEnabled, t])
 
   const handleRebindHere = useCallback(async () => {
     setRebindConfirmOpen(false)
