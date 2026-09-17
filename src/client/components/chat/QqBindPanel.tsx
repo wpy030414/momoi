@@ -9,6 +9,8 @@ import { Loader2, CheckCircle2, AlertCircle, ArrowLeft, ExternalLink } from 'luc
 
 interface QqBindPanelProps {
   convId: string
+  /** 该会话所属的 Agent ID —— per-agent 绑定路由权威 */
+  agentId: string
   /** 返回渠道选择页（ImBindDialog 提供） */
   onBack?: () => void
   /** 绑定流程完成（含 3s 成功展示后由本组件触发） */
@@ -17,6 +19,7 @@ interface QqBindPanelProps {
 
 type BindInfo = {
   bound: boolean
+  agent_id?: string
   app_id?: string
   bound_at?: number
   conversation_id?: string
@@ -33,7 +36,7 @@ type PanelState =
   | { phase: 'confirmed' }
   | { phase: 'connected'; info: BindInfo }
 
-export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
+export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanelProps) {
   const { t } = useTranslation()
   const [state, setState] = useState<PanelState>({ phase: 'loading' })
   const [appId, setAppId] = useState('')
@@ -46,7 +49,7 @@ export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
   const loadInfo = useCallback(async () => {
     setState({ phase: 'loading' })
     try {
-      const info = await api.qqBindInfo()
+      const info = await api.qqBindInfo(agentId)
       if (info.bound) {
         setState({ phase: 'connected', info })
       } else {
@@ -55,7 +58,7 @@ export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
     } catch (err) {
       setState({ phase: 'form', appId: '', error: err instanceof Error ? err.message : t('common.error') })
     }
-  }, [t])
+  }, [agentId, t])
 
   useEffect(() => {
     loadInfo()
@@ -75,27 +78,27 @@ export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
     }
     setState({ phase: 'submitting' })
     try {
-      await api.qqBindStart(convId, appId.trim(), appSecret.trim(), groupEnabled)
+      await api.qqBindStart(convId, agentId, appId.trim(), appSecret.trim(), groupEnabled)
       setState({ phase: 'confirmed' })
     } catch (err) {
       setState({ phase: 'form', appId, error: err instanceof Error ? err.message : t('common.error') })
     }
-  }, [appId, appSecret, convId, t])
+  }, [appId, appSecret, convId, agentId, t])
 
   const handleRebindHere = useCallback(async () => {
     setRebindConfirmOpen(false)
     try {
-      await api.qqBindStart(convId)
+      await api.qqBindStart(convId, agentId)
       await loadInfo()
     } catch (err) {
       setState({ phase: 'form', appId, error: err instanceof Error ? err.message : t('common.error') })
     }
-  }, [convId, loadInfo, t])
+  }, [convId, agentId, loadInfo, t])
 
   const handleUnbind = useCallback(async () => {
     setUnbinding(true)
     try {
-      await api.qqUnbind()
+      await api.qqUnbind(agentId)
       setUnbindConfirmOpen(false)
       setAppId('')
       setAppSecret('')
@@ -105,7 +108,7 @@ export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
     } finally {
       setUnbinding(false)
     }
-  }, [t])
+  }, [agentId, t])
 
   const renderContent = () => {
     switch (state.phase) {
@@ -212,7 +215,7 @@ export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
                 checked={info.group_enabled ?? false}
                 onCheckedChange={async (checked) => {
                   try {
-                    await api.qqBindStart(undefined, undefined, undefined, checked)
+                    await api.qqBindStart('', agentId, undefined, undefined, checked)
                     await loadInfo()
                   } catch { /* 切换失败静默，toggle 回弹 */ }
                 }}

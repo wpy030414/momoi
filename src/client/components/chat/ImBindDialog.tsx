@@ -8,6 +8,8 @@ interface ImBindDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   convId: string
+  /** 该会话的 agent_id —— QQ per-agent 绑定需用 */
+  agentId: string
 }
 
 type Channel = 'select' | 'wechat' | 'qq'
@@ -16,7 +18,7 @@ type Channel = 'select' | 'wechat' | 'qq'
  * 「在 IM 上继续」对话框：先选渠道（微信 / QQ），再进入对应绑定面板。
  * 两渠道绑定完全正交 —— 一个会话可同时绑定微信与 QQ。
  */
-export function ImBindDialog({ open, onOpenChange, convId }: ImBindDialogProps) {
+export function ImBindDialog({ open, onOpenChange, convId, agentId }: ImBindDialogProps) {
   const { t } = useTranslation()
   const [channel, setChannel] = useState<Channel>('select')
 
@@ -70,7 +72,7 @@ export function ImBindDialog({ open, onOpenChange, convId }: ImBindDialogProps) 
           <WechatBindPanel key="wechat" convId={convId} onBack={() => setChannel('select')} onComplete={handleClose} />
         )}
         {channel === 'qq' && (
-          <QqBindPanel key="qq" convId={convId} onBack={() => setChannel('select')} onComplete={handleClose} />
+          <QqBindPanel key="qq" convId={convId} agentId={agentId} onBack={() => setChannel('select')} onComplete={handleClose} />
         )}
       </DialogContent>
     </Dialog>

@@ -15,6 +15,8 @@ import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 
 export interface QqChatOptions {
   userId: string
+  /** 该连接所属的 Agent ID —— per-agent 绑定路由权威 */
+  agentId: string
   /** 接收到该消息的连接的 appId —— 换凭证后在飞消息的新鲜度守卫 */
   appId: string
   openid: string
@@ -27,6 +29,8 @@ export interface QqChatOptions {
 
 export interface QqGroupChatOptions {
   userId: string
+  /** 该连接所属的 Agent ID —— per-agent 绑定路由权威 */
+  agentId: string
   appId: string
   groupOpenid: string
   authorOpenid: string
@@ -58,7 +62,7 @@ export async function handleQqMessage(opts: QqChatOptions): Promise<void> {
     console.log(`[qq-chat] Duplicate message_id=${opts.messageId}, skipping`)
     return
   }
-  await withUserImLock(opts.userId, () => handleQqMessageInner(opts))
+  await withUserImLock(`${opts.userId}:${opts.agentId}`, () => handleQqMessageInner(opts))
 }
 
 /** QQ 单条消息文本上限约 5000 字符，超长分片发送（保守取 4000） */
@@ -104,16 +108,19 @@ async function sendTextWithRetry(
 }
 
 async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
-  const { userId, appId, openid, msgId, text } = opts
+  const { userId, agentId, appId, openid, msgId, text } = opts
 
   const NOT_BOUND_HINT = '尚未绑定会话，请在网页端选择会话并绑定 QQ 后重试。'
 
   // 绑定行即路由权威。新鲜度守卫：行不存在或凭证已换（app_id 不符），
   // 说明这是旧连接的在飞消息 —— 静默丢弃，不得污染新绑定。
   const binding = await db.select().from(qqBindings)
-    .where(eq(qqBindings.user_id, userId)).get()
+    .where(and(
+      eq(qqBindings.user_id, userId),
+      eq(qqBindings.agent_id, agentId),
+    )).get()
   if (!binding || binding.app_id.trim() !== appId) {
-    console.log(`[qq-chat] Stale message for user ${userId} (appId mismatch), dropping`)
+    console.log(`[qq-chat] Stale message for user ${userId} agent ${agentId} (appId mismatch), dropping`)
     return
   }
   const creds: QqCredentials = { appId: binding.app_id.trim(), appSecret: binding.app_secret }
@@ -153,8 +160,7 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
     event: { type: 'user_message', id: userMsgId, content: text },
   })
 
-  // Agent anchor: derived from the conversation loaded during route validation
-  const agentId = conv.agent_id || ''
+  // Agent anchor: from the binding's agent (already destructured from opts)
 
   // ---- Load history ----
   const historyMsgs = await db.select().from(messages)
@@ -270,7 +276,7 @@ async function sendGroupTextWithRetry(
 
 /** 为 QQ 群自动查找或创建群组会话（lazy init） */
 async function resolveGroupConversation(
-  userId: string, appId: string, groupOpenid: string, c2cConvId: string,
+  userId: string, appId: string, groupOpenid: string, agentId: string,
 ): Promise<string | null> {
   // 1. 已有映射且会话未软删 → 直接复用
   const existing = await db.select().from(qqGroupConversations)
@@ -291,16 +297,7 @@ async function resolveGroupConversation(
       )).run()
   }
 
-  // 2. 取 Agent：优先继承 C2C 锚定会话的 Agent，否则用首个非 neutral Agent
-  let agentId = ''
-  if (c2cConvId) {
-    const c2cConv = await db.select().from(conversations)
-      .where(and(eq(conversations.id, c2cConvId), sql`${conversations.deleted_at} IS NULL`))
-      .get()
-    if (c2cConv?.agent_id) {
-      agentId = c2cConv.agent_id
-    }
-  }
+  // 2. Agent 由 binding 直接提供（per-agent 绑定模型），不再从 C2C 会话推导
   if (!agentId) {
     const agents = await listAgents()
     const defaultAgent = agents.find((a) => a.id !== NEUTRAL_AGENT_ID)
@@ -345,17 +342,20 @@ export async function handleQqGroupMessage(opts: QqGroupChatOptions): Promise<vo
     console.log(`[qq-group-chat] Duplicate message_id=${opts.messageId}, skipping`)
     return
   }
-  await withUserImLock(opts.userId, () => handleQqGroupMessageInner(opts))
+  await withUserImLock(`${opts.userId}:${opts.agentId}`, () => handleQqGroupMessageInner(opts))
 }
 
 async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void> {
-  const { userId, appId, groupOpenid, authorOpenid, authorUsername, text, msgId } = opts
+  const { userId, agentId, appId, groupOpenid, authorOpenid, authorUsername, text, msgId } = opts
 
   // 新鲜度守卫：绑定行必须存在、凭证未换、且 group_enabled 已开
   const binding = await db.select().from(qqBindings)
-    .where(eq(qqBindings.user_id, userId)).get()
+    .where(and(
+      eq(qqBindings.user_id, userId),
+      eq(qqBindings.agent_id, agentId),
+    )).get()
   if (!binding || binding.app_id.trim() !== appId || !binding.group_enabled) {
-    console.log(`[qq-group-chat] Group message dropped: binding stale or group disabled for user ${userId}`)
+    console.log(`[qq-group-chat] Group message dropped: binding stale or group disabled for user ${userId} agent ${agentId}`)
     return
   }
   const creds: QqCredentials = { appId: binding.app_id.trim(), appSecret: binding.app_secret }
@@ -366,8 +366,8 @@ async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void
     return
   }
 
-  // 查找或创建群组会话（Agent 从 C2C 锚定会话继承）
-  const convId = await resolveGroupConversation(userId, appId, groupOpenid, binding.conversation_id)
+  // 查找或创建群组会话（Agent 由 binding 直接提供，无需再从 C2C 会话推导）
+  const convId = await resolveGroupConversation(userId, appId, groupOpenid, agentId)
   if (!convId) {
     await sendGroupText(creds, groupOpenid, { msgId, content: '创建群聊会话失败，请联系管理员。' }).catch(() => {})
     return
@@ -395,7 +395,7 @@ async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void
     event: { type: 'user_message', id: userMsgId, content: displayContent },
   })
 
-  const agentId = conv.agent_id || ''
+  // Agent anchor: from opts (already destructured above)
 
   // 加载历史
   const historyMsgs = await db.select().from(messages)

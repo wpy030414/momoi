@@ -189,13 +189,19 @@ userRoute.post('/rename', userAuthMiddleware, async (c) => {
   await db.update(conversations).set({ user_id: newName }).where(eq(conversations.user_id, oldUsername)).run()
   await db.update(userOauthBindings).set({ user_id: newName }).where(eq(userOauthBindings.user_id, oldUsername)).run()
   await db.update(wechatBindings).set({ user_id: newName }).where(eq(wechatBindings.user_id, oldUsername)).run()
+  // QQ per-agent 绑定下需遍历全部 binding 行：旧 key 停、新 key 起。
+  // 先查再更名，避免改名后旧 user_id 查不到。
+  const oldQqBindings = await db.select().from(qqBindings)
+    .where(eq(qqBindings.user_id, oldUsername)).all()
+  for (const b of oldQqBindings) {
+    stopBotForUser(oldUsername, b.agent_id)
+  }
   await db.update(qqBindings).set({ user_id: newName }).where(eq(qqBindings.user_id, oldUsername)).run()
-  // QQ 连接注册表以 userId 为 key —— 换名后须重建连接（旧 key 停、新 key 起），
-  // 否则消息会因 chat.ts 的新鲜度守卫（app_id 之外还有行缺失判定）被静默吞掉
-  stopBotForUser(oldUsername)
-  void startBotForUser(newName).catch((e) => {
-    console.error(`[qq] failed to restart bot after rename ${oldUsername} → ${newName}:`, e instanceof Error ? e.message : e)
-  })
+  for (const b of oldQqBindings) {
+    void startBotForUser(newName, b.agent_id).catch((e) => {
+      console.error(`[qq] failed to restart bot after rename ${oldUsername} → ${newName} agent=${b.agent_id}:`, e instanceof Error ? e.message : e)
+    })
+  }
 
   const result = await signUserToken(newName)
   setAuthCookie(c, result.token)

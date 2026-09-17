@@ -363,20 +363,20 @@ export const api = {
     ),
 
   // QQ binding
-  qqBindInfo: () =>
-    request<{ bound: boolean; app_id?: string; bound_at?: number; conversation_id?: string; status?: 'connected' | 'error'; error?: string; ws_connected?: boolean; group_enabled?: boolean }>(
-      '/api/qq/bind'
+  qqBindInfo: (agentId: string) =>
+    request<{ bound: boolean; agent_id?: string; app_id?: string; bound_at?: number; conversation_id?: string; status?: 'connected' | 'error'; error?: string; ws_connected?: boolean; group_enabled?: boolean }>(
+      `/api/qq/bind?agent_id=${encodeURIComponent(agentId)}`
     ),
 
-  qqBindStart: (convId?: string, appId?: string, appSecret?: string, groupEnabled?: boolean) =>
+  qqBindStart: (convId: string, agentId: string, appId?: string, appSecret?: string, groupEnabled?: boolean) =>
     request<{ success: boolean }>(
       '/api/qq/bind',
-      { method: 'POST', body: JSON.stringify({ conv_id: convId || '', app_id: appId || '', app_secret: appSecret || '', group_enabled: groupEnabled }) }
+      { method: 'POST', body: JSON.stringify({ conv_id: convId || '', agent_id: agentId, app_id: appId || '', app_secret: appSecret || '', group_enabled: groupEnabled }) }
     ),
 
-  qqUnbind: () =>
+  qqUnbind: (agentId: string) =>
     request<{ success: boolean }>(
       '/api/qq/bind',
-      { method: 'DELETE' }
+      { method: 'DELETE', body: JSON.stringify({ agent_id: agentId }) }
     ),
 }

@@ -116,7 +116,8 @@ const MIGRATION_SQL = `
   );
 
   CREATE TABLE IF NOT EXISTS qq_bindings (
-    user_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL DEFAULT '',
     app_id TEXT NOT NULL DEFAULT '',
     app_secret TEXT NOT NULL DEFAULT '',
     conversation_id TEXT NOT NULL DEFAULT '',
@@ -124,7 +125,8 @@ const MIGRATION_SQL = `
     error TEXT NOT NULL DEFAULT '',
     group_enabled INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (user_id, agent_id)
   );
 
   CREATE TABLE IF NOT EXISTS qq_group_conversations (
@@ -173,6 +175,38 @@ async function initSqlite() {
   ]
   for (const stmt of ADDITIVE_MIGRATIONS) {
     try { sqlDb.run(stmt) } catch { /* column already exists */ }
+  }
+
+  // Migration: qq_bindings composite PK (user_id, agent_id).
+  // Old schema had user_id as sole PK — rebuild the table if agent_id column is missing.
+  let qqBindingsNeedsRebuild = false
+  try {
+    sqlDb.run(`SELECT agent_id FROM qq_bindings LIMIT 0`)
+  } catch {
+    qqBindingsNeedsRebuild = true
+  }
+  if (qqBindingsNeedsRebuild) {
+    console.log('[db] Migrating qq_bindings: adding agent_id column + composite PK')
+    sqlDb.run(`
+      CREATE TABLE IF NOT EXISTS qq_bindings_new (
+        user_id TEXT NOT NULL DEFAULT '',
+        agent_id TEXT NOT NULL DEFAULT '',
+        app_id TEXT NOT NULL DEFAULT '',
+        app_secret TEXT NOT NULL DEFAULT '',
+        conversation_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'connected',
+        error TEXT NOT NULL DEFAULT '',
+        group_enabled INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        PRIMARY KEY (user_id, agent_id)
+      )
+    `)
+    sqlDb.run(`INSERT INTO qq_bindings_new (user_id, agent_id, app_id, app_secret, conversation_id, status, error, group_enabled, created_at, updated_at)
+      SELECT user_id, '', app_id, app_secret, conversation_id, status, error, COALESCE(group_enabled, 0), created_at, updated_at FROM qq_bindings`)
+    sqlDb.run(`DROP TABLE qq_bindings`)
+    sqlDb.run(`ALTER TABLE qq_bindings_new RENAME TO qq_bindings`)
+    console.log('[db] qq_bindings migration complete')
   }
 
   persist()
@@ -310,7 +344,8 @@ async function initPg(dbUrl: string, user: string, password: string) {
     );
 
     CREATE TABLE IF NOT EXISTS qq_bindings (
-      user_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT '',
+      agent_id TEXT NOT NULL DEFAULT '',
       app_id TEXT NOT NULL DEFAULT '',
       app_secret TEXT NOT NULL DEFAULT '',
       conversation_id TEXT NOT NULL DEFAULT '',
@@ -318,7 +353,8 @@ async function initPg(dbUrl: string, user: string, password: string) {
       error TEXT NOT NULL DEFAULT '',
       group_enabled BOOLEAN NOT NULL DEFAULT FALSE,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, agent_id)
     );
 
     CREATE TABLE IF NOT EXISTS qq_group_conversations (
@@ -341,6 +377,21 @@ async function initPg(dbUrl: string, user: string, password: string) {
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_settings TEXT NOT NULL DEFAULT '{}';
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS trace TEXT;
     ALTER TABLE qq_bindings ADD COLUMN IF NOT EXISTS group_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+    -- Migration: qq_bindings composite PK (user_id, agent_id)
+    ALTER TABLE qq_bindings ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT '';
+    -- Drop old single-column PK if it still exists; add composite PK
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+                 WHERE constraint_name = 'qq_bindings_pkey' AND table_name = 'qq_bindings') THEN
+        ALTER TABLE qq_bindings DROP CONSTRAINT qq_bindings_pkey;
+      END IF;
+    END $$;
+    -- Add composite PK if not already present (idempotent: errors if exists, so wrap)
+    DO $$ BEGIN
+      ALTER TABLE qq_bindings ADD PRIMARY KEY (user_id, agent_id);
+    EXCEPTION WHEN others THEN
+      -- PK already exists (composite or otherwise), skip
+    END $$;
   `)
 
   const db = drizzlePg(pool, { schema }) as any

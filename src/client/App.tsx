@@ -55,6 +55,7 @@ export function App() {
   const [linkedAccountsOpen, setLinkedAccountsOpen] = useState(false)
   const [imBindOpen, setImBindOpen] = useState(false)
   const [imBindConvId, setImBindConvId] = useState<string | null>(null)
+  const [imBindAgentId, setImBindAgentId] = useState<string>('')
   const [oauthRegisterInfo, setOauthRegisterInfo] = useState<{ providerId: string; providerUserId: string } | null>(null)
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
@@ -180,8 +181,9 @@ export function App() {
     setDeleteConvTitle(conv?.title || '')
   }
 
-  const handleContinueOnIm = (convId: string) => {
+  const handleContinueOnIm = (convId: string, agentId: string) => {
     setImBindConvId(convId)
+    setImBindAgentId(agentId)
     setImBindOpen(true)
   }
 
@@ -670,9 +672,10 @@ export function App() {
         open={imBindOpen}
         onOpenChange={(open) => {
           setImBindOpen(open)
-          if (!open) setImBindConvId(null)
+          if (!open) { setImBindConvId(null); setImBindAgentId('') }
         }}
         convId={imBindConvId || ''}
+        agentId={imBindAgentId}
       />
 
       {/* Group Chat Agent Selection Dialog */}

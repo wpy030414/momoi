@@ -88,7 +88,8 @@ export const wechatBindings = sqliteTable('wechat_bindings', {
 })
 
 export const qqBindings = sqliteTable('qq_bindings', {
-  user_id: text('user_id').primaryKey(),
+  user_id: text('user_id').notNull().default(''),
+  agent_id: text('agent_id').notNull().default(''),
   app_id: text('app_id').notNull().default(''),
   app_secret: text('app_secret').notNull().default(''),
   conversation_id: text('conversation_id').notNull().default(''),
@@ -97,7 +98,9 @@ export const qqBindings = sqliteTable('qq_bindings', {
   group_enabled: integer('group_enabled', { mode: 'boolean' }).notNull().default(false),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
-})
+}, (table) => ({
+  pk: primaryKey({ columns: [table.user_id, table.agent_id] }),
+}))
 
 export const qqGroupConversations = sqliteTable('qq_group_conversations', {
   app_id: text('app_id').notNull(),

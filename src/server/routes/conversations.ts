@@ -32,15 +32,22 @@ export async function unbindConversationWechat(userId: string, conversationId: s
  */
 export async function unbindConversationQq(userId: string, conversationId: string): Promise<void> {
   const binding = await db.select().from(qqBindings)
-    .where(eq(qqBindings.user_id, userId)).get()
-  if (binding && binding.conversation_id === conversationId) {
-    stopBotForUser(userId)
+    .where(and(
+      eq(qqBindings.user_id, userId),
+      eq(qqBindings.conversation_id, conversationId),
+    )).get()
+  if (binding) {
+    stopBotForUser(userId, binding.agent_id)
     // 清理该 app_id 下的群聊映射
     if (binding.app_id) {
       await db.delete(qqGroupConversations)
         .where(eq(qqGroupConversations.app_id, binding.app_id)).run()
     }
-    await db.delete(qqBindings).where(eq(qqBindings.user_id, userId)).run()
+    await db.delete(qqBindings)
+      .where(and(
+        eq(qqBindings.user_id, userId),
+        eq(qqBindings.agent_id, binding.agent_id),
+      )).run()
   }
 }
 

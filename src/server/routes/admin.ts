@@ -8,10 +8,10 @@ import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '../../shared/constants.js'
 import fs from 'fs'
 import path from 'path'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
-import { db, conversations, messages, users, userOauthBindings, agents, wechatBindings, qqBindings } from '../db.js'
+import { db, conversations, messages, users, userOauthBindings, agents, wechatBindings, qqBindings, qqGroupConversations } from '../db.js'
 import { skillRegistry } from '../skills/loader.js'
 import AdmZip from 'adm-zip'
-import { stopBotForUser } from '../qq/manager.js'
+import { stopBotForUser, stopAllBotsForUser } from '../qq/manager.js'
 
 export const adminRoute = new Hono()
 
@@ -316,10 +316,18 @@ adminRoute.delete('/users/:username', async (c) => {
   // Delete WeChat binding (sql.js has foreign_keys OFF by default,
   // so cascade cannot be relied on — clean up explicitly).
   await db.delete(wechatBindings).where(eq(wechatBindings.user_id, username)).run()
-  // Delete QQ binding + stop its gateway connection (a lingering connection
-  // would keep receiving messages that the freshness guard silently drops).
+  // Delete QQ binding + stop all gateway connections for this user.
+  // With per-agent bindings, there may be multiple connections to tear down.
+  const allQqBindings = await db.select().from(qqBindings)
+    .where(eq(qqBindings.user_id, username)).all()
+  for (const b of allQqBindings) {
+    stopBotForUser(username, b.agent_id)
+    if (b.app_id) {
+      await db.delete(qqGroupConversations)
+        .where(eq(qqGroupConversations.app_id, b.app_id)).run()
+    }
+  }
   await db.delete(qqBindings).where(eq(qqBindings.user_id, username)).run()
-  stopBotForUser(username)
   // Delete user record
   await db.delete(users).where(eq(users.username, username)).run()
 

@@ -18,7 +18,7 @@ interface SidebarProps {
   onDelete: (id: string) => void
   onExport: (id: string) => void
   onManageGroupAgents?: (convId: string) => void
-  onContinueOnIm?: (convId: string) => void
+  onContinueOnIm?: (convId: string, agentId: string) => void
   appName: string
   currentUser: string
   showGithub?: boolean
@@ -311,7 +311,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
           {(conversations.find((c) => c.id === menu.convId) as any)?.type === 'direct' && onContinueOnIm && (
             <button
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
-              onClick={() => { onContinueOnIm(menu.convId); closeMenu() }}
+              onClick={() => { const c = conversations.find((c) => c.id === menu.convId); onContinueOnIm(menu.convId, (c as any)?.agent_id || ''); closeMenu() }}
             >
               <Smartphone className="h-3.5 w-3.5" />
               {t('sidebar.continueOnIm')}
