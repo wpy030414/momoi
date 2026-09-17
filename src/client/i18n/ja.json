@@ -297,7 +297,9 @@
     "changeCredentials": "認証情報を変更",
     "unbind": "連携解除",
     "unbindConfirm": "QQ 連携を解除しますか？ボット接続は切断されます。",
-    "notConnected": "ボット接続は未接続です。新しいメッセージ到着時に自動再接続されます。"
+    "notConnected": "ボット接続は未接続です。新しいメッセージ到着時に自動再接続されます。",
+    "groupEnabled": "グループチャットを有効化",
+    "groupEnabledDesc": "有効にすると、QQグループでボットに@メンションすると返信が届きます"
   },
   "oauthRegister": {
     "title": "登録を完了",

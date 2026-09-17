@@ -364,14 +364,14 @@ export const api = {
 
   // QQ binding
   qqBindInfo: () =>
-    request<{ bound: boolean; app_id?: string; bound_at?: number; conversation_id?: string; status?: 'connected' | 'error'; error?: string; ws_connected?: boolean }>(
+    request<{ bound: boolean; app_id?: string; bound_at?: number; conversation_id?: string; status?: 'connected' | 'error'; error?: string; ws_connected?: boolean; group_enabled?: boolean }>(
       '/api/qq/bind'
     ),
 
-  qqBindStart: (convId?: string, appId?: string, appSecret?: string) =>
+  qqBindStart: (convId?: string, appId?: string, appSecret?: string, groupEnabled?: boolean) =>
     request<{ success: boolean }>(
       '/api/qq/bind',
-      { method: 'POST', body: JSON.stringify({ conv_id: convId || '', app_id: appId || '', app_secret: appSecret || '' }) }
+      { method: 'POST', body: JSON.stringify({ conv_id: convId || '', app_id: appId || '', app_secret: appSecret || '', group_enabled: groupEnabled }) }
     ),
 
   qqUnbind: () =>

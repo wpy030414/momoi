@@ -297,7 +297,9 @@
     "changeCredentials": "更换凭证",
     "unbind": "解除绑定",
     "unbindConfirm": "确定要解除 QQ 绑定吗？机器人连接将被断开。",
-    "notConnected": "机器人连接未就绪，新消息到达后会自动重连。"
+    "notConnected": "机器人连接未就绪，新消息到达后会自动重连。",
+    "groupEnabled": "启用群聊支持",
+    "groupEnabledDesc": "开启后，在QQ群内@机器人即可获得回复"
   },
   "oauthRegister": {
     "title": "完成注册",

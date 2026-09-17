@@ -297,7 +297,9 @@
     "changeCredentials": "Change credentials",
     "unbind": "Unbind",
     "unbindConfirm": "Unbind QQ? The bot connection will be closed.",
-    "notConnected": "Bot connection is not ready; it will reconnect when new messages arrive."
+    "notConnected": "Bot connection is not ready; it will reconnect when new messages arrive.",
+    "groupEnabled": "Enable group chat",
+    "groupEnabledDesc": "When enabled, @mention the bot in QQ groups to get replies"
   },
   "oauthRegister": {
     "title": "Complete Registration",

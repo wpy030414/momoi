@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
+import { Switch } from '../ui/switch'
 import { api } from '../../lib/api'
 import { Loader2, CheckCircle2, AlertCircle, ArrowLeft, ExternalLink } from 'lucide-react'
 
@@ -22,6 +23,7 @@ type BindInfo = {
   status?: 'connected' | 'error'
   error?: string
   ws_connected?: boolean
+  group_enabled?: boolean
 }
 
 type PanelState =
@@ -39,6 +41,7 @@ export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
   const [unbindConfirmOpen, setUnbindConfirmOpen] = useState(false)
   const [rebindConfirmOpen, setRebindConfirmOpen] = useState(false)
   const [unbinding, setUnbinding] = useState(false)
+  const [groupEnabled, setGroupEnabled] = useState(false)
 
   const loadInfo = useCallback(async () => {
     setState({ phase: 'loading' })
@@ -72,7 +75,7 @@ export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
     }
     setState({ phase: 'submitting' })
     try {
-      await api.qqBindStart(convId, appId.trim(), appSecret.trim())
+      await api.qqBindStart(convId, appId.trim(), appSecret.trim(), groupEnabled)
       setState({ phase: 'confirmed' })
     } catch (err) {
       setState({ phase: 'form', appId, error: err instanceof Error ? err.message : t('common.error') })
@@ -151,6 +154,11 @@ export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
             {state.error && (
               <p className="text-sm text-destructive break-all">{state.error}</p>
             )}
+            <div className="flex items-center justify-between py-1">
+              <span className="text-sm">{t('qqBind.groupEnabled')}</span>
+              <Switch checked={groupEnabled} onCheckedChange={setGroupEnabled} />
+            </div>
+            <p className="text-xs text-muted-foreground -mt-1">{t('qqBind.groupEnabledDesc')}</p>
             <Button onClick={handleSubmit} disabled={!appId.trim() || !appSecret.trim()}>
               {t('qqBind.submit')}
             </Button>
@@ -198,6 +206,19 @@ export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
                 </p>
               )}
             </div>
+            <div className="flex items-center justify-between w-full px-2">
+              <span className="text-sm">{t('qqBind.groupEnabled')}</span>
+              <Switch
+                checked={info.group_enabled ?? false}
+                onCheckedChange={async (checked) => {
+                  try {
+                    await api.qqBindStart(undefined, undefined, undefined, checked)
+                    await loadInfo()
+                  } catch { /* 切换失败静默，toggle 回弹 */ }
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground -mt-2">{t('qqBind.groupEnabledDesc')}</p>
             <div className="flex flex-wrap justify-center gap-2">
               {info.conversation_id !== convId && (
                 <Button variant="outline" size="sm" onClick={() => setRebindConfirmOpen(true)}>
