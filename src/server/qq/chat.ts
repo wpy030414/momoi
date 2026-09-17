@@ -1,18 +1,14 @@
 /**
- * QQ → Momoi 聊天桥接：接收 QQ C2C 文本，路由到 AI 并以 C2C 流式（打字机）回复。
- * 不依赖 HTTP 层，直接调用 runPiAgentLoop；与 wechat/chat.ts 同构，
- * 差异在回发链路（流式帧 + sendText 降级）与新鲜度守卫（app_id 比对）。
+ * QQ → Momoi 聊天桥接：接收 QQ C2C / 群聊文本，路由到 AI 并以单次发送回复。
+ * 不依赖 HTTP 层，直接调用 runPiAgentLoop；与 wechat/chat.ts 同构。
+ * 回发：C2C 与群聊均一次性发送（sendTextWithRetry，3 次重试 + 超长分片）。
  */
 import { db, conversations, messages, qqBindings } from '../db.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { broadcastStream, broadcastConversationChanged, broadcastConversationSync } from '../realtime.js'
 import { withUserImLock } from '../im/locks.js'
-import { SUGGESTIONS_FENCE } from '../../shared/constants.js'
-import {
-  sendC2CText, sendStreamFrame, getNextMsgSeq, isQqRateLimitError,
-  type QqCredentials, type QqStreamFrameRequest,
-} from './api.js'
+import { sendC2CText, type QqCredentials } from './api.js'
 
 export interface QqChatOptions {
   userId: string
@@ -157,19 +153,13 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
     agent_id: m.agent_id || null,
   }))
 
-  // ---- Run AI (stream to QQ + realtime broadcast to other devices) ----
-  // send 回调承担两个职责：
-  //   1. 将流事件实时中继到同账号其他设备（网页端 SSE 通道）
-  //   2. text token 喂给 QqStreamSender —— QQ 端打字机流式呈现
-  const streamer = new QqStreamSender(creds, openid, msgId)
+  // ---- Run AI (broadcast to web clients; no QQ streaming — send full text on completion) ----
+  // send 回调仅承担实时中继到同账号其他设备（网页端 SSE 通道）
   const { reply, suggestions, thinking } = await runPiAgentLoop({
     userMessage: text,
     history,
     send: (msg) => {
       broadcastStream(userId, '', { conversation_id: convId, event: msg })
-      if ((msg as any).type === 'token' && (msg as any).text) {
-        streamer.onToken((msg as any).text as string)
-      }
     },
     thinkingMode: true,
     conversationId: convId,
@@ -197,16 +187,13 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
   // 侧边栏最后一条消息预览 + 时间戳也需刷新
   broadcastConversationSync(userId)
 
-  // ---- Deliver reply to QQ: 流式收口，失败降级一次性发送 ----
+  // ---- Deliver reply to QQ: single-shot send (no streaming for C2C or groups) ----
   console.log('[qq-chat] Delivering reply: openid=', openid,
     'msgId=', msgId, 'textLen=', replyText.length)
 
   let sendOk = false
   if (replyText.trim()) {
-    sendOk = await streamer.complete(replyText)
-    if (!sendOk) {
-      sendOk = await sendTextWithRetry(creds, openid, msgId, replyText)
-    }
+    sendOk = await sendTextWithRetry(creds, openid, msgId, replyText)
   }
 
   if (!sendOk) {
@@ -226,146 +213,3 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
   }
 }
 
-// ---- QqStreamSender：runPiAgentLoop 流事件 → QQ stream_messages 帧序列 ----
-
-const STREAM_THROTTLE_MS = 800
-const STREAM_MAX_RETRIES = 3
-
-/**
- * QQ C2C 流式发送器（协议要点）：
- * - replace 语义：每帧携带全量文本；同一流共用同一 msg_seq，仅 index 递增
- * - input_state: 1=GENERATING（中间帧）、10=DONE（终帧）
- * - 懒开启：首个 token 才发首帧；频控（HTTP 429 / err_code 50002）退避重试
- * - suggestions 围栏截断：累积文本出现围栏即停止追加（终态 reply 已剥离围栏）
- * - 任何失败（重试耗尽/非频控错误）置 broken —— 后续仅累积，complete 返回
- *   false 由调用方降级 sendText 全文
- */
-class QqStreamSender {
-  private creds: QqCredentials
-  private openid: string
-  private msgId: string
-  private throttleMs: number
-
-  private streamMsgId?: string
-  private index = 0
-  private msgSeq: number | null = null
-  private lastFlushAt = 0
-  private lastSentText = ''
-  private pendingText = ''
-  private pendingTimer: ReturnType<typeof setTimeout> | null = null
-  private flushInProgress = false
-  private flushPromise: Promise<void> | null = null
-  private isCompleted = false
-  private broken = false
-  private fenced = false
-
-  constructor(creds: QqCredentials, openid: string, msgId: string, throttleMs = STREAM_THROTTLE_MS) {
-    this.creds = creds
-    this.openid = openid
-    this.msgId = msgId
-    this.throttleMs = throttleMs
-  }
-
-  /** 喂入 text token 增量；同步非阻塞（帧发送在节流定时器里异步进行） */
-  onToken(delta: string): void {
-    if (this.isCompleted || this.fenced) return
-    const next = this.pendingText + delta
-    const fenceIdx = next.indexOf(SUGGESTIONS_FENCE)
-    if (fenceIdx >= 0) {
-      this.pendingText = next.slice(0, fenceIdx)
-      this.fenced = true
-    } else {
-      this.pendingText = next
-    }
-    if (this.broken) return
-    this.scheduleFlush()
-  }
-
-  /**
-   * 收口：发送 DONE 终帧。返回 true = 已通过流式送达；
-   * false = 流式链路已坏，调用方应降级 sendText 全文。
-   */
-  async complete(finalText: string): Promise<boolean> {
-    if (this.isCompleted) return !this.broken && this.lastSentText !== ''
-    this.isCompleted = true
-    if (this.pendingTimer) {
-      clearTimeout(this.pendingTimer)
-      this.pendingTimer = null
-    }
-    // 等待在飞帧结束（含其退避重试），避免 DONE 帧与其交错
-    if (this.flushPromise) {
-      await this.flushPromise.catch(() => {})
-    }
-    if (this.broken) return false
-    try {
-      await this.doFlush(10, finalText)
-      return true
-    } catch (err) {
-      console.error('[qq-stream] DONE frame failed:', (err as Error).message)
-      return false
-    }
-  }
-
-  // ---- Internal ----
-
-  private scheduleFlush(): void {
-    if (this.isCompleted || this.broken || this.flushInProgress || this.pendingTimer) return
-    if (this.pendingText === this.lastSentText) return
-    const wait = Math.max(0, this.throttleMs - (Date.now() - this.lastFlushAt))
-    this.pendingTimer = setTimeout(() => {
-      this.pendingTimer = null
-      this.flushNow(1)
-    }, wait)
-  }
-
-  private flushNow(state: 1 | 10): void {
-    if (this.isCompleted || this.broken || this.flushInProgress) return
-    if (state === 1 && this.pendingText === this.lastSentText) return
-    this.flushInProgress = true
-    const promise = this.doFlush(state, this.pendingText)
-      .catch((err) => {
-        this.broken = true
-        console.error('[qq-stream] flush failed, falling back to sendText:', (err as Error).message)
-      })
-      .finally(() => {
-        this.flushInProgress = false
-        // Trailing flush: 文本在在飞帧期间又增长了 —— 补一帧
-        if (!this.isCompleted && !this.broken && !this.pendingTimer &&
-            this.pendingText !== this.lastSentText) {
-          this.scheduleFlush()
-        }
-      })
-    this.flushPromise = promise
-  }
-
-  private async doFlush(state: 1 | 10, text: string): Promise<void> {
-    if (this.msgSeq === null) this.msgSeq = getNextMsgSeq()
-    const req: QqStreamFrameRequest = {
-      input_mode: 'replace',
-      input_state: state,
-      content_type: 'markdown',
-      content_raw: text,
-      event_id: this.msgId,
-      msg_id: this.msgId,
-      msg_seq: this.msgSeq,
-      index: this.index,
-    }
-    if (this.streamMsgId) req.stream_msg_id = this.streamMsgId
-
-    for (let attempt = 0; ; attempt++) {
-      try {
-        const resp = await sendStreamFrame(this.creds, this.openid, req)
-        if (resp?.id && !this.streamMsgId) this.streamMsgId = resp.id
-        this.lastSentText = text
-        this.lastFlushAt = Date.now()
-        return
-      } catch (err) {
-        // 频控错误：指数退避重试且 index 前进，避免陈旧 index 冲突
-        if (attempt >= STREAM_MAX_RETRIES || !isQqRateLimitError(err)) throw err
-        console.warn(`[qq-stream] rate limited, retry ${attempt + 1}/${STREAM_MAX_RETRIES}`)
-        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000))
-        req.index = ++this.index
-      }
-    }
-  }
-}

@@ -4,29 +4,12 @@
  *
  * 协议事实逆向自 @tencent-connect/qqbot-nodejs@1.0.4 源码（token.js /
  * api-client.js / messages.js / routes.js），仅择取 Momoi 所需子集：
- * 取 token、发 C2C 文本、C2C 流式帧、网关地址。
+ * 取 token、发 C2C 文本、发群文本、网关地址。
  */
 
 export interface QqCredentials {
   appId: string
   appSecret: string
-}
-
-/** C2C 流式帧请求（stream_messages） */
-export interface QqStreamFrameRequest {
-  /** 固定 'replace' — 每帧携带全量文本覆盖上一帧 */
-  input_mode: 'replace'
-  /** 1 = GENERATING（中间帧）、10 = DONE（终帧） */
-  input_state: 1 | 10
-  /** 固定 'markdown' */
-  content_type: 'markdown'
-  content_raw: string
-  event_id: string
-  msg_id: string
-  msg_seq: number
-  index: number
-  /** 首帧响应返回的 id，后续帧带上以续流 */
-  stream_msg_id?: string
 }
 
 export const QQ_API_BASE = 'https://api.sgroup.qq.com'
@@ -104,12 +87,6 @@ async function fetchToken(creds: QqCredentials): Promise<string> {
 
 // ---- REST 请求 ----
 
-/** 判定是否频控错误（HTTP 429 或业务码 50002）— 流式帧退避重试用 */
-export function isQqRateLimitError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  return msg.includes('HTTP 429') || msg.includes('err_code=50002') || msg.includes('rate limit')
-}
-
 /**
  * QQ 开放平台 REST 请求。Authorization: `QQBot <token>`。
  * 失败 throw（错误消息含 HTTP 状态、err_code 与 body 摘要，供上层分类决策）。
@@ -169,20 +146,6 @@ export async function sendC2CText(
     msg_seq: opts.msgSeq ?? getNextMsgSeq(),
     ...(opts.msgId ? { msg_id: opts.msgId } : {}),
   })
-}
-
-/**
- * 发送 C2C 流式帧（仅私聊可用）。replace 语义：content_raw 为全量文本；
- * 同一流所有帧共用同一 msg_seq，仅 index 递增；终帧 input_state=10。
- * 失败 throw（频控可用 isQqRateLimitError 判定后退避重试）。
- */
-export async function sendStreamFrame(
-  creds: QqCredentials,
-  openid: string,
-  req: QqStreamFrameRequest,
-): Promise<{ id?: string }> {
-  const token = await getAccessToken(creds)
-  return qqApiFetch(token, 'POST', `/v2/users/${openid}/stream_messages`, req)
 }
 
 /** 获取 WebSocket 网关地址（wss://） */
