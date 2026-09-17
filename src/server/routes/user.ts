@@ -1,10 +1,11 @@
 import { Hono } from 'hono'
-import { db, users, userOauthBindings, wechatBindings, conversations } from '../db.js'
+import { db, users, userOauthBindings, wechatBindings, qqBindings, conversations } from '../db.js'
 import { eq, and } from 'drizzle-orm'
 import { hashPin, verifyPin, signUserToken, isAdmin, setAuthCookie, clearAuthCookie } from '../auth.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { isDirectRegistrationOpen, isOauthRegistrationOpen } from '../config.js'
 import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../rateLimiter.js'
+import { stopBotForUser, startBotForUser } from '../qq/manager.js'
 
 export const userRoute = new Hono()
 
@@ -188,6 +189,13 @@ userRoute.post('/rename', userAuthMiddleware, async (c) => {
   await db.update(conversations).set({ user_id: newName }).where(eq(conversations.user_id, oldUsername)).run()
   await db.update(userOauthBindings).set({ user_id: newName }).where(eq(userOauthBindings.user_id, oldUsername)).run()
   await db.update(wechatBindings).set({ user_id: newName }).where(eq(wechatBindings.user_id, oldUsername)).run()
+  await db.update(qqBindings).set({ user_id: newName }).where(eq(qqBindings.user_id, oldUsername)).run()
+  // QQ 连接注册表以 userId 为 key —— 换名后须重建连接（旧 key 停、新 key 起），
+  // 否则消息会因 chat.ts 的新鲜度守卫（app_id 之外还有行缺失判定）被静默吞掉
+  stopBotForUser(oldUsername)
+  void startBotForUser(newName).catch((e) => {
+    console.error(`[qq] failed to restart bot after rename ${oldUsername} → ${newName}:`, e instanceof Error ? e.message : e)
+  })
 
   const result = await signUserToken(newName)
   setAuthCookie(c, result.token)

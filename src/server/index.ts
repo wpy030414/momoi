@@ -21,9 +21,11 @@ import { oauthRoute } from './routes/oauth.js'
 import { assetsRoute } from './routes/assets.js'
 import { voiceRoute } from './routes/voice.js'
 import { wechatRoute } from './routes/wechat.js'
+import { qqRoute } from './routes/qq.js'
 import { eventsRoute } from './routes/events.js'
 import { serveClient } from './static.js'
 import { startWechatPoller } from './wechat/poller.js'
+import { initQqBots } from './qq/manager.js'
 
 const app = new Hono()
 
@@ -48,6 +50,7 @@ app.route('/api/oauth', oauthRoute)
 app.route('/api/assets', assetsRoute)
 app.route('/api/voice', voiceRoute)
 app.route('/api/wechat', wechatRoute)
+app.route('/api/qq', qqRoute)
 app.route('/api/events', eventsRoute)
 
 // Static files — production only (dev mode uses Vite proxy)
@@ -64,6 +67,9 @@ serve({
 
 // Start WeChat message poller (non-blocking, timer-based)
 startWechatPoller()
+
+// Restore QQ bot gateway connections for all bound users (non-blocking)
+void initQqBots().catch((e) => console.error('[qq] restore failed:', e instanceof Error ? e.message : e))
 
 // Banner — use visual-width-aware padding so CJK characters align properly in terminal
 const visualWidth = (s: string): number => {
