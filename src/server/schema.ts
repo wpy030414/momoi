@@ -86,3 +86,14 @@ export const wechatBindings = sqliteTable('wechat_bindings', {
   session_expired: integer('session_expired', { mode: 'boolean' }).notNull().default(false),
   created_at: integer('created_at').notNull(),
 })
+
+export const qqBindings = sqliteTable('qq_bindings', {
+  user_id: text('user_id').primaryKey(),
+  app_id: text('app_id').notNull().default(''),
+  app_secret: text('app_secret').notNull().default(''),
+  conversation_id: text('conversation_id').notNull().default(''),
+  status: text('status').notNull().default('connected'),
+  error: text('error').notNull().default(''),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+})

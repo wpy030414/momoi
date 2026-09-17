@@ -7,6 +7,7 @@ import { eq, and, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { sendMessage, WECHAT_BASE_URL, type WechatCredentials } from './ilink.js'
 import { broadcastStream, broadcastConversationChanged, broadcastConversationSync } from '../realtime.js'
+import { withUserImLock } from '../im/locks.js'
 
 export interface WechatChatOptions {
   userId: string
@@ -18,9 +19,6 @@ export interface WechatChatOptions {
   /** iLink message_id for dedup — same msg may be delivered multiple times */
   messageId?: number
 }
-
-/** Per-user concurrency lock — 防止同一用户的多次 AI 调用交叉执行 */
-const locks = new Map<string, Promise<void>>()
 
 /** Dedup cache: message_id → timestamp, evicted after 5 minutes */
 const dedupCache = new Map<number, number>()
@@ -37,25 +35,13 @@ function isDuplicate(messageId: number | undefined, now: number): boolean {
   return false
 }
 
-async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  while (locks.has(key)) {
-    await locks.get(key)
-  }
-  const promise = fn()
-  locks.set(key, promise.then(
-    () => { locks.delete(key) },
-    () => { locks.delete(key) },
-  ) as unknown as Promise<void>)
-  return promise
-}
-
 export async function handleWechatMessage(opts: WechatChatOptions): Promise<void> {
   // Dedup before acquiring lock — avoid queuing behind a long AI call for a duplicate
   if (isDuplicate(opts.messageId, Date.now())) {
     console.log(`[wechat-chat] Duplicate message_id=${opts.messageId}, skipping`)
     return
   }
-  await withLock(opts.userId, () => handleWechatMessageInner(opts))
+  await withUserImLock(opts.userId, () => handleWechatMessageInner(opts))
 }
 
 async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> {

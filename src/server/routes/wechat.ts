@@ -2,26 +2,12 @@ import { Hono } from 'hono'
 import { db, conversations, wechatBindings } from '../db.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
+import { withNamedLock } from '../im/locks.js'
 import QRCode from 'qrcode'
 
 export const wechatRoute = new Hono()
 
 const ILLINK_BASE = 'https://ilinkai.weixin.qq.com'
-
-/** Per-user lock — serializes concurrent bind/status confirmations for the same account */
-const bindingLocks = new Map<string, Promise<void>>()
-
-async function withBindingLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  while (bindingLocks.has(key)) {
-    await bindingLocks.get(key)
-  }
-  const promise = fn()
-  bindingLocks.set(key, promise.then(
-    () => { bindingLocks.delete(key) },
-    () => { bindingLocks.delete(key) },
-  ) as unknown as Promise<void>)
-  return promise
-}
 
 function wechatHeaders(): Record<string, string> {
   const uin = Buffer.from(String(Math.floor(Math.random() * 4294967295))).toString('base64')
@@ -162,7 +148,7 @@ wechatRoute.get('/bind/status', userAuthMiddleware, async (c) => {
   if (data.status === 'confirmed' && data.bot_token) {
     // Serialize per-user — prevents two concurrent QR scans from clobbering
     // each other's bot_token / conversation_id (A2).
-    return withBindingLock(userId, async () => {
+    return withNamedLock(userId, async () => {
       const existing = await db.select().from(wechatBindings)
         .where(eq(wechatBindings.user_id, userId)).get()
 

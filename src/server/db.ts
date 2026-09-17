@@ -113,6 +113,17 @@ const MIGRATION_SQL = `
     updates_buf TEXT NOT NULL DEFAULT '',
     session_expired INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE IF NOT EXISTS qq_bindings (
+    user_id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL DEFAULT '',
+    app_secret TEXT NOT NULL DEFAULT '',
+    conversation_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'connected',
+    error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );`
 
 // ---- SQLite (sql.js) local mode ----
@@ -286,6 +297,17 @@ async function initPg(dbUrl: string, user: string, password: string) {
       created_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS qq_bindings (
+      user_id TEXT PRIMARY KEY,
+      app_id TEXT NOT NULL DEFAULT '',
+      app_secret TEXT NOT NULL DEFAULT '',
+      conversation_id TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'connected',
+      error TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
     CREATE INDEX IF NOT EXISTS idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
@@ -320,4 +342,5 @@ export const {
   users,
   userOauthBindings,
   wechatBindings,
+  qqBindings,
 } = result.schema

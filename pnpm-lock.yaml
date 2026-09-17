@@ -119,6 +119,9 @@ importers:
       word-extractor:
         specifier: ^1.0.4
         version: 1.0.4
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
@@ -144,6 +147,9 @@ importers:
       '@types/sql.js':
         specifier: ^1.4.11
         version: 1.4.11
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       '@vitejs/plugin-react':
         specifier: ^6.1.1
         version: 6.1.1(vite@8.2.2(@types/node@26.4.1)(esbuild@0.27.7)(jiti@1.21.7)(tsx@4.23.13)(yaml@2.9.0))
@@ -6153,7 +6159,6 @@ snapshots:
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 26.4.1
-    optional: true
 
   '@ungap/structured-clone@1.4.0': {}
 
