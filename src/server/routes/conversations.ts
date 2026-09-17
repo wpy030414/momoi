@@ -1,10 +1,11 @@
 import { Hono } from 'hono'
-import { db, conversations, messages, groupConversationAgents, agents, wechatBindings, qqBindings } from '../db.js'
+import { db, conversations, messages, groupConversationAgents, agents, wechatBindings, qqBindings, qqGroupConversations } from '../db.js'
 import { eq, and, desc, gte, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 import { broadcastConversationSync, broadcastConversationChanged } from '../realtime.js'
+import { stopBotForUser } from '../qq/manager.js'
 
 function getUserId(c: any): string {
   return c.get('userId') || ''
@@ -25,18 +26,21 @@ export async function unbindConversationWechat(userId: string, conversationId: s
 
 /**
  * 解除某个会话的 QQ 绑定路由（软删会话 / 硬删会话共用）。
- * - 与微信不同：只清 conversation_id，保留凭证与连接 —— AppSecret 一旦
- *   遗失需在 q.qq.com 重新生成，成本远高于扫码；未锚定会话时消息进来
- *   会收到「尚未绑定会话」提示（chat.ts 已有该分支），连接保持可用。
+ * - 删除绑定会话 → 绑定关系 + 群聊映射全部删除，彻底断联。
+ *   群聊会话下次收到消息时会自愈重建（resolveGroupConversation 检测到
+ *   映射存在但会话已软删 → 清理旧映射 → 创建新群聊会话）。
  */
 export async function unbindConversationQq(userId: string, conversationId: string): Promise<void> {
   const binding = await db.select().from(qqBindings)
     .where(eq(qqBindings.user_id, userId)).get()
   if (binding && binding.conversation_id === conversationId) {
-    await db.update(qqBindings).set({
-      conversation_id: '',
-      updated_at: Math.floor(Date.now() / 1000),
-    }).where(eq(qqBindings.user_id, userId)).run()
+    stopBotForUser(userId)
+    // 清理该 app_id 下的群聊映射
+    if (binding.app_id) {
+      await db.delete(qqGroupConversations)
+        .where(eq(qqGroupConversations.app_id, binding.app_id)).run()
+    }
+    await db.delete(qqBindings).where(eq(qqBindings.user_id, userId)).run()
   }
 }
 
