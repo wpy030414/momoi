@@ -18,7 +18,7 @@ interface SidebarProps {
   onDelete: (id: string) => void
   onExport: (id: string) => void
   onManageGroupAgents?: (convId: string) => void
-  onContinueOnWechat?: (convId: string) => void
+  onContinueOnIm?: (convId: string) => void
   appName: string
   currentUser: string
   showGithub?: boolean
@@ -106,7 +106,7 @@ function ConversationTitle({ title }: { title: string }) {
   )
 }
 
-export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onManageGroupAgents, onContinueOnWechat, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings }: SidebarProps) {
+export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings }: SidebarProps) {
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -308,13 +308,13 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
             left: Math.max(8, menu.anchorRect.right - 160),
           }}
         >
-          {(conversations.find((c) => c.id === menu.convId) as any)?.type === 'direct' && onContinueOnWechat && (
+          {(conversations.find((c) => c.id === menu.convId) as any)?.type === 'direct' && onContinueOnIm && (
             <button
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
-              onClick={() => { onContinueOnWechat(menu.convId); closeMenu() }}
+              onClick={() => { onContinueOnIm(menu.convId); closeMenu() }}
             >
               <Smartphone className="h-3.5 w-3.5" />
-              {t('sidebar.continueOnWechat')}
+              {t('sidebar.continueOnIm')}
             </button>
           )}
           <button

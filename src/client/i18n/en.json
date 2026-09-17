@@ -67,7 +67,7 @@
     "delete": "Delete",
     "deleteConfirm": "Delete conversation \"{{name}}\"? This action cannot be undone.",
     "groupMembers": "Members",
-    "continueOnWechat": "Continue on WeChat"
+    "continueOnIm": "Continue on IM"
   },
   "menu": {
     "logout": "Logout",
@@ -268,6 +268,36 @@
     "rebindConfirm": "Move the WeChat binding to this conversation? The old conversation's binding will be automatically removed.",
     "unbind": "Unbind",
     "unbindConfirm": "Are you sure you want to unbind WeChat?"
+  },
+  "imBind": {
+    "title": "Continue on IM",
+    "description": "Pick a messaging channel to bind. WeChat and QQ can be bound at the same time.",
+    "wechat": "WeChat",
+    "wechatDesc": "Scan a QR code to continue this chat in WeChat",
+    "qq": "QQ",
+    "qqDesc": "Bind with your QQ bot's AppID / AppSecret",
+    "back": "Back"
+  },
+  "qqBind": {
+    "title": "Bind QQ",
+    "description": "Enter the AppID and AppSecret of a bot you created on the QQ Open Platform. Once bound, chat with the bot on QQ to continue this conversation.",
+    "createBotGuide": "Create a bot on the QQ Open Platform and get credentials",
+    "appIdPlaceholder": "e.g. 102345678",
+    "appSecretPlaceholder": "Your bot's AppSecret",
+    "missingCredentials": "Please fill in both AppID and AppSecret",
+    "submit": "Verify and bind",
+    "submitting": "Verifying credentials...",
+    "success": "Bound",
+    "successDesc": "Your QQ bot is bound. Chat with it on QQ to continue this conversation.",
+    "alreadyBound": "QQ bot bound",
+    "boundToOtherConv": "This QQ binding currently points to another conversation; transferring will route messages here.",
+    "rebindHere": "Bind to this conversation",
+    "rebindTitle": "Rebind to this conversation",
+    "rebindConfirm": "Move the QQ binding to this conversation?",
+    "changeCredentials": "Change credentials",
+    "unbind": "Unbind",
+    "unbindConfirm": "Unbind QQ? The bot connection will be closed.",
+    "notConnected": "Bot connection is not ready; it will reconnect when new messages arrive."
   },
   "oauthRegister": {
     "title": "Complete Registration",

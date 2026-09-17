@@ -67,7 +67,7 @@
     "delete": "削除",
     "deleteConfirm": "会話「{{name}}」を削除しますか？この操作は元に戻せません。",
     "groupMembers": "メンバー",
-    "continueOnWechat": "WeChat で続ける"
+    "continueOnIm": "IM で続ける"
   },
   "menu": {
     "logout": "ログアウト",
@@ -268,6 +268,36 @@
     "rebindConfirm": "WeChat 連携をこの会話に移しますか？元の会話の連携は自動的に解除されます。",
     "unbind": "連携解除",
     "unbindConfirm": "WeChat 連携を解除してもよろしいですか？"
+  },
+  "imBind": {
+    "title": "IM で続ける",
+    "description": "連携するメッセージアプリを選択してください。WeChat と QQ は同時に連携できます。",
+    "wechat": "WeChat",
+    "wechatDesc": "QR コードをスキャンして WeChat で会話を続ける",
+    "qq": "QQ",
+    "qqDesc": "QQ ボットの AppID / AppSecret で連携",
+    "back": "戻る"
+  },
+  "qqBind": {
+    "title": "QQ 連携",
+    "description": "QQ オープンプラットフォームで作成したボットの AppID と AppSecret を入力してください。連携後、QQ でボットに話しかけるとこの会話を続けられます。",
+    "createBotGuide": "QQ オープンプラットフォームでボットを作成して認証情報を取得",
+    "appIdPlaceholder": "例: 102345678",
+    "appSecretPlaceholder": "ボットの AppSecret",
+    "missingCredentials": "AppID と AppSecret の両方を入力してください",
+    "submit": "検証して連携",
+    "submitting": "認証情報を検証中...",
+    "success": "連携完了",
+    "successDesc": "QQ ボットとの連携が完了しました。QQ でボットに話しかけて会話を続けられます。",
+    "alreadyBound": "QQ ボット連携済み",
+    "boundToOtherConv": "この QQ 連携は現在別の会話を指しています。移すとメッセージはこの会話に届きます。",
+    "rebindHere": "この会話に連携",
+    "rebindTitle": "この会話に再連携",
+    "rebindConfirm": "QQ 連携をこの会話に移しますか？",
+    "changeCredentials": "認証情報を変更",
+    "unbind": "連携解除",
+    "unbindConfirm": "QQ 連携を解除しますか？ボット接続は切断されます。",
+    "notConnected": "ボット接続は未接続です。新しいメッセージ到着時に自動再接続されます。"
   },
   "oauthRegister": {
     "title": "登録を完了",

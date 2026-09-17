@@ -67,7 +67,7 @@
     "delete": "删除",
     "deleteConfirm": "确定要删除会话「{{name}}」吗？此操作不可撤销。",
     "groupMembers": "群成员",
-    "continueOnWechat": "在微信上继续"
+    "continueOnIm": "在 IM 上继续"
   },
   "menu": {
     "logout": "退出登录",
@@ -268,6 +268,36 @@
     "rebindConfirm": "确定要将微信绑定转移到当前会话吗？原会话的绑定将自动解除。",
     "unbind": "解除绑定",
     "unbindConfirm": "确定要解除微信绑定吗？"
+  },
+  "imBind": {
+    "title": "在 IM 上继续",
+    "description": "选择要绑定的即时通讯渠道，微信与 QQ 可同时绑定。",
+    "wechat": "微信",
+    "wechatDesc": "扫码绑定，在微信里继续这个对话",
+    "qq": "QQ",
+    "qqDesc": "填入 QQ 机器人的 AppID / AppSecret 绑定",
+    "back": "返回"
+  },
+  "qqBind": {
+    "title": "绑定 QQ",
+    "description": "填入你在 QQ 开放平台创建的机器人 AppID 与 AppSecret。绑定后在 QQ 里私聊机器人即可继续这个对话。",
+    "createBotGuide": "前往 QQ 开放平台创建机器人并获取凭证",
+    "appIdPlaceholder": "例如 102345678",
+    "appSecretPlaceholder": "机器人的 AppSecret",
+    "missingCredentials": "请填写 AppID 和 AppSecret",
+    "submit": "验证并绑定",
+    "submitting": "正在验证凭证...",
+    "success": "绑定成功",
+    "successDesc": "你已成功绑定 QQ 机器人，现在可以在 QQ 里私聊机器人继续对话了。",
+    "alreadyBound": "已绑定 QQ 机器人",
+    "boundToOtherConv": "该 QQ 绑定当前指向其他会话，转移后消息将路由到当前会话。",
+    "rebindHere": "绑定到此会话",
+    "rebindTitle": "重新绑定到此会话",
+    "rebindConfirm": "确定要将 QQ 绑定转移到当前会话吗？",
+    "changeCredentials": "更换凭证",
+    "unbind": "解除绑定",
+    "unbindConfirm": "确定要解除 QQ 绑定吗？机器人连接将被断开。",
+    "notConnected": "机器人连接未就绪，新消息到达后会自动重连。"
   },
   "oauthRegister": {
     "title": "完成注册",

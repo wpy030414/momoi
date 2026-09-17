@@ -3,12 +3,14 @@ import { useTranslation } from 'react-i18next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { api } from '../../lib/api'
-import { Smartphone, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Smartphone, Loader2, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react'
 
-interface WechatBindDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+interface WechatBindPanelProps {
   convId: string
+  /** 返回渠道选择页（ImBindDialog 提供） */
+  onBack?: () => void
+  /** 绑定流程完成（含 3s 成功展示后由本组件触发） */
+  onComplete?: () => void
 }
 
 type BindState =
@@ -19,7 +21,7 @@ type BindState =
   | { phase: 'expired' }
   | { phase: 'error'; message: string }
 
-export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialogProps) {
+export function WechatBindPanel({ convId, onBack, onComplete }: WechatBindPanelProps) {
   const { t } = useTranslation()
   const [state, setState] = useState<BindState>({ phase: 'loading' })
   const [unbindConfirmOpen, setUnbindConfirmOpen] = useState(false)
@@ -93,13 +95,9 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
   }, [startBind, t])
 
   useEffect(() => {
-    if (open) {
-      startBind()
-    } else {
-      clearPoll()
-    }
+    startBind()
     return () => clearPoll()
-  }, [open, startBind, clearPoll])
+  }, [startBind, clearPoll])
 
   useEffect(() => {
     if (state.phase !== 'showing_qr') return
@@ -115,10 +113,10 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
 
   useEffect(() => {
     if (state.phase === 'confirmed') {
-      const t = setTimeout(() => onOpenChange(false), 3000)
+      const t = setTimeout(() => onComplete?.(), 3000)
       return () => clearTimeout(t)
     }
-  }, [state.phase, onOpenChange])
+  }, [state.phase, onComplete])
 
   const renderContent = () => {
     switch (state.phase) {
@@ -230,19 +228,18 @@ export function WechatBindDialog({ open, onOpenChange, convId }: WechatBindDialo
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{t('wechatBind.title')}</DialogTitle>
-            <DialogDescription>
-              {state.phase !== 'showing_qr' && state.phase !== 'confirmed'
-                ? t('wechatBind.description')
-                : undefined}
-            </DialogDescription>
-          </DialogHeader>
-          {renderContent()}
-        </DialogContent>
-      </Dialog>
+      {onBack && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute left-4 top-4 h-7 w-7 p-0"
+          onClick={onBack}
+          aria-label={t('imBind.back')}
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+      )}
+      {renderContent()}
 
       <Dialog open={unbindConfirmOpen} onOpenChange={(open) => { if (!open) setUnbindConfirmOpen(false) }}>
         <DialogContent className="max-w-xs">

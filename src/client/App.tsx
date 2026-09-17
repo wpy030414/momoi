@@ -8,7 +8,7 @@ import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
 import { LinkedAccountsDialog } from './components/settings/LinkedAccountsDialog'
-import { WechatBindDialog } from './components/chat/WechatBindDialog'
+import { ImBindDialog } from './components/chat/ImBindDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
 // Admin tab components — lazy loaded (only admins see them)
@@ -53,8 +53,8 @@ export function App() {
   const [changePinOpen, setChangePinOpen] = useState(false)
   const [changeUsernameOpen, setChangeUsernameOpen] = useState(false)
   const [linkedAccountsOpen, setLinkedAccountsOpen] = useState(false)
-  const [wechatBindOpen, setWechatBindOpen] = useState(false)
-  const [wechatBindConvId, setWechatBindConvId] = useState<string | null>(null)
+  const [imBindOpen, setImBindOpen] = useState(false)
+  const [imBindConvId, setImBindConvId] = useState<string | null>(null)
   const [oauthRegisterInfo, setOauthRegisterInfo] = useState<{ providerId: string; providerUserId: string } | null>(null)
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
@@ -180,9 +180,9 @@ export function App() {
     setDeleteConvTitle(conv?.title || '')
   }
 
-  const handleContinueOnWechat = (convId: string) => {
-    setWechatBindConvId(convId)
-    setWechatBindOpen(true)
+  const handleContinueOnIm = (convId: string) => {
+    setImBindConvId(convId)
+    setImBindOpen(true)
   }
 
   const confirmDeleteConversation = async () => {
@@ -500,7 +500,7 @@ export function App() {
             onDelete={handleDeleteConversation}
             onExport={chat.exportConversation}
             onManageGroupAgents={handleManageGroupAgents}
-            onContinueOnWechat={handleContinueOnWechat}
+            onContinueOnIm={handleContinueOnIm}
             appName={appName}
             currentUser={currentUser}
             showGithub={showGithub}
@@ -665,14 +665,14 @@ export function App() {
         onOpenChange={setLinkedAccountsOpen}
       />
 
-      {/* WeChat Bind Dialog */}
-      <WechatBindDialog
-        open={wechatBindOpen}
+      {/* IM Bind Dialog (WeChat / QQ channel selection) */}
+      <ImBindDialog
+        open={imBindOpen}
         onOpenChange={(open) => {
-          setWechatBindOpen(open)
-          if (!open) setWechatBindConvId(null)
+          setImBindOpen(open)
+          if (!open) setImBindConvId(null)
         }}
-        convId={wechatBindConvId || ''}
+        convId={imBindConvId || ''}
       />
 
       {/* Group Chat Agent Selection Dialog */}

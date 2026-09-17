@@ -361,4 +361,22 @@ export const api = {
       '/api/wechat/bind',
       { method: 'DELETE' }
     ),
+
+  // QQ binding
+  qqBindInfo: () =>
+    request<{ bound: boolean; app_id?: string; bound_at?: number; conversation_id?: string; status?: 'connected' | 'error'; error?: string; ws_connected?: boolean }>(
+      '/api/qq/bind'
+    ),
+
+  qqBindStart: (convId?: string, appId?: string, appSecret?: string) =>
+    request<{ success: boolean }>(
+      '/api/qq/bind',
+      { method: 'POST', body: JSON.stringify({ conv_id: convId || '', app_id: appId || '', app_secret: appSecret || '' }) }
+    ),
+
+  qqUnbind: () =>
+    request<{ success: boolean }>(
+      '/api/qq/bind',
+      { method: 'DELETE' }
+    ),
 }
