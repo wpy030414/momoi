@@ -339,7 +339,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
             <Pencil className="h-3.5 w-3.5" />
             {t('sidebar.rename')}
           </button>
-          {(conversations.find((c) => c.id === menu.convId) as any)?.type === 'group' && onManageGroupAgents && (
+          {(conversations.find((c) => c.id === menu.convId) as any)?.type === 'group' && !(conversations.find((c) => c.id === menu.convId) as any)?.qq_bound && onManageGroupAgents && (
             <button
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
               onClick={() => { onManageGroupAgents(menu.convId); closeMenu() }}

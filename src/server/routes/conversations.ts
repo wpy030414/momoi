@@ -218,6 +218,7 @@ conversationsRoute.post('/merge', async (c) => {
 
   // 1. Verify all source conversations exist, belong to user, are group type, not deleted
   const sources: typeof conversations.$inferSelect[] = []
+  const isQqSource = new Map<string, boolean>()
   for (const sid of sourceIds) {
     const s = await db.select().from(conversations)
       .where(and(eq(conversations.id, sid), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
@@ -225,6 +226,16 @@ conversationsRoute.post('/merge', async (c) => {
     if (!s) return c.json({ error: `会话 ${sid} 不存在` }, 404)
     if ((s as any).type !== 'group') return c.json({ error: `会话 ${sid} 不是群聊` }, 400)
     sources.push(s)
+    const qqRow = await db.select().from(qqGroupConversations)
+      .where(eq(qqGroupConversations.conversation_id, sid)).get()
+    isQqSource.set(sid, !!qqRow)
+  }
+
+  // 同质性检查：不能混合 QQ 群聊和普通群聊
+  const hasQq = [...isQqSource.values()].some(v => v)
+  const hasNonQq = [...isQqSource.values()].some(v => !v)
+  if (hasQq && hasNonQq) {
+    return c.json({ error: '不能混合 QQ 群聊和普通群聊' }, 400)
   }
 
   // 2. Create new conversation C

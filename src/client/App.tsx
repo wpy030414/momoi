@@ -497,6 +497,9 @@ export function App() {
   // 当前会话的 Agent（单聊气泡标签/头像优先用它，而非下拉选择）
   const activeAgentId = chat.conversations.find((c) => c.id === chat.activeId)?.agent_id || null
 
+  // 合并群聊：源会话是否为 QQ 群聊（用于过滤候选列表）
+  const mergeSourceIsQq = (chat.conversations.find((c: any) => c.id === mergeSourceId) as any)?.qq_bound === 1
+
   return (
     <div className="flex h-full overflow-hidden bg-background relative">
       {/* Sidebar */}
@@ -877,7 +880,7 @@ export function App() {
           </DialogHeader>
           <div className="max-h-64 space-y-1 overflow-y-auto">
             {chat.conversations
-              .filter((c: any) => c.type === 'group' && c.id !== mergeSourceId)
+              .filter((c: any) => c.type === 'group' && c.id !== mergeSourceId && (c.qq_bound === 1 ? mergeSourceIsQq : !mergeSourceIsQq))
               .map((c: any) => (
                 <label
                   key={c.id}
@@ -896,7 +899,7 @@ export function App() {
                 </label>
               ))
             }
-            {chat.conversations.filter((c: any) => c.type === 'group' && c.id !== mergeSourceId).length === 0 && (
+            {chat.conversations.filter((c: any) => c.type === 'group' && c.id !== mergeSourceId && (c.qq_bound === 1 ? mergeSourceIsQq : !mergeSourceIsQq)).length === 0 && (
               <p className="text-sm text-muted-foreground py-2 text-center">
                 {t('sidebar.mergeNoTargets')}
               </p>
