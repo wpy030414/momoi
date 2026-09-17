@@ -1086,7 +1086,7 @@
 
 1. **手写最小协议客户端，不集成 `@tencent-connect/qqbot-nodejs` SDK**：`src/server/qq/{api,gateway,manager,chat}.ts` 平行于 `src/server/wechat/` 实现，协议事实逆向自 SDK v1.0.4 源码（token / C2C 发送 / stream_messages / WS 网关）。唯一新增依赖 `ws`（已在依赖树中，经 `@hono/node-ws` 传递）。
 2. **无认领模型**：QQ 个人机器人未发布态只有创建者本人能私聊（1 用户 : 1 机器人 : 1 会话），发送者必然是用户本人——不存储、不校验 openid 归属。
-3. **C2C 流式回复 + 降级**：AI 回复经 `stream_messages` 以打字机效果呈现（replace 全量帧、800ms 节流、频控退避、suggestions 围栏截断）；流式链路故障降级 `sendText` 分片（>4000 字符），最终失败写 system 消息。
+3. **C2C 单次发送（2026-09-17 更新：放弃流式）**：AI 回复最初通过 `stream_messages` 流式回显，后统一改为 `sendC2CText` / `sendGroupText` 单次发送——删除了整个 `QqStreamSender` 类（~130 行）+ `sendStreamFrame` + `isQqRateLimitError` + `QqStreamFrameRequest`。C2C 与群聊行为一致：`sendTextWithRetry`（3 次退避 + >4000 字符自动分片）
 4. **凭证保留式解绑**：软删会话仅清 `qq_bindings.conversation_id`，保留凭证与连接（AppSecret 遗失需重新生成，成本远高于微信重扫码）；显式解绑才删行断连。
 5. **跨渠道共享用户锁**：抽取 `src/server/im/locks.ts`（原 wechat/chat.ts 与 routes/wechat.ts 各一份的重复实现），微信与 QQ 消息处理共用裸 userId 锁——双渠道绑同一会话时 AI 调用串行，防历史交叉。
 6. **状态落库阈值**：DB `status='error'` 仅由凭证校验失败 / 启动失败 / 致命关闭码（4914/4915）触发；瞬时 WS 错误仅日志 + 自动重连（退避 [1s..60s]、快断保护），防状态抖动。
@@ -1109,4 +1109,40 @@
 **影响**：
 - 新增：`src/server/qq/{api,gateway,manager,chat}.ts`、`src/server/im/locks.ts`、`src/server/routes/qq.ts`、`qq_bindings` 表、`ImBindDialog.tsx`、`QqBindPanel.tsx`
 - 重构：`WechatBindDialog` → `WechatBindPanel`（去 Dialog 壳）、wechat 侧锁实现改用共享模块、侧栏入口改「在 IM 上继续」
-- 契约：`docs/specs/module-qq.md`
+- 后续变更（2026-09-17）：D45——QQ 群聊支持与 C2C 放弃流式
+
+---
+
+## D45：QQ 群聊支持（opt-in + 单 Agent 对多真人 + 放弃流式统一单次发送）
+
+**日期**：2026-09-17
+
+**背景**：QQ 渠道（D44）仅支持 C2C 私聊，群聊 @机器人 事件被静默忽略。主人在群里 @机器人 发现没反应后要求支持群聊（方案 B —— 每群独立群组会话，单 Agent 面对多真人）。同时决定 C2C 私聊也放弃流式，统一走单次发送。
+
+**决策**：
+
+1. **Opt-in 群聊**：`qqBindings` 新增 `group_enabled` (boolean, default false)。Gateway 的事件订阅（`INTENT_GROUP_AND_C2C`）不变——群事件始终到达，但仅在 `group_enabled` 开启时处理。绑定时或绑定后可在面板 toggle，即时生效无需重启连接。
+2. **独立路由表**：新建 `qq_group_conversations(app_id, group_openid, conversation_id)` 表，映射 QQ 群 → Momoi 群组会话。复合主键 `(app_id, group_openid)` 保证每群至多一个会话。C2C 私聊路由（`qqBindings.conversation_id`）与群聊路由完全隔离。
+3. **懒创建群组会话**：首次收到群消息时自动创建 `type:'group'` 会话（标题「QQ群聊」）+ 注册默认 Agent 为唯一成员 + 写入 `qq_group_conversations` 映射。会话归属用户（非独立实体）——群成员发言均以该用户的群组会话为存储载体。
+4. **单 Agent 模式**：不走 `orchestrateGroupChat`（Web UI 的多 Agent 串行编排器 + 中立 Agent 裁决 + @mention 链），直接 `runPiAgentLoop({ isGroup: true, isQqGroup: true })`。只有一个 AI Agent 面对多个 QQ 群成员，无 Agent 间交互需求。
+5. **消息格式 `[昵称]: 内容`**：与 Web 端群聊中 Agent 间消息格式一致，AI 通过系统提示词（`isQqGroup` 规则块）区分不同群成员。
+6. **C2C 与群聊统一单次发送**：删除 `QqStreamSender` 类（~130 行）+ `sendStreamFrame` + `isQqRateLimitError` + `QqStreamFrameRequest`。C2C 回发从 `streamer.complete() → 降级 sendTextWithRetry` 简化为直接 `sendTextWithRetry`。群聊用 `sendGroupTextWithRetry`（`POST /v2/groups/{group_openid}/messages`，无流式 API）。
+7. **去 group 类型 guard**：`POST /api/qq/bind` 不再拒绝 `conv.type === 'group'`——群聊路由走独立表，C2C 路由到 group 类型会话也没有理由被禁止。
+
+**原因**：
+- 群聊 opt-in：大部分用户只想要私聊，群聊是风险更高的场景（群成员都可能 @机器人），默认关闭更安全
+- 独立路由表：一对多关系（一个机器人 → 多个 QQ 群）天然不适合扩展单主键 `qqBindings` 表；软删自愈（映射指向已软删会话 → 自动重建）比硬编码更从容
+- 不走编排器：`orchestrateGroupChat` 面向 Web UI 多 Agent 场景（中立 Agent 决定发言顺序、Agent 间 at_mention 工具、SSE 广播），QQ 群聊是单 Agent 对多真人——`runPiAgentLoop` 直调即可
+- 放弃流式：① 群消息不支持流式 API；② C2C 也统一后回发路径一致（`sendTextWithRetry` / `sendGroupTextWithRetry`），代码大幅简化，删除约 160 行
+
+**备选与权衡**：
+- ❌ 扩展 `qqBindings` 表加 `group_openid` 列：单机器人只能绑一个群（违反一对多现实）
+- ❌ 走 `orchestrateGroupChat`：编排器强依赖 SSE send 回调 + 中立 Agent 模型调用 + Agent 间状态机——QQ 群无需这些，引入只会增加复杂度和延迟
+- ❌ 群名自动获取：网关事件不含群名，需额外 API 查询，首版不引入
+- ⚠️ 群消息被动回窗口仅 5 分钟（C2C 是 60 分钟）：`sendGroupTextWithRetry` 在彻底失败前尝试不带 `msg_id` 的主动推送
+
+**影响**：
+- 新增：`qq_group_conversations` 表（双方言迁移）、`sendGroupText`（api.ts）、`handleQqGroupMessage` / `resolveGroupConversation` / `sendGroupTextWithRetry`（chat.ts）、`onGroupMessage` 回调（gateway.ts / manager.ts）、`isQqGroup` 系统提示词块（pi-adapter.ts）、group_enabled toggle（QqBindPanel + i18n 三语）
+- 删除：`QqStreamSender` 类、`sendStreamFrame`、`isQqRateLimitError`、`QqStreamFrameRequest`、`SUGGESTIONS_FENCE` 引用（chat.ts）
+- 简化：`handleQqMessageInner` 回发链路（streamer.complete → 降级 → 直接 sendTextWithRetry）
+- 更新：`docs/specs/module-qq.md`（数据模型/消息流程/行为约束/验收标准/协议附录）
