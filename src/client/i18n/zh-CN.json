@@ -51,6 +51,7 @@
     "roleTool": "工具",
     "roleAssistant": "助手",
     "exportDefaultTitle": "对话",
+    "qqGroupReadonly": "此会话仅接收来自QQ群聊的消息，无法在此处发送",
     "askUser": {
       "skip": "跳过",
       "submit": "提交",

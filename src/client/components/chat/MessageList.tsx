@@ -36,9 +36,18 @@ interface MessageListProps {
   agentVoiceMap?: Map<string, boolean>
   /** Show thinking details in messages */
   verbose?: boolean
+  /** QQ group: single-agent group where users are real humans → show sender labels */
+  isQqGroup?: boolean
 }
 
-export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose }: MessageListProps) {
+/** Parse `[senderName]: rest` from user messages in QQ groups. Returns null if no match. */
+function parseQqSender(content: string): { senderName: string; cleanContent: string } | null {
+  const m = content.match(/^\[([^\]]+)\]:\s(.*)$/s)
+  if (!m) return null
+  return { senderName: m[1], cleanContent: m[2] }
+}
+
+export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose, isQqGroup }: MessageListProps) {
   // Only the last assistant message shows its suggestion chips — older ones
   // were for a past turn and are meaningless as "what to ask next".
   const lastAssistantIdx = [...messages]
@@ -50,9 +59,20 @@ export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, age
   return (
     <div className="space-y-2 max-w-3xl mx-auto">
       {messages.map((msg, idx) => {
+        // QQ group: parse [senderName]: content for user messages
+        let displayContent = msg.content
+        let senderName: string | undefined
+        if (isQqGroup && msg.role === 'user') {
+          const parsed = parseQqSender(msg.content)
+          if (parsed) {
+            senderName = parsed.senderName
+            displayContent = parsed.cleanContent
+          }
+        }
+
         // Resolve agent avatar for group messages
         let msgAgentAvatar = agentAvatar
-        let msgAgentName: string | undefined
+        let msgAgentName: string | undefined = senderName
         let msgVoiceEnabled = agentVoiceEnabled ?? false
         let msgAgentId: string | undefined
         if (agents && msg.agent_id) {
@@ -75,7 +95,7 @@ export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, age
         return (
           <MessageBubble
             key={msg.id || idx}
-            message={msg}
+            message={{ ...msg, content: displayContent }}
             onSuggestion={onSuggestion}
             showSuggestions={idx === lastAssistantIdxFromEnd}
             onRevert={msg.role === 'user' ? () => onRevert?.(idx) : undefined}

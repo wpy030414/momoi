@@ -51,6 +51,7 @@
     "roleTool": "ツール",
     "roleAssistant": "アシスタント",
     "exportDefaultTitle": "会話",
+    "qqGroupReadonly": "この会話はQQグループチャットからのメッセージのみを受信します。ここから送信できません",
     "askUser": {
       "skip": "スキップ",
       "submit": "送信",

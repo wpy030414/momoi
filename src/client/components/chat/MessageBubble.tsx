@@ -61,9 +61,9 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
       <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-row-reverse gap-2' : ''}`}>
         {/* Content column */}
         <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
-          {/* Agent name label for group chat */}
-          {!isUser && agentName && (
-            <div className="text-xs text-muted-foreground mb-1 ml-1">{agentName}</div>
+          {/* Sender/agent name label — assistant in group chat, or user in QQ group */}
+          {agentName && (
+            <div className={`text-xs text-muted-foreground mb-1 ${isUser ? 'mr-1' : 'ml-1'}`}>{agentName}</div>
           )}
 
           {/* Trace-driven rendering: thinking + text + tool calls in chronological order.

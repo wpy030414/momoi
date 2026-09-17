@@ -51,6 +51,7 @@
     "roleTool": "Tool",
     "roleAssistant": "Assistant",
     "exportDefaultTitle": "conversation",
+    "qqGroupReadonly": "This conversation receives messages from QQ group chat only — sending is disabled",
     "askUser": {
       "skip": "Skip",
       "submit": "Submit",

@@ -87,6 +87,8 @@ export function ChatPanel({
   const hasMessages = messages.length > 0
   const hasAgents = agents && agents.length > 0
   const noAgents = !isGroup && !agentsLoading && !hasAgents
+  // QQ 群聊：单 Agent 群组（非 Web 端多 Agent 群聊）—— 只读，隐藏输入栏
+  const isQqGroup = isGroup && groupAgents && groupAgents.length <= 1
   // 单聊气泡归属的 Agent：优先当前会话的 Agent（历史消息都来自它），否则回退到下拉选择
   const directAgent = isGroup
     ? undefined
@@ -254,6 +256,7 @@ export function ChatPanel({
             agentVoiceEnabled={isGroup ? false : directAgentVoiceEnabled}
             agentVoiceMap={agentVoiceMap}
             verbose={verbose}
+            isQqGroup={isQqGroup}
           />
         )}
       </div>
@@ -267,8 +270,8 @@ export function ChatPanel({
         />
       )}
 
-      {/* Input area */}
-      {hasMessages && (
+      {/* Input area — hidden in QQ group (read-only: messages only come from QQ) */}
+      {hasMessages && !isQqGroup && (
         <div className="relative z-10">
           <InputBar
             onSend={handleSend}
@@ -286,6 +289,11 @@ export function ChatPanel({
             conversationId={conversationId}
             onEnsureConversation={onEnsureConversation}
           />
+        </div>
+      )}
+      {hasMessages && isQqGroup && (
+        <div className="text-center text-xs text-muted-foreground py-2 border-t">
+          {t('chat.qqGroupReadonly')}
         </div>
       )}
     </div>
