@@ -23,6 +23,7 @@ import { voiceRoute } from './routes/voice.js'
 import { wechatRoute } from './routes/wechat.js'
 import { qqRoute } from './routes/qq.js'
 import { eventsRoute } from './routes/events.js'
+import { docsRoute } from './routes/docs.js'
 import { serveClient } from './static.js'
 import { startWechatPoller } from './wechat/poller.js'
 import { initQqBots } from './qq/manager.js'
@@ -52,6 +53,7 @@ app.route('/api/voice', voiceRoute)
 app.route('/api/wechat', wechatRoute)
 app.route('/api/qq', qqRoute)
 app.route('/api/events', eventsRoute)
+app.route('/api/docs', docsRoute)
 
 // Static files — production only (dev mode uses Vite proxy)
 if (process.env.NODE_ENV === 'production') {

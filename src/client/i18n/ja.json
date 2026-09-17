@@ -85,7 +85,12 @@
     "theme": "テーマ",
     "themeLight": "ライト",
     "themeDark": "ダーク",
+    "docs": "ドキュメント",
     "adminSettings": "管理"
+  },
+  "docs": {
+    "title": "ドキュメント",
+    "empty": "ドキュメントがありません"
   },
   "settings": {
     "title": "管理",

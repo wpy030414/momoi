@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
-import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge } from 'lucide-react'
+import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen } from 'lucide-react'
 import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation } from '@/shared/types'
@@ -32,6 +32,7 @@ interface SidebarProps {
   theme?: Theme
   onThemeChange?: (theme: Theme) => void
   onAdminSettings?: () => void
+  onDocs?: () => void
 }
 
 interface MenuState {
@@ -107,7 +108,7 @@ function ConversationTitle({ title }: { title: string }) {
   )
 }
 
-export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings }: SidebarProps) {
+export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs }: SidebarProps) {
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -517,6 +518,16 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
             </div>
           </div>
 
+          {/* Docs */}
+          {onDocs && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors mt-1"
+              onClick={() => { closeAllPopovers(); onDocs() }}
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              {t('menu.docs')}
+            </button>
+          )}
           {/* Admin settings */}
           {onAdminSettings && (
             <button

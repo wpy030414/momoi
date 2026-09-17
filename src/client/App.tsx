@@ -4,6 +4,9 @@ import { useGroupChat } from './hooks/useGroupChat'
 import { useTheme } from './hooks/useTheme'
 import { Sidebar } from './components/sidebar/Sidebar'
 import { AdminSidebar, ADMIN_TABS } from './components/admin/AdminSidebar'
+import { DocsSidebar } from './components/docs/DocsSidebar'
+import type { DocEntry } from './components/docs/DocsSidebar'
+import { DocsViewer } from './components/docs/DocsViewer'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
@@ -36,6 +39,10 @@ export function App() {
   const chat = useGroupChat()
   const { theme, setTheme } = useTheme()
   const [adminViewOpen, setAdminViewOpen] = useState(false)
+  // Docs view state
+  const [docsViewOpen, setDocsViewOpen] = useState(false)
+  const [docsEntries, setDocsEntries] = useState<DocEntry[]>([])
+  const [activeDoc, setActiveDoc] = useState<string | null>(null)
   const [verbose, setVerbose] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('momoi_verbose') === 'true'
@@ -447,6 +454,35 @@ export function App() {
     }
   }
 
+  const handleDocs = () => {
+    // Fetch doc list on first open (cache it for the session)
+    if (docsEntries.length === 0) {
+      api.get<DocEntry[]>('/api/docs').then((r) => {
+        setDocsEntries(r)
+        const firstDoc = r[0]?.path ?? null
+        setActiveDoc(firstDoc)
+        history.pushState(null, '', firstDoc ? `#/docs/${encodeURIComponent(firstDoc)}` : '#/docs')
+      }).catch(() => {})
+    } else {
+      history.pushState(null, '', activeDoc ? `#/docs/${encodeURIComponent(activeDoc)}` : '#/docs')
+    }
+    setTimeout(() => {
+      setDocsViewOpen(true)
+    }, 100)
+  }
+
+  const handleSelectDoc = (path: string) => {
+    setActiveDoc(path)
+    history.pushState(null, '', `#/docs/${encodeURIComponent(path)}`)
+  }
+
+  const closeDocsView = () => {
+    setDocsViewOpen(false)
+    if (window.location.hash.startsWith('#/docs')) {
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }
+
   // Route guard: #/settings/{tab} only opens for admins (mount + browser back/forward).
   // Anyone else typing the path is bounced back home.
   useEffect(() => {
@@ -474,6 +510,37 @@ export function App() {
     window.addEventListener('hashchange', syncAdminRoute)
     return () => window.removeEventListener('hashchange', syncAdminRoute)
   }, [isAdminUser])
+
+  // Route guard: #/docs/{path} — syncs docs view from hash
+  useEffect(() => {
+    const leaveDocsRoute = () => {
+      setDocsViewOpen(false)
+      if (window.location.hash.startsWith('#/docs')) {
+        history.replaceState(null, '', window.location.pathname + window.location.search)
+      }
+    }
+    const ensureDocsLoaded = () => {
+      if (docsEntries.length === 0) {
+        api.get<DocEntry[]>('/api/docs').then((r) => {
+          setDocsEntries(r)
+        }).catch(() => {})
+      }
+    }
+    const syncDocsRoute = () => {
+      const match = window.location.hash.match(/^#\/docs(?:\/(.+))?$/)
+      if (match) {
+        const docPath = match[1] ? decodeURIComponent(match[1]) : null
+        ensureDocsLoaded()
+        setDocsViewOpen(true)
+        setActiveDoc((prev) => docPath || (docsEntries[0]?.path ?? null))
+      } else {
+        setDocsViewOpen(false)
+      }
+    }
+    syncDocsRoute()
+    window.addEventListener('hashchange', syncDocsRoute)
+    return () => window.removeEventListener('hashchange', syncDocsRoute)
+  }, [docsEntries.length])
 
   // Show OAuth2 registration screen for new OAuth users
   if (oauthRegisterInfo) {
@@ -514,12 +581,19 @@ export function App() {
           ? `absolute inset-y-0 left-0 z-50 w-72 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
           : `relative ${sidebarOpen ? 'w-72' : 'w-0 border-r-0'}`}
       `}>
-        {/* Sidebar — admin mode: management nav; otherwise: conversations */}
+        {/* Sidebar — admin mode: management nav; docs mode: doc tree; otherwise: conversations */}
         {adminViewOpen ? (
           <AdminSidebar
             activeTab={adminTab}
             onTabChange={handleAdminTabChange}
             onBack={closeAdminView}
+          />
+        ) : docsViewOpen ? (
+          <DocsSidebar
+            docs={docsEntries}
+            activeDoc={activeDoc}
+            onSelect={handleSelectDoc}
+            onBack={closeDocsView}
           />
         ) : (
           <Sidebar
@@ -546,6 +620,7 @@ export function App() {
             theme={theme}
             onThemeChange={setTheme}
             onAdminSettings={isAdminUser ? handleAdminSettings : undefined}
+            onDocs={handleDocs}
           />
         )}
       </div>
@@ -558,7 +633,7 @@ export function App() {
         />
       )}
 
-      {/* Main area — admin mode: management content; otherwise: chat */}
+      {/* Main area — admin mode: management content; docs mode: doc viewer; otherwise: chat */}
         {adminViewOpen ? (
           <div className="flex-1 flex flex-col min-w-0">
             {/* Top bar — same height as AdminSidebar header, holds toggle + actions */}
@@ -610,6 +685,10 @@ export function App() {
               </Suspense>
             </div>
           </div>
+        ) : docsViewOpen ? (
+          <DocsViewer
+            docPath={activeDoc}
+          />
         ) : (
           <div className="flex-1 flex flex-col min-w-0 relative">
             {/* Top bar — gradient background, bottom aligned with sidebar top-bar */}

@@ -85,7 +85,12 @@
     "theme": "Theme",
     "themeLight": "Light",
     "themeDark": "Dark",
+    "docs": "Docs",
     "adminSettings": "Admin"
+  },
+  "docs": {
+    "title": "Docs",
+    "empty": "No documents"
   },
   "settings": {
     "title": "Admin",

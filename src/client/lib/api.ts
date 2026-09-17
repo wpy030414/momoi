@@ -195,6 +195,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // Generic GET helper
+  get: <T>(path: string) => request<T>(path),
   // User Auth
   getUserStatus: (username: string) => request<{ has_pin: boolean; direct_registration_open: boolean; oauth_registration_open: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
     headers: { 'X-User': encodeURIComponent(username) }

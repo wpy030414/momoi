@@ -85,7 +85,12 @@
     "theme": "主题",
     "themeLight": "浅色",
     "themeDark": "深色",
+    "docs": "文档",
     "adminSettings": "后台管理"
+  },
+  "docs": {
+    "title": "文档",
+    "empty": "暂无文档"
   },
   "settings": {
     "title": "后台管理",
