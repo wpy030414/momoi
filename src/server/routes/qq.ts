@@ -25,6 +25,7 @@ qqRoute.get('/bind', userAuthMiddleware, async (c) => {
     conversation_id: binding.conversation_id || undefined,
     status: binding.status,
     error: binding.error || undefined,
+    group_enabled: binding.group_enabled === true,
     // 运行时连接健康态（内存）；DB 是绑定的权威，服务重启后 WS 态自动重建
     ws_connected: isBotReady(userId),
   })
@@ -35,10 +36,11 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
   const userId = (c as any).get('userId') as string
   const body = await c.req.json().catch(() => ({})) as {
     conv_id?: string; app_id?: string; app_secret?: string
+    group_enabled?: boolean
   }
 
-  // If a target conversation is specified, verify it belongs to this user,
-  // is not soft-deleted, and is a direct (non-group) conversation.
+  // If a target conversation is specified, verify it belongs to this user
+  // and is not soft-deleted.
   let targetConvId = (body.conv_id || '').trim()
   if (targetConvId) {
     const conv = await db.select().from(conversations)
@@ -49,9 +51,6 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
       )).get()
     if (!conv) {
       return c.json({ error: 'Conversation not found' }, 404)
-    }
-    if (conv.type === 'group') {
-      return c.json({ error: 'Group conversations cannot be bound to QQ' }, 400)
     }
   }
 
@@ -85,6 +84,7 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
           app_id: appId,
           app_secret: appSecret,
           conversation_id: targetConvId || existing.conversation_id || '',
+          group_enabled: typeof body.group_enabled === 'boolean' ? (body.group_enabled ? 1 : 0) : (existing.group_enabled ? 1 : 0),
           status: 'connected',
           error: '',
           created_at: now,
@@ -96,6 +96,7 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
           app_id: appId,
           app_secret: appSecret,
           conversation_id: targetConvId,
+          group_enabled: body.group_enabled === true ? 1 : 0,
           status: 'connected',
           error: '',
           created_at: now,
@@ -108,12 +109,20 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
       return c.json({ success: true })
     }
 
-    // 无凭证：已有绑定时仅更新路由目标（换绑会话，无需动连接）
+    // 无凭证：已有绑定时仅更新路由目标或 group_enabled toggle
     if (!existing) {
       return c.json({ error: '缺少 AppID/AppSecret 且不存在已有绑定' }, 400)
     }
+    // 仅 toggle group_enabled（无 conv_id 也无凭证）—— 即时生效无需重启连接
     if (!targetConvId) {
-      return c.json({ error: '缺少 conv_id' }, 400)
+      if (typeof body.group_enabled !== 'boolean') {
+        return c.json({ error: '缺少 conv_id' }, 400)
+      }
+      await db.update(qqBindings).set({
+        group_enabled: body.group_enabled ? 1 : 0,
+        updated_at: now,
+      }).where(eq(qqBindings.user_id, userId)).run()
+      return c.json({ success: true })
     }
     await db.update(qqBindings).set({
       conversation_id: targetConvId,
