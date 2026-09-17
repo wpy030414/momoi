@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog'
 import { WechatBindPanel } from './WechatBindPanel'
 import { QqBindPanel } from './QqBindPanel'
-import { Smartphone, MessageCircle } from 'lucide-react'
 
 interface ImBindDialogProps {
   open: boolean
@@ -50,26 +49,18 @@ export function ImBindDialog({ open, onOpenChange, convId }: ImBindDialogProps) 
         </DialogHeader>
 
         {channel === 'select' && (
-          <div className="flex flex-col gap-3 py-2">
+          <div className="flex flex-col gap-2 py-2">
             <button
-              className="flex items-center gap-3 rounded-lg border p-4 text-left transition-colors hover:bg-accent/60"
+              className="flex items-center rounded-lg border px-4 py-3 text-left font-medium transition-colors hover:bg-accent/60"
               onClick={() => setChannel('wechat')}
             >
-              <Smartphone className="h-8 w-8 shrink-0 text-green-600 dark:text-green-400" />
-              <span className="flex flex-col">
-                <span className="font-medium">{t('imBind.wechat')}</span>
-                <span className="text-sm text-muted-foreground">{t('imBind.wechatDesc')}</span>
-              </span>
+              {t('imBind.wechat')}
             </button>
             <button
-              className="flex items-center gap-3 rounded-lg border p-4 text-left transition-colors hover:bg-accent/60"
+              className="flex items-center rounded-lg border px-4 py-3 text-left font-medium transition-colors hover:bg-accent/60"
               onClick={() => setChannel('qq')}
             >
-              <MessageCircle className="h-8 w-8 shrink-0 text-sky-500" />
-              <span className="flex flex-col">
-                <span className="font-medium">{t('imBind.qq')}</span>
-                <span className="text-sm text-muted-foreground">{t('imBind.qqDesc')}</span>
-              </span>
+              {t('imBind.qq')}
             </button>
           </div>
         )}

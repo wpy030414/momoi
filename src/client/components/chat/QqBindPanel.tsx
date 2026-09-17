@@ -122,7 +122,7 @@ export function QqBindPanel({ convId, onBack, onComplete }: QqBindPanelProps) {
           <div className="flex flex-col gap-4 py-2">
             <p className="text-sm text-muted-foreground">{t('qqBind.description')}</p>
             <a
-              href="https://q.qq.com/"
+              href="https://q.qq.com/qqbot/openclaw/index.html"
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
