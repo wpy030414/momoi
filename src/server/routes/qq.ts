@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { db, conversations, qqBindings } from '../db.js'
+import { db, conversations, qqBindings, qqGroupConversations } from '../db.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { withNamedLock } from '../im/locks.js'
@@ -136,6 +136,13 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
 qqRoute.delete('/bind', userAuthMiddleware, async (c) => {
   const userId = (c as any).get('userId') as string
   stopBotForUser(userId)
+  // Clean up group conversation mappings tied to this user's app_id
+  const binding = await db.select().from(qqBindings)
+    .where(eq(qqBindings.user_id, userId)).get()
+  if (binding?.app_id) {
+    await db.delete(qqGroupConversations)
+      .where(eq(qqGroupConversations.app_id, binding.app_id)).run()
+  }
   await db.delete(qqBindings).where(eq(qqBindings.user_id, userId)).run()
   return c.json({ success: true })
 })

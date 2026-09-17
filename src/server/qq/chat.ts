@@ -270,7 +270,7 @@ async function sendGroupTextWithRetry(
 
 /** 为 QQ 群自动查找或创建群组会话（lazy init） */
 async function resolveGroupConversation(
-  userId: string, appId: string, groupOpenid: string,
+  userId: string, appId: string, groupOpenid: string, c2cConvId: string,
 ): Promise<string | null> {
   // 1. 已有映射且会话未软删 → 直接复用
   const existing = await db.select().from(qqGroupConversations)
@@ -291,12 +291,24 @@ async function resolveGroupConversation(
       )).run()
   }
 
-  // 2. 取默认 Agent（首个非 neutral Agent）
-  const agents = await listAgents()
-  const defaultAgent = agents.find((a) => a.id !== NEUTRAL_AGENT_ID)
-  if (!defaultAgent) {
-    console.error('[qq-group-chat] No non-neutral agent found, cannot create group conversation')
-    return null
+  // 2. 取 Agent：优先继承 C2C 锚定会话的 Agent，否则用首个非 neutral Agent
+  let agentId = ''
+  if (c2cConvId) {
+    const c2cConv = await db.select().from(conversations)
+      .where(and(eq(conversations.id, c2cConvId), sql`${conversations.deleted_at} IS NULL`))
+      .get()
+    if (c2cConv?.agent_id) {
+      agentId = c2cConv.agent_id
+    }
+  }
+  if (!agentId) {
+    const agents = await listAgents()
+    const defaultAgent = agents.find((a) => a.id !== NEUTRAL_AGENT_ID)
+    if (!defaultAgent) {
+      console.error('[qq-group-chat] No non-neutral agent found, cannot create group conversation')
+      return null
+    }
+    agentId = defaultAgent.id
   }
 
   // 3. 创建群组会话 + 成员关系 + 映射
@@ -306,14 +318,14 @@ async function resolveGroupConversation(
     id: convId,
     user_id: userId,
     title: 'QQ群聊',
-    agent_id: defaultAgent.id,
+    agent_id: agentId,
     type: 'group',
     created_at: now,
     updated_at: now,
   }).run()
   await db.insert(groupConversationAgents).values({
     conversation_id: convId,
-    agent_id: defaultAgent.id,
+    agent_id: agentId,
     sort_order: 0,
   }).run()
   await db.insert(qqGroupConversations).values({
@@ -354,8 +366,8 @@ async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void
     return
   }
 
-  // 查找或创建群组会话
-  const convId = await resolveGroupConversation(userId, appId, groupOpenid)
+  // 查找或创建群组会话（Agent 从 C2C 锚定会话继承）
+  const convId = await resolveGroupConversation(userId, appId, groupOpenid, binding.conversation_id)
   if (!convId) {
     await sendGroupText(creds, groupOpenid, { msgId, content: '创建群聊会话失败，请联系管理员。' }).catch(() => {})
     return

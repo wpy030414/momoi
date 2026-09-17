@@ -100,7 +100,7 @@ export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, age
             showSuggestions={idx === lastAssistantIdxFromEnd}
             onRevert={msg.role === 'user' ? () => onRevert?.(idx) : undefined}
             agentAvatar={msgAgentAvatar}
-            agentName={msgAgentName || msg.agent_name || fallbackAgentName}
+            agentName={msgAgentName || msg.agent_name || (msg.role === 'user' && !isQqGroup ? undefined : fallbackAgentName)}
             voiceEnabled={msgVoiceEnabled}
             activeAgentId={msgAgentId}
             verbose={verbose}
