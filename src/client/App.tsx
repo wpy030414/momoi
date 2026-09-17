@@ -123,6 +123,10 @@ export function App() {
   const [deleteConvId, setDeleteConvId] = useState<string | null>(null)
   const [deleteConvTitle, setDeleteConvTitle] = useState('')
 
+  // Merge group chats
+  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null)
+  const [mergeSelectedIds, setMergeSelectedIds] = useState<string[]>([])
+
   // Toggle infinite mode: notify server to enable/disable the loop
   const handleInfiniteModeChange = async (enabled: boolean) => {
     setInfiniteMode(enabled)
@@ -192,6 +196,29 @@ export function App() {
     await chat.deleteConversation(deleteConvId)
     setDeleteConvId(null)
     setDeleteConvTitle('')
+  }
+
+  const handleMergeConversation = (convId: string) => {
+    setMergeSourceId(convId)
+    setMergeSelectedIds([convId])
+  }
+
+  const toggleMergeSelect = (convId: string) => {
+    setMergeSelectedIds(prev =>
+      prev.includes(convId) ? prev.filter(id => id !== convId) : [...prev, convId]
+    )
+  }
+
+  const confirmMergeConversation = async () => {
+    if (!mergeSourceId || mergeSelectedIds.length < 2) return
+    try {
+      const { conversation } = await api.mergeConversations(mergeSelectedIds)
+      await chat.selectConversation(conversation.id)
+      setMergeSourceId(null)
+      setMergeSelectedIds([])
+    } catch (e) {
+      console.error('Merge failed:', e)
+    }
   }
 
   const handleLogin = (username: string, expiresAt?: number) => {
@@ -500,6 +527,7 @@ export function App() {
             onNewGroup={() => setGroupDialogOpen(true)}
             onRename={chat.renameConversation}
             onDelete={handleDeleteConversation}
+            onMerge={handleMergeConversation}
             onExport={chat.exportConversation}
             onManageGroupAgents={handleManageGroupAgents}
             onContinueOnIm={handleContinueOnIm}
@@ -626,6 +654,7 @@ export function App() {
               activeAgentId={activeAgentId}
               onAgentChange={setSelectedAgentId}
               isGroup={chat.isGroupMode}
+              isQqGroup={chat.isQqGroup}
               groupAgents={chat.groupAgents}
               onSendGroup={chat.sendGroupMessage}
               infiniteMode={infiniteMode}
@@ -832,6 +861,53 @@ export function App() {
             </Button>
             <Button variant="destructive" onClick={confirmDeleteConversation}>
               {t('sidebar.delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Merge group conversations dialog */}
+      <Dialog open={!!mergeSourceId} onOpenChange={(open) => { if (!open) { setMergeSourceId(null); setMergeSelectedIds([]) } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('sidebar.mergeGroupChat')}</DialogTitle>
+            <DialogDescription>
+              {t('sidebar.mergeSelectTarget')}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-64 space-y-1 overflow-y-auto">
+            {chat.conversations
+              .filter((c: any) => c.type === 'group' && c.id !== mergeSourceId)
+              .map((c: any) => (
+                <label
+                  key={c.id}
+                  className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5"
+                    checked={mergeSelectedIds.includes(c.id)}
+                    onChange={() => toggleMergeSelect(c.id)}
+                  />
+                  <span className="flex-1 truncate">{c.title}</span>
+                  {c.agent_count != null && (
+                    <span className="text-xs text-muted-foreground">({c.agent_count + 1})</span>
+                  )}
+                </label>
+              ))
+            }
+            {chat.conversations.filter((c: any) => c.type === 'group' && c.id !== mergeSourceId).length === 0 && (
+              <p className="text-sm text-muted-foreground py-2 text-center">
+                {t('sidebar.mergeNoTargets')}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setMergeSourceId(null); setMergeSelectedIds([]) }}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={confirmMergeConversation} disabled={mergeSelectedIds.length < 2}>
+              {t('sidebar.mergeGroupChat')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -26,9 +26,8 @@ export async function unbindConversationWechat(userId: string, conversationId: s
 
 /**
  * 解除某个会话的 QQ 绑定路由（软删会话 / 硬删会话共用）。
- * - 删除绑定会话 → 绑定关系 + 群聊映射全部删除，彻底断联。
- *   群聊会话下次收到消息时会自愈重建（resolveGroupConversation 检测到
- *   映射存在但会话已软删 → 清理旧映射 → 创建新群聊会话）。
+ * - 删除绑定会话 → 绑定关系拆除；从群聊 Agent 成员中移除该 Agent。
+ *   群聊会话其他 Agent 不受影响。
  */
 export async function unbindConversationQq(userId: string, conversationId: string): Promise<void> {
   const binding = await db.select().from(qqBindings)
@@ -104,6 +103,14 @@ conversationsRoute.get('/:id', async (c) => {
     groupAgents = rows.map((r: { agent_id: string; name: string; avatar: string }) => ({ id: r.agent_id, name: r.name, avatar: r.avatar }))
   }
 
+  // 判定该群聊会话是否属于 QQ 群（多 Bot 共享同一群聊时 agent 数 > 1，不能再靠 client 猜测）
+  let isQqGroup = false
+  if ((conv as any).type === 'group') {
+    const qqRow = await db.select().from(qqGroupConversations)
+      .where(eq(qqGroupConversations.conversation_id, id)).get()
+    isQqGroup = !!qqRow
+  }
+
   return c.json({
     conversation: conv,
     messages: msgs.map((m: typeof messages.$inferSelect) => ({
@@ -114,6 +121,7 @@ conversationsRoute.get('/:id', async (c) => {
       trace: m.trace ? JSON.parse(m.trace) : null,
     })),
     agents: groupAgents,
+    is_qq_group: isQqGroup,
   })
 })
 
@@ -188,15 +196,110 @@ conversationsRoute.patch('/:id', async (c) => {
 
   await db.update(conversations).set({ title: body.title, updated_at: now }).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).run()
 
-  // Scope the read-back by user_id too — otherwise a caller who renames someone
-  // else's conversation (the UPDATE above no-ops) still gets that conversation echoed.
   const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
 
-  // 重命名记录实时同步到同账号其他设备侧边栏
   broadcastConversationSync(userId)
 
   return c.json({ conversation: conv })
+})
+
+// Merge group conversations — create a new conversation, copy all messages
+// (preserving created_at for chronological order), merge agent members, soft-delete sources.
+conversationsRoute.post('/merge', async (c) => {
+  const userId = getUserId(c)
+  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+
+  const body = await c.req.json<{ source_ids: string[] }>()
+  const sourceIds = body.source_ids
+  if (!sourceIds || sourceIds.length < 2) {
+    return c.json({ error: '至少需要 2 个会话才能合并' }, 400)
+  }
+
+  // 1. Verify all source conversations exist, belong to user, are group type, not deleted
+  const sources: typeof conversations.$inferSelect[] = []
+  for (const sid of sourceIds) {
+    const s = await db.select().from(conversations)
+      .where(and(eq(conversations.id, sid), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
+      .get()
+    if (!s) return c.json({ error: `会话 ${sid} 不存在` }, 404)
+    if ((s as any).type !== 'group') return c.json({ error: `会话 ${sid} 不是群聊` }, 400)
+    sources.push(s)
+  }
+
+  // 2. Create new conversation C
+  const newId = randomUUID()
+  const now = Math.floor(Date.now() / 1000)
+  const defaultAgentId = sources[0].agent_id
+  await db.insert(conversations).values({
+    id: newId,
+    user_id: userId,
+    title: '合并群聊',
+    agent_id: defaultAgentId,
+    type: 'group',
+    created_at: now,
+    updated_at: now,
+  }).run()
+
+  // 3. For each source: copy messages, merge agents, repoint mappings, soft-delete
+  const seenAgentIds = new Set<string>()
+  for (const source of sources) {
+    // 3a. Copy messages (preserve created_at for chronological ordering)
+    const sourceMsgs = await db.select().from(messages)
+      .where(eq(messages.conversation_id, source.id))
+      .orderBy(messages.created_at)
+      .all()
+    for (const msg of sourceMsgs) {
+      await db.insert(messages).values({
+        conversation_id: newId,
+        role: msg.role,
+        content: msg.content,
+        thinking: msg.thinking,
+        tool_calls: msg.tool_calls,
+        trace: msg.trace,
+        tool_call_id: msg.tool_call_id,
+        suggestions: msg.suggestions,
+        attachments: msg.attachments,
+        agent_id: msg.agent_id,
+        created_at: msg.created_at,
+      }).run()
+    }
+
+    // 3b. Merge groupConversationAgents (dedup)
+    const sourceAgents = await db.select().from(groupConversationAgents)
+      .where(eq(groupConversationAgents.conversation_id, source.id))
+      .all()
+    for (const sa of sourceAgents) {
+      if (seenAgentIds.has(sa.agent_id)) continue
+      seenAgentIds.add(sa.agent_id)
+      try {
+        await db.insert(groupConversationAgents).values({
+          conversation_id: newId,
+          agent_id: sa.agent_id,
+          sort_order: 0,
+        }).run()
+      } catch { /* already exists */ }
+    }
+
+    // 3c. Redirect qq_group_conversations mappings
+    await db.update(qqGroupConversations)
+      .set({ conversation_id: newId })
+      .where(eq(qqGroupConversations.conversation_id, source.id))
+      .run()
+
+    // 3d. Soft-delete source
+    await db.update(conversations)
+      .set({ deleted_at: now, updated_at: now })
+      .where(and(eq(conversations.id, source.id), eq(conversations.user_id, userId)))
+      .run()
+  }
+
+  // 4. Read back new conversation
+  const mergedConv = await db.select().from(conversations).where(eq(conversations.id, newId)).get()
+  broadcastConversationSync(userId)
+  broadcastConversationChanged(userId, newId)
+
+  return c.json({ conversation: mergedConv })
 })
 
 // Revert from a specific message — delete this message and all subsequent ones

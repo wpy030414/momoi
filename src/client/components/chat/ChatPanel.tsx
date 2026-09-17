@@ -45,6 +45,8 @@ interface ChatPanelProps {
   onAgentChange?: (id: string) => void
   /** Group chat mode */
   isGroup?: boolean
+  /** QQ 群聊标记（服务端判定，替代 client 端 agent 数量猜测） */
+  isQqGroup?: boolean
   groupAgents?: AgentBrief[]
   onSendGroup?: (text: string, thinkingMode: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>, infiniteMode?: boolean) => void
   /** Infinite mode */
@@ -66,7 +68,7 @@ interface ChatPanelProps {
 export function ChatPanel({
   messages, loading, onSend, onCancel, onRevert, backgroundImage, supportAttachments, supportInfiniteMode,
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
-  isGroup, groupAgents, onSendGroup,
+  isGroup, isQqGroup, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
   pendingQuestion, onSendAnswer, onSkipAnswer,
   recommendedQuestions,
@@ -87,8 +89,8 @@ export function ChatPanel({
   const hasMessages = messages.length > 0
   const hasAgents = agents && agents.length > 0
   const noAgents = !isGroup && !agentsLoading && !hasAgents
-  // QQ 群聊：单 Agent 群组（非 Web 端多 Agent 群聊）—— 只读，隐藏输入栏
-  const isQqGroup = isGroup && groupAgents && groupAgents.length <= 1
+  // QQ 群聊：服务端通过 qqGroupConversations 表判定（多 Bot 下 agent 数 > 1，不能靠 client 猜测）
+  const isQqGroupChat = isQqGroup === true
   // 单聊气泡归属的 Agent：优先当前会话的 Agent（历史消息都来自它），否则回退到下拉选择
   const directAgent = isGroup
     ? undefined
@@ -256,7 +258,7 @@ export function ChatPanel({
             agentVoiceEnabled={isGroup ? false : directAgentVoiceEnabled}
             agentVoiceMap={agentVoiceMap}
             verbose={verbose}
-            isQqGroup={isQqGroup}
+            isQqGroup={isQqGroupChat}
           />
         )}
       </div>
@@ -271,7 +273,7 @@ export function ChatPanel({
       )}
 
       {/* Input area — hidden in QQ group (read-only: messages only come from QQ) */}
-      {hasMessages && !isQqGroup && (
+      {hasMessages && !isQqGroupChat && (
         <div className="relative z-10">
           <InputBar
             onSend={handleSend}
@@ -291,7 +293,7 @@ export function ChatPanel({
           />
         </div>
       )}
-      {hasMessages && isQqGroup && (
+      {hasMessages && isQqGroupChat && (
         <div className="text-center text-xs text-muted-foreground py-2 border-t">
           {t('chat.qqGroupReadonly')}
         </div>

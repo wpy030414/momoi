@@ -68,7 +68,10 @@
     "delete": "Delete",
     "deleteConfirm": "Delete conversation \"{{name}}\"? This action cannot be undone.",
     "groupMembers": "Members",
-    "continueOnIm": "Continue on IM"
+    "continueOnIm": "Continue on IM",
+    "mergeGroupChat": "Merge Group Chats",
+    "mergeSelectTarget": "Select group chats to merge. A new conversation will be created with all messages in chronological order.",
+    "mergeNoTargets": "No other group chats to merge"
   },
   "menu": {
     "logout": "Logout",

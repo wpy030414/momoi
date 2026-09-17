@@ -274,7 +274,8 @@ async function sendGroupTextWithRetry(
   return true
 }
 
-/** 为 QQ 群自动查找或创建群组会话（lazy init） */
+/** 为 QQ 群自动查找或创建群组会话（lazy init）。
+ *  每个 Bot 独立会话，按 (app_id, group_openid) 归并。 */
 async function resolveGroupConversation(
   userId: string, appId: string, groupOpenid: string, agentId: string,
 ): Promise<string | null> {
@@ -288,7 +289,15 @@ async function resolveGroupConversation(
     const conv = await db.select().from(conversations)
       .where(and(eq(conversations.id, existing.conversation_id), sql`${conversations.deleted_at} IS NULL`))
       .get()
-    if (conv) return conv.id
+    if (conv) {
+      // 确保该 Agent 在成员列表中（补漏：首次创建时可能未添加）
+      try {
+        await db.insert(groupConversationAgents).values({
+          conversation_id: conv.id, agent_id: agentId, sort_order: 0,
+        }).run()
+      } catch { /* already exists */ }
+      return conv.id
+    }
     // 会话已软删 → 清理旧映射，重新创建
     await db.delete(qqGroupConversations)
       .where(and(
@@ -297,7 +306,7 @@ async function resolveGroupConversation(
       )).run()
   }
 
-  // 2. Agent 由 binding 直接提供（per-agent 绑定模型），不再从 C2C 会话推导
+  // 2. Agent 由 binding 直接提供
   if (!agentId) {
     const agents = await listAgents()
     const defaultAgent = agents.find((a) => a.id !== NEUTRAL_AGENT_ID)
@@ -308,7 +317,7 @@ async function resolveGroupConversation(
     agentId = defaultAgent.id
   }
 
-  // 3. 创建群组会话 + 成员关系 + 映射
+  // 3. 创建群组会话（只添加当前收消息的 Agent）
   const convId = randomUUID()
   const now = Math.floor(Date.now() / 1000)
   await db.insert(conversations).values({
@@ -321,9 +330,7 @@ async function resolveGroupConversation(
     updated_at: now,
   }).run()
   await db.insert(groupConversationAgents).values({
-    conversation_id: convId,
-    agent_id: agentId,
-    sort_order: 0,
+    conversation_id: convId, agent_id: agentId, sort_order: 0,
   }).run()
   await db.insert(qqGroupConversations).values({
     app_id: appId,
@@ -342,7 +349,7 @@ export async function handleQqGroupMessage(opts: QqGroupChatOptions): Promise<vo
     console.log(`[qq-group-chat] Duplicate message_id=${opts.messageId}, skipping`)
     return
   }
-  await withUserImLock(`${opts.userId}:${opts.agentId}`, () => handleQqGroupMessageInner(opts))
+  await withUserImLock(`${opts.userId}:${opts.groupOpenid}`, () => handleQqGroupMessageInner(opts))
 }
 
 async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void> {
@@ -366,7 +373,7 @@ async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void
     return
   }
 
-  // 查找或创建群组会话（Agent 由 binding 直接提供，无需再从 C2C 会话推导）
+  // 查找或创建群组会话（Agent 由 binding 直接提供）
   const convId = await resolveGroupConversation(userId, appId, groupOpenid, agentId)
   if (!convId) {
     await sendGroupText(creds, groupOpenid, { msgId, content: '创建群聊会话失败，请联系管理员。' }).catch(() => {})

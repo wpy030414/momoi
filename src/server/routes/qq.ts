@@ -174,7 +174,8 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
   })
 })
 
-// DELETE /api/qq/bind — unbind a specific agent's bot and disconnect
+// DELETE /api/qq/bind — unbind a specific agent's bot and disconnect.
+// 清理该 app_id 下的群聊映射。
 qqRoute.delete('/bind', userAuthMiddleware, async (c) => {
   const userId = (c as any).get('userId') as string
   const body = await c.req.json().catch(() => ({})) as { agent_id?: string }

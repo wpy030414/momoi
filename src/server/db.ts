@@ -209,6 +209,48 @@ async function initSqlite() {
     console.log('[db] qq_bindings migration complete')
   }
 
+  // Migration: qq_group_conversations — revert to (app_id, group_openid) PK.
+  // Detect stale schema by checking for removed columns (group_name / user_id).
+  let qqGroupConvNeedsRebuild = false
+  try {
+    sqlDb.run(`SELECT group_name FROM qq_group_conversations LIMIT 0`)
+    // column exists → stale schema, need rebuild
+    qqGroupConvNeedsRebuild = true
+  } catch {
+    // column missing → might still have user_id col from intermediate state
+    try {
+      sqlDb.run(`SELECT user_id FROM qq_group_conversations LIMIT 0`)
+      qqGroupConvNeedsRebuild = true
+    } catch { /* already correct */ }
+  }
+  if (qqGroupConvNeedsRebuild) {
+    console.log('[db] Migrating qq_group_conversations: reverting to (app_id, group_openid) PK')
+    sqlDb.run(`
+      CREATE TABLE IF NOT EXISTS qq_group_conversations_new (
+        app_id TEXT NOT NULL,
+        group_openid TEXT NOT NULL,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        PRIMARY KEY (app_id, group_openid)
+      )
+    `)
+    try {
+      sqlDb.run(`
+        INSERT INTO qq_group_conversations_new (app_id, group_openid, conversation_id, created_at)
+        SELECT app_id, group_openid, conversation_id, created_at
+        FROM qq_group_conversations
+      `)
+    } catch (e) {
+      console.log('[db] qq_group_conversations migration insert failed:', (e as Error).message)
+    }
+    sqlDb.run(`DROP TABLE qq_group_conversations`)
+    sqlDb.run(`ALTER TABLE qq_group_conversations_new RENAME TO qq_group_conversations`)
+    console.log('[db] qq_group_conversations migration complete')
+  }
+
+  // Ensure index exists
+  sqlDb.run(`CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id)`)
+
   persist()
 
   const db = drizzle(sqlDb, { schema }) as any
@@ -392,6 +434,20 @@ async function initPg(dbUrl: string, user: string, password: string) {
     EXCEPTION WHEN others THEN
       -- PK already exists (composite or otherwise), skip
     END $$;
+    -- Migration: qq_group_conversations — revert to (app_id, group_openid) PK;
+    -- drop stale columns (user_id, group_name, group_chain_id) from auto-merge experiment.
+    DO $$ BEGIN
+      ALTER TABLE qq_group_conversations DROP CONSTRAINT IF EXISTS qq_group_conversations_pkey;
+    EXCEPTION WHEN others THEN END $$;
+    ALTER TABLE qq_group_conversations DROP COLUMN IF EXISTS user_id;
+    ALTER TABLE qq_group_conversations DROP COLUMN IF EXISTS group_name;
+    ALTER TABLE qq_group_conversations DROP COLUMN IF EXISTS group_chain_id;
+    DROP INDEX IF EXISTS idx_qq_group_conv_user;
+    DROP INDEX IF EXISTS idx_qq_group_conv_chain;
+    DO $$ BEGIN
+      ALTER TABLE qq_group_conversations ADD PRIMARY KEY (app_id, group_openid);
+    EXCEPTION WHEN others THEN END $$;
+    CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
   `)
 
   const db = drizzlePg(pool, { schema }) as any

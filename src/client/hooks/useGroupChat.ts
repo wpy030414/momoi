@@ -17,6 +17,7 @@ export function useGroupChat() {
   const chat = useChat()
   const [groupAgents, setGroupAgents] = useState<AgentBrief[]>([])
   const [isGroupMode, setIsGroupMode] = useState(false)
+  const [isQqGroup, setIsQqGroup] = useState(false)
   const [allAgents, setAllAgents] = useState<AgentBrief[]>([])
   // 群模式同步守卫：包装层刚同步过的会话不再重复请求；世代计数丢弃乱序响应
   const lastGroupSyncRef = useRef<string | null>(null)
@@ -42,6 +43,7 @@ export function useGroupChat() {
       if (knownType === 'direct') {
         setIsGroupMode(false)
         setGroupAgents([])
+        setIsQqGroup(false)
         lastGroupSyncRef.current = chat.activeId
         return
       }
@@ -53,9 +55,11 @@ export function useGroupChat() {
           if (res.agents) {
             setGroupAgents(res.agents)
           }
+          setIsQqGroup(res.is_qq_group === true)
         } else {
           setIsGroupMode(false)
           setGroupAgents([])
+          setIsQqGroup(false)
         }
         lastGroupSyncRef.current = chat.activeId
       }).catch(console.error)
@@ -88,9 +92,11 @@ export function useGroupChat() {
     if ((res.conversation as Conversation).type === 'group') {
       setIsGroupMode(true)
       setGroupAgents(res.agents || [])
+      setIsQqGroup((res as any).is_qq_group === true)
     } else {
       setIsGroupMode(false)
       setGroupAgents([])
+      setIsQqGroup(false)
     }
     lastGroupSyncRef.current = id
   }, [chat])
@@ -182,6 +188,7 @@ export function useGroupChat() {
     ...chat,
     groupAgents,
     isGroupMode,
+    isQqGroup,
     createGroupConversation,
     addAgentToGroup,
     removeAgentFromGroup,

@@ -239,11 +239,12 @@ export const api = {
 
   // Conversations
   listConversations: () => request<{ conversations: import('@/shared/types').Conversation[] }>('/api/conversations'),
-  getConversation: (id: string) => request<{ conversation: import('@/shared/types').Conversation; messages: import('@/shared/types').Message[]; agents?: Array<{ id: string; name: string; avatar: string }> }>(`/api/conversations/${id}`),
+  getConversation: (id: string) => request<{ conversation: import('@/shared/types').Conversation; messages: import('@/shared/types').Message[]; agents?: Array<{ id: string; name: string; avatar: string }>; is_qq_group?: boolean }>(`/api/conversations/${id}`),
   createConversation: (title?: string) => request<{ conversation: import('@/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title }) }),
   createGroupConversation: (agentIds: string[]) => request<{ conversation: import('@/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: '群组对话', type: 'group', agent_ids: agentIds }) }),
   deleteConversation: (id: string) => request<{ success: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   renameConversation: (id: string, title: string) => request<{ conversation: import('@/shared/types').Conversation }>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  mergeConversations: (sourceIds: string[]) => request<{ conversation: import('@/shared/types').Conversation }>('/api/conversations/merge', { method: 'POST', body: JSON.stringify({ source_ids: sourceIds }) }),
   revertMessages: (conversationId: string, messageId: number) => request<{ success: boolean }>(`/api/conversations/${conversationId}/messages/${messageId}`, { method: 'DELETE' }),
 
   // Group Chat

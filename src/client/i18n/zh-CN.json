@@ -68,7 +68,10 @@
     "delete": "删除",
     "deleteConfirm": "确定要删除会话「{{name}}」吗？此操作不可撤销。",
     "groupMembers": "群成员",
-    "continueOnIm": "在 IM 上继续"
+    "continueOnIm": "在 IM 上继续",
+    "mergeGroupChat": "合并群聊",
+    "mergeSelectTarget": "勾选要合并的群聊，将创建新会话并按时间排序所有消息。",
+    "mergeNoTargets": "没有其他群聊可以合并"
   },
   "menu": {
     "logout": "退出登录",
