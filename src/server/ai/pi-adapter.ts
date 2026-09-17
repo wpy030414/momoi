@@ -80,11 +80,13 @@ interface BuildSystemPromptOptions {
   /** 主角的名字（当 speakingRole 为 supporting 时） */
   protagonistName?: string
   language?: string
+  /** QQ 群聊模式 —— 单 Agent 面对多真人 */
+  isQqGroup?: boolean
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
 function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
-  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language } = opts
+  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup } = opts
   let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
 
   // ---- Momo easter egg: inject vibrant personality when language is Japanese ----
@@ -117,6 +119,19 @@ function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
 - 适度使用 @ 功能，让它成为你群聊互动的自然习惯，而不是只在需要专业知识时才呼叫。
 ${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应对方的点名，但不必为此改变你的回复优先级或内容。
 ` : ''}`
+  }
+
+  if (isQqGroup) {
+    prompt += `
+## QQ群聊规则
+你正在一个QQ群聊中与多名用户交流。你不是在网站页面上，而是在一个真实的QQ群里与真人对话。
+- 对话历史中，user 角色以 \`[用户昵称]: \` 开头的消息是QQ群成员的发言。不同昵称代表不同的真人成员。
+- 你对所有群成员开放，请自然、友好地回复群里的消息，像一个真实的群成员一样参与对话。
+- 可以同时回应多个成员的讨论，但不要在一条消息里试图和所有人对话。
+- 回复应当简洁自然，不要长篇大论，除非被问到需要详细解答的问题。
+- 可以适当表达情绪、使用轻松的口吻，适配QQ群聊的氛围。
+- 始终保持你的人设与性格——过去、名字、经历与用户对你的认知不会因场景变化而改变。
+`
   }
 
   if (speakingRole === 'protagonist') {
@@ -876,6 +891,8 @@ export interface RunPiAgentLoopOptions {
   /** 主角的名字（当 speakingRole 为 supporting 时） */
   protagonistName?: string
   language?: string
+  /** QQ 群聊模式 —— 单 Agent 面对多真人，提示词以群聊规则覆盖 */
+  isQqGroup?: boolean
 }
 
 // ---- 入口函数 ----
@@ -886,6 +903,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     mentionSignal, isGroup, infiniteMode,
     agentName, groupAgentNames, mentionedBy,
     speakingRole, protagonistName, language,
+    isQqGroup,
   } = opts
   const config = await getConfig()
 
@@ -907,7 +925,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
   const convId = conversationId || 'default'
 
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language })
+  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup })
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {

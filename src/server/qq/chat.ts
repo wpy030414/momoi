@@ -3,23 +3,38 @@
  * 不依赖 HTTP 层，直接调用 runPiAgentLoop；与 wechat/chat.ts 同构。
  * 回发：C2C 与群聊均一次性发送（sendTextWithRetry，3 次重试 + 超长分片）。
  */
-import { db, conversations, messages, qqBindings } from '../db.js'
+import { db, conversations, messages, qqBindings, qqGroupConversations, groupConversationAgents } from '../db.js'
 import { eq, and, sql } from 'drizzle-orm'
+import { randomUUID } from 'crypto'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { broadcastStream, broadcastConversationChanged, broadcastConversationSync } from '../realtime.js'
 import { withUserImLock } from '../im/locks.js'
-import { sendC2CText, type QqCredentials } from './api.js'
+import { sendC2CText, sendGroupText, type QqCredentials } from './api.js'
+import { listAgents } from '../config.js'
+import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
 
 export interface QqChatOptions {
   userId: string
   /** 接收到该消息的连接的 appId —— 换凭证后在飞消息的新鲜度守卫 */
   appId: string
   openid: string
-  /** 入站消息 id —— 被动回复 msg_id / 流式 event_id */
+  /** 入站消息 id —— 被动回复 msg_id */
   msgId: string
   text: string
   /** QQ message id for dedup —— RESUME 边界可能重复投递 */
   messageId: string
+}
+
+export interface QqGroupChatOptions {
+  userId: string
+  appId: string
+  groupOpenid: string
+  authorOpenid: string
+  authorUsername: string
+  text: string
+  messageId: string
+  /** 入站群消息 id —— 被动回复 msg_id（窗口 5 分钟） */
+  msgId: string
 }
 
 /** Dedup cache: message_id → timestamp, evicted after 5 minutes */
@@ -209,6 +224,233 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
       }).run()
     } catch (dbErr) {
       console.error('[qq-chat] Failed to write delivery-failure marker:', (dbErr as Error).message)
+    }
+  }
+}
+
+// ---- QQ 群聊消息处理 ----
+
+/** 封装 sendGroupText 的带退避群发（群消息无流式，全程单次发送） */
+async function sendGroupTextWithRetry(
+  creds: QqCredentials, groupOpenid: string, msgId: string, text: string,
+): Promise<boolean> {
+  const chunks = chunkText(text)
+  for (const chunk of chunks) {
+    let sent = false
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await sendGroupText(creds, groupOpenid, { msgId, content: chunk })
+        sent = true
+        break
+      } catch (e) {
+        const err = e as Error
+        const isTransient = err.message.includes('HTTP 5') ||
+          err.message.includes('fetch failed') ||
+          err.message.includes('timeout') ||
+          err.message.includes('ETIMEDOUT') ||
+          err.message.includes('ECONNRESET')
+        if (attempt < 2 && isTransient) {
+          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000))
+        } else if (attempt === 2 || !isTransient) {
+          // 最后一搏：不带 msgId 重试（被动回复窗口可能已过期）
+          try {
+            await sendGroupText(creds, groupOpenid, { content: chunk })
+            sent = true
+          } catch { /* 彻底失败 */ }
+        } else {
+          console.error(`[qq-group-chat] sendGroupText failed after ${attempt + 1} attempt(s):`, err.message)
+          break
+        }
+      }
+    }
+    if (!sent) return false
+  }
+  return true
+}
+
+/** 为 QQ 群自动查找或创建群组会话（lazy init） */
+async function resolveGroupConversation(
+  userId: string, appId: string, groupOpenid: string,
+): Promise<string | null> {
+  // 1. 已有映射且会话未软删 → 直接复用
+  const existing = await db.select().from(qqGroupConversations)
+    .where(and(
+      eq(qqGroupConversations.app_id, appId),
+      eq(qqGroupConversations.group_openid, groupOpenid),
+    )).get()
+  if (existing) {
+    const conv = await db.select().from(conversations)
+      .where(and(eq(conversations.id, existing.conversation_id), sql`${conversations.deleted_at} IS NULL`))
+      .get()
+    if (conv) return conv.id
+    // 会话已软删 → 清理旧映射，重新创建
+    await db.delete(qqGroupConversations)
+      .where(and(
+        eq(qqGroupConversations.app_id, appId),
+        eq(qqGroupConversations.group_openid, groupOpenid),
+      )).run()
+  }
+
+  // 2. 取默认 Agent（首个非 neutral Agent）
+  const agents = await listAgents()
+  const defaultAgent = agents.find((a) => a.id !== NEUTRAL_AGENT_ID)
+  if (!defaultAgent) {
+    console.error('[qq-group-chat] No non-neutral agent found, cannot create group conversation')
+    return null
+  }
+
+  // 3. 创建群组会话 + 成员关系 + 映射
+  const convId = randomUUID()
+  const now = Math.floor(Date.now() / 1000)
+  await db.insert(conversations).values({
+    id: convId,
+    user_id: userId,
+    title: 'QQ群聊',
+    agent_id: defaultAgent.id,
+    type: 'group',
+    created_at: now,
+    updated_at: now,
+  }).run()
+  await db.insert(groupConversationAgents).values({
+    conversation_id: convId,
+    agent_id: defaultAgent.id,
+    sort_order: 0,
+  }).run()
+  await db.insert(qqGroupConversations).values({
+    app_id: appId,
+    group_openid: groupOpenid,
+    conversation_id: convId,
+    created_at: now,
+  }).run()
+
+  broadcastConversationSync(userId)
+  console.log(`[qq-group-chat] Created group conversation ${convId} for app=${appId} group=${groupOpenid}`)
+  return convId
+}
+
+export async function handleQqGroupMessage(opts: QqGroupChatOptions): Promise<void> {
+  if (isDuplicate(opts.messageId, Date.now())) {
+    console.log(`[qq-group-chat] Duplicate message_id=${opts.messageId}, skipping`)
+    return
+  }
+  await withUserImLock(opts.userId, () => handleQqGroupMessageInner(opts))
+}
+
+async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void> {
+  const { userId, appId, groupOpenid, authorOpenid, authorUsername, text, msgId } = opts
+
+  // 新鲜度守卫：绑定行必须存在、凭证未换、且 group_enabled 已开
+  const binding = await db.select().from(qqBindings)
+    .where(eq(qqBindings.user_id, userId)).get()
+  if (!binding || binding.app_id.trim() !== appId || !binding.group_enabled) {
+    console.log(`[qq-group-chat] Group message dropped: binding stale or group disabled for user ${userId}`)
+    return
+  }
+  const creds: QqCredentials = { appId: binding.app_id.trim(), appSecret: binding.app_secret }
+
+  // 内置命令
+  if (text === '/clear' || text === '/new' || text === '/reset' || text === '／clear') {
+    await sendGroupText(creds, groupOpenid, { msgId, content: '会话已重置。' }).catch(() => {})
+    return
+  }
+
+  // 查找或创建群组会话
+  const convId = await resolveGroupConversation(userId, appId, groupOpenid)
+  if (!convId) {
+    await sendGroupText(creds, groupOpenid, { msgId, content: '创建群聊会话失败，请联系管理员。' }).catch(() => {})
+    return
+  }
+
+  const conv = await db.select().from(conversations)
+    .where(and(eq(conversations.id, convId), sql`${conversations.deleted_at} IS NULL`)).get()
+  if (!conv) {
+    await sendGroupText(creds, groupOpenid, { msgId, content: '群聊会话已不存在。' }).catch(() => {})
+    return
+  }
+
+  // 写用户消息（[昵称]: 内容 格式）
+  const now = Math.floor(Date.now() / 1000)
+  const displayContent = `[${authorUsername}]: ${text}`
+  const userMsgResult = await db.insert(messages).values({
+    conversation_id: convId, role: 'user',
+    content: displayContent, created_at: now,
+  }).returning({ id: messages.id })
+  const userMsgId = Number(userMsgResult[0]?.id ?? 0)
+  await db.update(conversations).set({ updated_at: now }).where(eq(conversations.id, convId)).run()
+
+  broadcastStream(userId, '', {
+    conversation_id: convId,
+    event: { type: 'user_message', id: userMsgId, content: displayContent },
+  })
+
+  const agentId = conv.agent_id || ''
+
+  // 加载历史
+  const historyMsgs = await db.select().from(messages)
+    .where(eq(messages.conversation_id, convId))
+    .orderBy(messages.created_at).all()
+  const history = historyMsgs.slice(0, -1).map((m: any) => ({
+    role: m.role as any,
+    content: m.content,
+    tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
+    tool_call_id: m.tool_call_id || undefined,
+    agent_id: m.agent_id || null,
+  }))
+
+  // 跑 AI（send 回调仅 broadcastStream，QQ 群不支持流式回发）
+  const { reply, suggestions, thinking } = await runPiAgentLoop({
+    userMessage: displayContent,
+    history,
+    send: (msg) => {
+      broadcastStream(userId, '', { conversation_id: convId, event: msg })
+    },
+    thinkingMode: true,
+    conversationId: convId,
+    userId,
+    agentId,
+    isGroup: true,
+    isQqGroup: true,
+  })
+
+  // 写 assistant 消息
+  const replyText = reply || '（未生成回复）'
+  if (replyText.trim()) {
+    const replyNow = Math.floor(Date.now() / 1000)
+    await db.insert(messages).values({
+      conversation_id: convId,
+      role: 'assistant',
+      content: replyText,
+      thinking: thinking || null,
+      suggestions: suggestions.length > 0 ? JSON.stringify(suggestions) : null,
+      agent_id: agentId || null,
+      created_at: replyNow,
+    }).run()
+  }
+
+  broadcastConversationChanged(userId, convId)
+  broadcastConversationSync(userId)
+
+  // 回发群消息
+  console.log('[qq-group-chat] Delivering group reply: groupOpenid=', groupOpenid,
+    'msgId=', msgId, 'textLen=', replyText.length)
+
+  let sendOk = false
+  if (replyText.trim()) {
+    sendOk = await sendGroupTextWithRetry(creds, groupOpenid, msgId, replyText)
+  }
+
+  if (!sendOk) {
+    try {
+      const failNow = Math.floor(Date.now() / 1000)
+      await db.insert(messages).values({
+        conversation_id: convId,
+        role: 'system',
+        content: `[QQ群推送失败] 回复已生成但未能发送到 QQ 群。`,
+        agent_id: agentId || null,
+        created_at: failNow,
+      }).run()
+    } catch (dbErr) {
+      console.error('[qq-group-chat] Failed to write delivery-failure marker:', (dbErr as Error).message)
     }
   }
 }

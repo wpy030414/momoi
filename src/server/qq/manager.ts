@@ -7,7 +7,7 @@
 import { db, qqBindings } from '../db.js'
 import { eq } from 'drizzle-orm'
 import { QQGatewayConnection } from './gateway.js'
-import { handleQqMessage } from './chat.js'
+import { handleQqMessage, handleQqGroupMessage } from './chat.js'
 import { withNamedLock } from '../im/locks.js'
 
 interface ManagedConn {
@@ -79,6 +79,20 @@ async function startBotInner(userId: string): Promise<void> {
         messageId: msg.messageId,
       }).catch((e) => {
         console.error(`[qq:${userId}] message handling failed:`, e instanceof Error ? e.message : e)
+      })
+    },
+    onGroupMessage: (msg) => {
+      void handleQqGroupMessage({
+        userId,
+        appId,
+        groupOpenid: msg.groupOpenid,
+        authorOpenid: msg.authorOpenid,
+        authorUsername: msg.authorUsername,
+        text: msg.content,
+        messageId: msg.messageId,
+        msgId: msg.messageId,
+      }).catch((e) => {
+        console.error(`[qq:${userId}] group message handling failed:`, e instanceof Error ? e.message : e)
       })
     },
     onReady: () => {
