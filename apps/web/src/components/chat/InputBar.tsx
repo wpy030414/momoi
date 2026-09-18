@@ -71,7 +71,8 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
   const [mentionIndex, setMentionIndex] = useState(1)
   const [menuPosition, setMenuPosition] = useState<{ bottom: number; left: number } | null>(null)
 
-  const isInputDisabled = disabled || noAgents
+  const isInputDisabled = noAgents
+  const cannotSend = disabled || isInputDisabled || uploading
 
   // Filtered agents based on current query
   const filteredAgents = (agents || []).filter((a) =>
@@ -131,7 +132,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
 
   const handleSend = () => {
     const trimmed = text.trim()
-    if ((!trimmed && attachments.length === 0) || isInputDisabled || uploading) return
+    if ((!trimmed && attachments.length === 0) || cannotSend) return
     onSend(trimmed, attachments.length > 0 ? attachments : undefined)
     setText('')
     setAttachments([])
@@ -355,7 +356,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
             <button
               onClick={handleSend}
-              disabled={isInputDisabled || uploading || !hasContent}
+              disabled={cannotSend || !hasContent}
               className="inline-flex items-center justify-center p-1.5 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all h-9 w-9"
               title={t('chat.send')}
             >

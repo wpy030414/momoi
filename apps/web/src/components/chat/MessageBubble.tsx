@@ -111,7 +111,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
                 </div>
               )}
               {/* Content block — only shown in legacy path (no trace) */}
-              <div className={`inline-block rounded-lg px-4 py-1 bg-card/75 border`}>
+              <div className={`inline-block rounded-lg px-4 py-2.5 bg-card/75 border`}>
                 {message.streaming && !message.content ? (
                   <div className="flex gap-1">
                     <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -144,7 +144,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
 
           {/* Message content — user messages only (assistant text is rendered via trace or legacy path above) */}
           {isUser && (
-            <div className={`inline-block rounded-lg px-4 py-1 bg-primary/75 text-primary-foreground text-left`}>
+            <div className={`inline-block rounded-lg px-4 py-2.5 bg-primary/75 text-primary-foreground text-left`}>
               {message.streaming && !message.content ? (
                 <div className="flex gap-1">
                   <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -250,12 +250,25 @@ function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?:
     } else {
       // text
       elements.push(
-        <div key={`text-${i}`} className={`inline-block rounded-lg px-4 py-1 bg-card/75 border mb-1`}>
+        <div key={`text-${i}`} className={`inline-block rounded-lg px-4 py-2.5 bg-card/75 border mb-1`}>
           <MessageContent content={entry.text} streaming={streaming && i === trace.length - 1} isUser={false} />
         </div>
       )
       i++
     }
+  }
+  // Show loading dots when streaming and no text output has arrived yet.
+  // This bridges the gap between thinking blocks and the first real response.
+  if (streaming && !trace.some((e) => e.type === 'text')) {
+    elements.push(
+      <div key="loading-dots" className={`inline-block rounded-lg px-4 py-2.5 bg-card/75 border mb-1`}>
+        <div className="flex gap-1">
+          <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+          <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+          <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+        </div>
+      </div>
+    )
   }
   return elements
 }
