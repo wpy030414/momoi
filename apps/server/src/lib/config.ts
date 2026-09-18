@@ -1,5 +1,5 @@
 import './env.js'
-import { db, settings, agents, mcpServers } from './db.js'
+import { db, settings, agents, mcpServers } from '../db/index.js'
 import { eq } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import type { AppConfig, Agent, McpServerConfig } from '@momoi/shared/types'

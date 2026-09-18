@@ -1,6 +1,6 @@
 import type { Context, Next } from 'hono'
-import { STAND_ALONE } from '../standalone.js'
-import { verifyUserToken, getAuthToken } from '../auth.js'
+import { STAND_ALONE } from '../lib/standalone.js'
+import { verifyUserToken, getAuthToken } from '../lib/auth.js'
 
 /**
  * User auth middleware — validates the JWT from the HttpOnly cookie

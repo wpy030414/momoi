@@ -1,19 +1,19 @@
 import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
-import { adminAuthMiddleware } from '../auth.js'
-import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen, isExternalImageHostingEnabled, getTtsConfig, updateTtsConfig } from '../config.js'
-import { base64ToBuffer, uploadToCdn } from '../cdn.js'
+import { adminAuthMiddleware } from '../lib/auth.js'
+import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen, isExternalImageHostingEnabled, getTtsConfig, updateTtsConfig } from '../lib/config.js'
+import { base64ToBuffer, uploadToCdn } from '../lib/cdn.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '@momoi/shared/constants'
 import fs from 'fs'
 import path from 'path'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
-import { db, conversations, messages, users, userOauthBindings, agents, wechatBindings, qqBindings, qqGroupConversations } from '../db.js'
+import { db, conversations, messages, users, userOauthBindings, agents, wechatBindings, qqBindings, qqGroupConversations } from '../db/index.js'
 import { skillRegistry } from '../skills/loader.js'
 import AdmZip from 'adm-zip'
-import { stopBotForUser, stopAllBotsForUser } from '../qq/manager.js'
+import { stopBotForUser, stopAllBotsForUser } from '../im/qq/manager.js'
 
-import { repoRoot } from '../paths.js'
+import { repoRoot } from '../lib/paths.js'
 
 export const adminRoute = new Hono()
 

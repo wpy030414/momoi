@@ -1,11 +1,11 @@
 import { Hono } from 'hono'
-import { db, conversations, messages, groupConversationAgents, agents, wechatBindings, qqBindings, qqGroupConversations } from '../db.js'
+import { db, conversations, messages, groupConversationAgents, agents, wechatBindings, qqBindings, qqGroupConversations } from '../db/index.js'
 import { eq, and, desc, gte, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
-import { broadcastConversationSync, broadcastConversationChanged } from '../realtime.js'
-import { stopBotForUser } from '../qq/manager.js'
+import { broadcastConversationSync, broadcastConversationChanged } from '../lib/realtime.js'
+import { stopBotForUser } from '../im/qq/manager.js'
 import { trackUserActivity } from './user.js'
 
 function getUserId(c: any): string {

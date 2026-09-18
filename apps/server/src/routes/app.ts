@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
-import { getConfig, listAgents } from '../config.js'
+import { getConfig, listAgents } from '../lib/config.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
-import { STAND_ALONE } from '../standalone.js'
+import { STAND_ALONE } from '../lib/standalone.js'
 
 export const appRoute = new Hono()
 

@@ -10,7 +10,7 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
-import { subscribeRealtime } from '../realtime.js'
+import { subscribeRealtime } from '../lib/realtime.js'
 
 export const eventsRoute = new Hono()
 

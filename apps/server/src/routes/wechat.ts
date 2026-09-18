@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
-import { db, conversations, wechatBindings } from '../db.js'
+import { db, conversations, wechatBindings } from '../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { withNamedLock } from '../im/locks.js'
-import { broadcastConversationSync } from '../realtime.js'
+import { broadcastConversationSync } from '../lib/realtime.js'
 import QRCode from 'qrcode'
 
 export const wechatRoute = new Hono()

@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import path from 'path'
 import fs from 'fs'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
-import { repoRoot } from '../paths.js'
+import { repoRoot } from '../lib/paths.js'
 
 export const assetsRoute = new Hono()
 

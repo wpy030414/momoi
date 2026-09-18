@@ -14,7 +14,7 @@
 //
 // ============================================================
 
-import { listMcpServers } from '../config.js'
+import { listMcpServers } from '../lib/config.js'
 
 // ---- Types ----
 

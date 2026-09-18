@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import path from 'path'
 import fs from 'fs'
-import { db, conversations, messages, groupConversationAgents } from '../db.js'
+import { db, conversations, messages, groupConversationAgents } from '../db/index.js'
 import { eq, and, count, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
@@ -10,14 +10,14 @@ import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutr
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage, Attachment, TraceEntry } from '@momoi/shared/types'
 import { randomUUID } from 'crypto'
-import { getConfig, listAgents, getAgent } from '../config.js'
+import { getConfig, listAgents, getAgent } from '../lib/config.js'
 import { resolveQuestion, getPendingQuestion } from '../tools/ask-user-tool.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { SandboxFS } from '../tools/workspace.js'
 import { synthesizeAndSave, markVoiceComplete, createTtsProvider } from '../ai/tts.js'
-import { broadcastStream, broadcastConversationSync } from '../realtime.js'
+import { broadcastStream, broadcastConversationSync } from '../lib/realtime.js'
 import { trackUserActivity } from './user.js'
 
 export const chatRoute = new Hono()
@@ -353,7 +353,7 @@ chatRoute.post('/', async (c) => {
 
         let ttsConfig: { endpoint: string; provider: string }
         try {
-          const { getTtsConfig } = await import('../config.js')
+          const { getTtsConfig } = await import('../lib/config.js')
           ttsConfig = await getTtsConfig()
         } catch {
           ttsConfig = { endpoint: 'http://localhost:9880', provider: 'gpt-sovits' }

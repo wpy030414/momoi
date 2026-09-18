@@ -5,7 +5,7 @@
 import fs from 'fs'
 import fsp from 'fs/promises'
 import path from 'path'
-import { repoRoot } from '../paths.js'
+import { repoRoot } from '../lib/paths.js'
 
 const RESERVED_NAMES = new Set([
   'CON', 'PRN', 'AUX', 'NUL',

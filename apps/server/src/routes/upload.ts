@@ -1,11 +1,11 @@
 import { Hono } from 'hono'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
-import { db, conversations } from '../db.js'
+import { db, conversations } from '../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { SandboxFS } from '../tools/workspace.js'
-import { uploadToCdn } from '../cdn.js'
-import { isExternalImageHostingEnabled } from '../config.js'
+import { uploadToCdn } from '../lib/cdn.js'
+import { isExternalImageHostingEnabled } from '../lib/config.js'
 
 export const uploadRoute = new Hono()
 

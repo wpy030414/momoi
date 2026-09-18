@@ -3,14 +3,14 @@
  * 不依赖 HTTP 层，直接调用 runPiAgentLoop；与 wechat/chat.ts 同构。
  * 回发：C2C 与群聊均一次性发送（sendTextWithRetry，3 次重试 + 超长分片）。
  */
-import { db, conversations, messages, qqBindings, qqGroupConversations, groupConversationAgents } from '../db.js'
+import { db, conversations, messages, qqBindings, qqGroupConversations, groupConversationAgents } from '../../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
-import { runPiAgentLoop } from '../ai/pi-adapter.js'
-import { broadcastStream, broadcastConversationChanged, broadcastConversationSync } from '../realtime.js'
-import { withUserImLock } from '../im/locks.js'
+import { runPiAgentLoop } from '../../ai/pi-adapter.js'
+import { broadcastStream, broadcastConversationChanged, broadcastConversationSync } from '../../lib/realtime.js'
+import { withUserImLock } from '../locks.js'
 import { sendC2CText, sendGroupText, type QqCredentials } from './api.js'
-import { listAgents } from '../config.js'
+import { listAgents } from '../../lib/config.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 
 export interface QqChatOptions {

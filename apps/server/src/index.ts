@@ -1,12 +1,12 @@
-import './env.js'
+import './lib/env.js'
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 
-import { env, migrateDefaultAgent } from './config.js'
-import { STAND_ALONE } from './standalone.js'
-import { db, users } from './db.js'
+import { env, migrateDefaultAgent } from './lib/config.js'
+import { STAND_ALONE } from './lib/standalone.js'
+import { db, users } from './db/index.js'
 
 // config.ts transitively imports db.ts which has top-level await for database initialization.
 // Auto-create Default agent from legacy global config if no agents exist
@@ -38,9 +38,9 @@ import { wechatRoute } from './routes/wechat.js'
 import { qqRoute } from './routes/qq.js'
 import { eventsRoute } from './routes/events.js'
 import { docsRoute } from './routes/docs.js'
-import { serveClient } from './static.js'
-import { startWechatPoller } from './wechat/poller.js'
-import { initQqBots } from './qq/manager.js'
+import { serveClient } from './lib/static.js'
+import { startWechatPoller } from './im/wechat/poller.js'
+import { initQqBots } from './im/qq/manager.js'
 
 const app = new Hono()
 

@@ -2,12 +2,12 @@
  * WeChat → Momoi 聊天桥接：接收微信文本，路由到 AI 并回复。
  * 不依赖 HTTP 层，直接调用 runPiAgentLoop；避免 cookie 认证问题。
  */
-import { db, conversations, messages, wechatBindings } from '../db.js'
+import { db, conversations, messages, wechatBindings } from '../../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
-import { runPiAgentLoop } from '../ai/pi-adapter.js'
+import { runPiAgentLoop } from '../../ai/pi-adapter.js'
 import { sendMessage, WECHAT_BASE_URL, type WechatCredentials } from './ilink.js'
-import { broadcastStream, broadcastConversationChanged, broadcastConversationSync } from '../realtime.js'
-import { withUserImLock } from '../im/locks.js'
+import { broadcastStream, broadcastConversationChanged, broadcastConversationSync } from '../../lib/realtime.js'
+import { withUserImLock } from '../locks.js'
 
 export interface WechatChatOptions {
   userId: string

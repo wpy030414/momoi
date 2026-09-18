@@ -2,7 +2,7 @@
  * 微信消息轮询器：定时遍历所有已绑定用户，拉取新消息并桥接处理。
  * 通道状态（updates_buf / session_expired）都在 wechat_bindings 表。
  */
-import { db, conversations, wechatBindings } from '../db.js'
+import { db, conversations, wechatBindings } from '../../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { getUpdates, WECHAT_BASE_URL, DEFAULT_POLL_TIMEOUT_MS, parseIncoming, type WechatCredentials } from './ilink.js'
 import { handleWechatMessage } from './chat.js'

@@ -3,11 +3,11 @@
 // ============================================================
 
 import { Hono } from 'hono'
-import { db, conversations, groupConversationAgents, agents } from '../db.js'
+import { db, conversations, groupConversationAgents, agents } from '../db/index.js'
 import { eq, and, sql, ne } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
-import { broadcastGroupMembers } from '../realtime.js'
+import { broadcastGroupMembers } from '../lib/realtime.js'
 import { trackUserActivity } from './user.js'
 
 function getUserId(c: any): string {

@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { repoRoot } from '../paths.js'
+import { repoRoot } from '../lib/paths.js'
 
 // ---- TTS Provider Interface ----
 

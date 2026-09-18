@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { SkillManifest, InstalledSkill } from '@momoi/shared/types'
 
-import { repoRoot } from '../paths.js'
+import { repoRoot } from '../lib/paths.js'
 
 const SKILLS_DIR = path.resolve(repoRoot(), 'skills')
 

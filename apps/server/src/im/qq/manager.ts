@@ -4,11 +4,11 @@
  * 启动时 initQqBots() 从 qq_bindings 恢复全部连接；凭证变更经
  * restartBotForUser 换连接（per-agent 锁串行化，防双连接双事件）。
  */
-import { db, qqBindings } from '../db.js'
+import { db, qqBindings } from '../../db/index.js'
 import { eq, and } from 'drizzle-orm'
 import { QQGatewayConnection } from './gateway.js'
 import { handleQqMessage, handleQqGroupMessage } from './chat.js'
-import { withNamedLock } from '../im/locks.js'
+import { withNamedLock } from '../locks.js'
 
 interface ManagedConn {
   conn: QQGatewayConnection

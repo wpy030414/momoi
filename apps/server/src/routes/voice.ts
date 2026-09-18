@@ -2,8 +2,8 @@ import { Hono } from 'hono'
 import path from 'path'
 import fs from 'fs'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
-import { getAgent } from '../config.js'
-import { repoRoot } from '../paths.js'
+import { getAgent } from '../lib/config.js'
+import { repoRoot } from '../lib/paths.js'
 
 export const voiceRoute = new Hono()
 

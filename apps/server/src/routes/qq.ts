@@ -1,11 +1,11 @@
 import { Hono } from 'hono'
-import { db, conversations, qqBindings, qqGroupConversations } from '../db.js'
+import { db, conversations, qqBindings, qqGroupConversations } from '../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { withNamedLock } from '../im/locks.js'
-import { getAccessToken } from '../qq/api.js'
-import { isBotReady, restartBotForUser, stopBotForUser } from '../qq/manager.js'
-import { broadcastConversationSync } from '../realtime.js'
+import { getAccessToken } from '../im/qq/api.js'
+import { isBotReady, restartBotForUser, stopBotForUser } from '../im/qq/manager.js'
+import { broadcastConversationSync } from '../lib/realtime.js'
 
 export const qqRoute = new Hono()
 

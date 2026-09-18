@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { randomBytes, randomUUID } from 'crypto'
-import { db, users, userOauthBindings } from '../db.js'
+import { db, users, userOauthBindings } from '../db/index.js'
 import { eq, and } from 'drizzle-orm'
-import { getConfig, isOauthRegistrationOpen } from '../config.js'
-import { signUserToken, setAuthCookie, getAuthToken, verifyUserToken, verifyPin, hashPin } from '../auth.js'
+import { getConfig, isOauthRegistrationOpen } from '../lib/config.js'
+import { signUserToken, setAuthCookie, getAuthToken, verifyUserToken, verifyPin, hashPin } from '../lib/auth.js'
 
 export const oauthRoute = new Hono()
 

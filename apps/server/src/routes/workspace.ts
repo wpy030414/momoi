@@ -4,7 +4,7 @@
 
 import { Hono } from 'hono'
 import path from 'path'
-import { db, conversations } from '../db.js'
+import { db, conversations } from '../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { SandboxFS } from '../tools/workspace.js'

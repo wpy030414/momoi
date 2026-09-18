@@ -3,7 +3,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, relative, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { repoRoot } from '../paths.js'
+import { repoRoot } from '../lib/paths.js'
 
 // Resolve docs/ relative to this file's location:
 //   prod (bundled): apps/server/dist/             → dist/docs (copied by build)

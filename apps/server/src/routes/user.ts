@@ -1,11 +1,11 @@
 import { Hono } from 'hono'
-import { db, users, userOauthBindings, wechatBindings, qqBindings, conversations } from '../db.js'
+import { db, users, userOauthBindings, wechatBindings, qqBindings, conversations } from '../db/index.js'
 import { eq, and } from 'drizzle-orm'
-import { hashPin, verifyPin, signUserToken, isAdmin, setAuthCookie, clearAuthCookie } from '../auth.js'
+import { hashPin, verifyPin, signUserToken, isAdmin, setAuthCookie, clearAuthCookie } from '../lib/auth.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
-import { isDirectRegistrationOpen, isOauthRegistrationOpen } from '../config.js'
-import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../rateLimiter.js'
-import { stopBotForUser, startBotForUser } from '../qq/manager.js'
+import { isDirectRegistrationOpen, isOauthRegistrationOpen } from '../lib/config.js'
+import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../lib/rateLimiter.js'
+import { stopBotForUser, startBotForUser } from '../im/qq/manager.js'
 
 export const userRoute = new Hono()
 

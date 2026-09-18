@@ -45,7 +45,7 @@ import {
   DEFAULT_SYSTEM_PROMPT,
 	NEUTRAL_AGENT_ID,
 } from '@momoi/shared/constants'
-import { getConfig, getAgent, listAgents } from '../config.js'
+import { getConfig, getAgent, listAgents } from '../lib/config.js'
 import { getAllTools } from './tools.js'
 import { resolveTool } from '../tools/registry.js'
 import { getMcpTools, callMcpTool } from '../tools/mcp-client.js'

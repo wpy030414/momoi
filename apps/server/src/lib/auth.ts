@@ -4,7 +4,7 @@ import { getCookie, setCookie } from 'hono/cookie'
 import { SignJWT, jwtVerify } from 'jose'
 import { eq } from 'drizzle-orm'
 import { env } from './config.js'
-import { db, settings } from './db.js'
+import { db, settings } from '../db/index.js'
 import { STAND_ALONE } from './standalone.js'
 
 // ---- Admin membership ----

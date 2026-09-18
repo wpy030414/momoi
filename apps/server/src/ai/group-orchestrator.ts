@@ -7,7 +7,7 @@ import type { ChatMessage, ContentPart } from './provider.js'
 import type { ServerMessage, Agent, TraceEntry } from '@momoi/shared/types'
 import type { ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
-import { getAgent, getConfig } from '../config.js'
+import { getAgent, getConfig } from '../lib/config.js'
 import { decideGroupSpeakerOrder, type SpeakerOrder } from './neutral-agent.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 
