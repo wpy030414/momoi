@@ -22,7 +22,7 @@
 
 ### 本地 SQLite 模式
 
-- **路径**：`data/momoi.db`（相对于项目根目录）
+- **路径**：`data/momoi.db`（相对于项目根目录）；单机模式（`--stand-alone`）使用独立的 `data/momoi.stand-alone.db`，且忽略 `DATABASE_URL` 强制走本地 SQLite
 - **创建时机**：`db.ts` 导入时自动创建 `data/` 目录，若 `.db` 文件不存在则新建内存数据库并持久化
 - **引擎**：`sql.js`（WebAssembly SQLite，无原生依赖）
 

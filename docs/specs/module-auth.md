@@ -13,10 +13,23 @@
 | `src/server/auth.ts` | PIN 哈希/校验 + 用户 JWT 签发验证 + 签名密钥管理 + `isAdmin()`/`adminAuthMiddleware` + Cookie 操作 |
 | `src/server/middleware/userAuth.ts` | 独立的用户 JWT 认证中间件（严格模式，仅从 HttpOnly Cookie 取 token） |
 | `src/server/routes/user.ts` | 用户端点（状态查询/验证/设置/修改/重命名/OAuth 绑定管理）+ `GET /me` |
+| `src/server/standalone.ts` | 单机模式标志（`--stand-alone` CLI 参数，零依赖叶子模块） |
+| `src/server/routes/user-standalone.ts` | 单机模式极简用户路由（仅 `GET /me`） |
 | `src/server/config.ts` | `env.ADMIN` 名单解析、`env.JWT_SECRET` 读取、注册开关（`isDirectRegistrationOpen` / `isOauthRegistrationOpen`） |
 | `src/server/rateLimiter.ts` | IP 速率限制器（PIN 暴力破解防护） |
 | `src/client/components/auth/LoginScreen.tsx` | 三步登录 UI |
 | `src/client/components/settings/ChangePinDialog.tsx` | 修改 PIN 表单 |
+
+## 单机模式（--stand-alone）
+
+服务器以 `--stand-alone` 启动时，整个 Momoi 鉴权体系被关闭，应用变为固定 `admin` 单用户模式：
+
+- **标志解析**：`src/server/standalone.ts` 导出 `STAND_ALONE`（`process.argv.includes('--stand-alone')`）。该模块零 import——ESM 中依赖体先于引用体执行，因此无论谁先导入（db.ts 的顶层 await 初始化、auth.ts 等）都能读到正确值
+- **中间件直通**：`userAuthMiddleware` 与 `adminAuthMiddleware` 开头短路，`c.set('userId', 'admin')` 后直接 `next()`；`isAdmin()` 恒真（后台面板永远可用）
+- **端点裁剪**：`/api/user` 挂载 `routes/user-standalone.ts`（仅 `GET /me` → `{username:'admin', is_admin:true}`，无中间件）；`/api/oauth` 整个不挂载。因此 verify/set-pin/change-pin/rename/logout/refresh/oauth-bindings/status 全部不存在，且**不可能签发任何 JWT 或 Cookie**（所有签发点都在这两个路由文件内）
+- **数据库**：使用独立的 `data/momoi.stand-alone.db`；启动时 seed 固定 `admin` 用户行（幂等）
+- **微信/QQ 不受影响**：IM 桥接不是 Momoi 鉴权体系的一部分，绑定照常（归属 `admin`）
+- **前端发现**：`GET /api/app-name` 响应含 `stand_alone: boolean`；客户端据此自动登录 `admin`、隐藏改密/改名/OAuth 关联/登出入口、隐藏后台「用户」tab，并禁用 token 续期与 `auth:expired` 驱逐
 
 ## 用户认证流程
 

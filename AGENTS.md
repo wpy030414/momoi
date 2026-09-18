@@ -45,6 +45,10 @@
 - **技能**：SKILL.md 文件（YAML 前置元数据 + Markdown 内容），注入系统提示词
 - **认证**：用户 4 位 PIN（PBKDF2 哈希 + JWT 14 天滑动续期，经 HttpOnly Cookie 传输）；管理员由 `ADMIN` 环境变量用户名名单授权（复用用户 JWT）
 
+### 单机模式（--stand-alone）
+
+服务器以 `--stand-alone` 启动时进入单机模式：固定 `admin` 单用户、Momoi 鉴权全关（`src/server/standalone.ts` 零依赖叶子模块从 `process.argv` 解析，全服务端共享）。`userAuthMiddleware` / `adminAuthMiddleware` 直通并固定 `userId='admin'`，`isAdmin()` 恒真；数据库使用独立的 `data/momoi.stand-alone.db`（忽略 `DATABASE_URL`）；`/api/user` 挂载极简路由（仅 `GET /me`，见 `routes/user-standalone.ts`），`/api/oauth` 不挂载——因此单机模式不可能签发任何 PIN/JWT/Cookie。微信 / QQ 桥接照常（归属 `admin`）。前端经 `GET /api/app-name` 的 `stand_alone` 字段发现模式：自动登录、隐藏改密/改名/关联/登出入口、后台「用户」tab 隐藏。
+
 ## 关键目录
 
 | 路径 | 用途 |

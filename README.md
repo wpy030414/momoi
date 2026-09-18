@@ -46,6 +46,23 @@ pnpm dev
 - 前端：http://localhost:5173
 - 后端 API：http://localhost:11408
 
+### 单机模式
+
+启动服务器时追加 `--stand-alone` 即进入单机模式——单用户、无 Momoi 鉴权的本机部署：
+
+```bash
+pnpm dev:standalone     # 开发模式（Vite 5173 + Hono 11408）
+pnpm start:standalone   # 生产模式（node dist/index.js --stand-alone）
+```
+
+- **独立数据库**：使用 `data/momoi.stand-alone.db`，与多租户主库 `data/momoi.db` 完全隔离（若配置了 `DATABASE_URL` 会被忽略并告警，强制走本地 SQLite）
+- **直接进入**：打开网页即以固定 `admin` 用户身份登录——没有登录页，不可改名、改 PIN、OAuth 关联或退出登录
+- **鉴权全关**：无 PIN / 密码、无 JWT、无 HttpOnly Cookie；`userAuthMiddleware` / `adminAuthMiddleware` 直通并固定 `userId='admin'`；`/api/user` 仅保留 `GET /me`，登录相关端点全部不存在；OAuth 路由不挂载
+- **后台永远开启**：管理面板（Gateway/品牌/智能体/MCP/技能/审查）始终可访问，「用户」tab 不显示
+- **微信 / QQ 绑定照常**：IM 桥接不是 Momoi 鉴权体系的一部分，绑定归属 `admin` 用户，poller / QQ 网关照常启动
+
+> ⚠️ 单机模式不做任何鉴权，仅适合本机或可信内网使用，请勿暴露到公网。
+
 ## 环境变量
 
 编辑 `.env`：
