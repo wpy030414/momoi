@@ -5,6 +5,7 @@ import { SignJWT, jwtVerify } from 'jose'
 import { eq } from 'drizzle-orm'
 import { env } from './config.js'
 import { db, settings } from './db.js'
+import { STAND_ALONE } from './standalone.js'
 
 // ---- Admin membership ----
 
@@ -13,8 +14,11 @@ import { db, settings } from './db.js'
  * fixed for the process lifetime. There is no admin key and no separate
  * admin token: admin endpoints accept an ordinary user JWT and check
  * membership here on every request.
+ * In stand-alone mode everyone is the fixed 'admin' user, so this is always
+ * true (the admin panel is permanently enabled).
  */
 export function isAdmin(username: string): boolean {
+  if (STAND_ALONE) return true
   return env.ADMIN.includes(username)
 }
 
@@ -70,6 +74,12 @@ export function verifyPin(pin: string, stored: string): boolean {
  * an admin. Sets `userId` for downstream handlers.
  */
 export async function adminAuthMiddleware(c: Context, next: Next) {
+  // Stand-alone mode: no Momoi auth at all — identity is the fixed 'admin'.
+  if (STAND_ALONE) {
+    c.set('userId', 'admin')
+    await next()
+    return
+  }
   const token = getAuthToken(c)
   if (!token) {
     return c.json({ error: 'Unauthorized' }, 401)

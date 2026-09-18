@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import path from 'path'
 import fs from 'fs'
+import { STAND_ALONE } from './standalone.js'
 
 // ---- Detect remote dialect from DATABASE_URL ----
 
@@ -13,9 +14,15 @@ function detectRemoteDialect(url: string): 'pg' {
   throw new Error(`Unsupported DATABASE_URL scheme: ${url.split('://')[0]}://. Expected postgres:// or postgresql://`)
 }
 
-const remoteDialect = (DATABASE_URL && DATABASE_USER && DATABASE_SECRET)
+// Stand-alone mode is by definition a local single-file deployment: it always
+// uses its own SQLite file and ignores any remote database configuration.
+const remoteDialect = !STAND_ALONE && (DATABASE_URL && DATABASE_USER && DATABASE_SECRET)
   ? detectRemoteDialect(DATABASE_URL)
   : null
+
+if (STAND_ALONE && DATABASE_URL) {
+  console.warn('[db] --stand-alone ignores DATABASE_URL; using the local SQLite file')
+}
 
 if (remoteDialect) {
   console.log(`[db] Remote database mode: ${remoteDialect}`)
@@ -148,7 +155,9 @@ async function initSqlite() {
 
   const dataDir = path.resolve('data')
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
-  const dbPath = path.join(dataDir, 'momoi.db')
+  // Stand-alone mode uses its own isolated database file, fully separate from
+  // the multi-tenant momoi.db.
+  const dbPath = path.join(dataDir, STAND_ALONE ? 'momoi.stand-alone.db' : 'momoi.db')
 
   const SQL = await initSqlJs()
 

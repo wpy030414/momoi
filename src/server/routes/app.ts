@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { getConfig, listAgents } from '../config.js'
 import { NEUTRAL_AGENT_ID } from '../../shared/constants.js'
+import { STAND_ALONE } from '../standalone.js'
 
 export const appRoute = new Hono()
 
@@ -17,6 +18,9 @@ appRoute.get('/', async (c) => {
     show_github: config.show_github,
     use_external_image_hosting: config.use_external_image_hosting,
     recommended_questions: config.recommended_questions,
+    // The client's single discovery channel for stand-alone mode (auto-login
+    // as the fixed 'admin' user, hide auth-related UI entries).
+    stand_alone: STAND_ALONE,
     agents: agents.filter((a) => a.id !== NEUTRAL_AGENT_ID).map((a) => ({ id: a.id, name: a.name, avatar: a.avatar, voice_enabled: a.voice_enabled })),
   })
 })

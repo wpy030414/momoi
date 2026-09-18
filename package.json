@@ -7,10 +7,13 @@
     "dev": "concurrently -k \"pnpm dev:server\" \"wait-on tcp:11408 && pnpm dev:client\"",
     "dev:client": "vite",
     "dev:server": "cross-env NODE_ENV=development tsx watch src/server/index.ts",
+    "dev:standalone": "concurrently -k \"pnpm dev:server:standalone\" \"wait-on tcp:11408 && pnpm dev:client\"",
+    "dev:server:standalone": "cross-env NODE_ENV=development tsx watch src/server/index.ts --stand-alone",
     "build": "pnpm build:server && pnpm build:client",
     "build:client": "vite build",
     "build:server": "tsup src/server/index.ts --format esm --clean --outDir dist && cp -r docs dist/docs",
-    "start": "cross-env NODE_ENV=production node dist/index.js"
+    "start": "cross-env NODE_ENV=production node dist/index.js",
+    "start:standalone": "cross-env NODE_ENV=production node dist/index.js --stand-alone"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.85.1",

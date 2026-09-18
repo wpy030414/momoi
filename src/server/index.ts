@@ -5,16 +5,30 @@ import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 
 import { env, migrateDefaultAgent } from './config.js'
+import { STAND_ALONE } from './standalone.js'
+import { db, users } from './db.js'
 
 // config.ts transitively imports db.ts which has top-level await for database initialization.
 // Auto-create Default agent from legacy global config if no agents exist
 await migrateDefaultAgent()
+
+// Stand-alone mode: seed the fixed 'admin' user row (idempotent) so the users
+// table (and /api/admin/stats' total_users) reflects the single fixed identity.
+if (STAND_ALONE) {
+  const now = Math.floor(Date.now() / 1000)
+  await db.insert(users)
+    .values({ username: 'admin', pin_hash: '', first_login_at: now, last_login_at: now, banned: false })
+    .onConflictDoNothing()
+    .run()
+}
+
 import { conversationsRoute } from './routes/conversations.js'
 import { adminRoute } from './routes/admin.js'
 import { appRoute } from './routes/app.js'
 import { chatRoute } from './routes/chat.js'
 import { uploadRoute } from './routes/upload.js'
 import { userRoute } from './routes/user.js'
+import { standAloneUserRoute } from './routes/user-standalone.js'
 import { workspaceRoute } from './routes/workspace.js'
 import { groupRoute } from './routes/group.js'
 import { oauthRoute } from './routes/oauth.js'
@@ -44,10 +58,16 @@ app.route('/api/admin', adminRoute)
 app.route('/api/app-name', appRoute)
 app.route('/api/chat', chatRoute)
 app.route('/api/upload', uploadRoute)
-app.route('/api/user', userRoute)
+// Stand-alone mode: the fixed 'admin' identity has no PIN/JWT/cookie, so only
+// the minimal /me endpoint exists. WeChat/QQ bridge routes stay mounted —
+// binding is an IM capability, not Momoi auth, and binds to the 'admin' user.
+app.route('/api/user', STAND_ALONE ? standAloneUserRoute : userRoute)
 app.route('/api/workspace', workspaceRoute)
 app.route('/api/group', groupRoute)
-app.route('/api/oauth', oauthRoute)
+if (!STAND_ALONE) {
+  // OAuth login is part of the Momoi auth stack — not offered in stand-alone.
+  app.route('/api/oauth', oauthRoute)
+}
 app.route('/api/assets', assetsRoute)
 app.route('/api/voice', voiceRoute)
 app.route('/api/wechat', wechatRoute)
@@ -91,6 +111,8 @@ console.log(`
 ║  ${padVisual("Momoi AGI", contentCols)}  ║
 ║  ${padVisual(`http://localhost:${env.PORT}`, contentCols)}  ║
 ║  ${padVisual("----------------------------------", contentCols)}  ║
-║  ${padVisual(`Admin: ${env.ADMIN.length ? env.ADMIN.join('、') : 'Not configured (no admin)'}`, contentCols)}  ║
+║  ${padVisual(STAND_ALONE
+  ? 'Mode: Stand-alone (user: admin, auth disabled)'
+  : `Admin: ${env.ADMIN.length ? env.ADMIN.join('、') : 'Not configured (no admin)'}`, contentCols)}  ║
 ╚══════════════════════════════════════╝
 `)
