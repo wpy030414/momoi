@@ -1,0 +1,45 @@
+{
+  "name": "@momoi/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@momoi/shared": "workspace:*",
+    "@radix-ui/react-collapsible": "^1.1.20",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-scroll-area": "^1.2.18",
+    "@radix-ui/react-select": "^2.3.7",
+    "@radix-ui/react-slot": "^1.3.3",
+    "@radix-ui/react-tabs": "^1.1.21",
+    "@radix-ui/react-tooltip": "^1.2.16",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "i18next": "^26.4.2",
+    "lucide-react": "^0.475.0",
+    "mermaid": "^11.17.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-i18next": "^17.0.13",
+    "react-markdown": "^9.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/typography": "^0.5.20",
+    "@types/node": "^22.17.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "autoprefixer": "^10.5.5",
+    "dotenv": "^17.4.2",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2"
+  }
+}

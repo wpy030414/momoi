@@ -222,28 +222,24 @@ pnpm start
 ## 项目结构
 
 ```
-momoi/
-├── src/
-│   ├── shared/          # 客户端与服务端共享的类型和常量
-│   ├── client/          # React 前端（入口：main.tsx）
-│   │   ├── components/  # UI 组件（shadcn/ui）和业务组件
-│   │   │   ├── auth/    # 登录界面（用户名 + PIN）
-│   │   │   ├── chat/    # 聊天界面（消息、输入、附件、思考块）
-│   │   │   ├── sidebar/ # 侧边栏（对话列表、导出、用户信息）
-│   │   │   ├── admin/   # 管理面板（Agent/Gateway/品牌/技能/统计）
-│   │   │   └── ui/      # shadcn/ui 基础组件
-│   │   ├── hooks/       # React Hooks（useChat、useGroupChat、useTheme）
-│   │   ├── lib/         # API 客户端、工具函数
-│   │   ├── i18n/        # 国际化配置（zh-CN、en）
-│   │   └── styles/      # 全局 CSS（主题变量、滚动条、Mermaid）
-│   └── server/          # Hono 后端（入口：index.ts）
-│       ├── ai/          # Pi Agent Core 适配层 + 群聊编排 + 中立 Agent
-│       ├── tools/       # 内置工具（12 个）
-│       ├── skills/      # 技能加载和注册
-│       ├── files/       # 文件附件解析（图片、Excel、PDF、文本）
-│       ├── middleware/   # 用户 JWT 认证中间件
-│       └── routes/      # API 路由（chat/group/conversations/admin/upload/user/workspace/app）
-├── skills/              # 已安装的技能目录
-├── data/                # SQLite 数据库 + 对话工作区（workspaces/，含上传附件）
-└── docs/                # 项目文档
+momoi/                          # 仓库根（pnpm monorepo）
+├── apps/
+│   ├── server/                 # @momoi/server — Hono 后端
+│   │   ├── src/                # 源码（index.ts 入口）
+│   │   ├── dist/               # 自包含产物：index.js + client/ + docs/
+│   │   └── scripts/copy-docs.mjs
+│   └── web/                    # @momoi/web — React 前端（Vite）
+│       ├── src/                # 源码（main.tsx 入口）
+│       ├── index.html / public/
+│       └── vite.config.ts
+├── packages/
+│   └── shared/                 # @momoi/shared — 共享类型与常量（TS 源码直引，零构建）
+│       └── src/                # types.ts / constants.ts / thinking.ts
+├── data/                       # SQLite 数据库（运行时，原地不动）
+├── skills/                     # 已安装的技能目录（运行时，原地不动）
+├── docs/                       # 项目文档
+├── .env                        # 环境变量
+├── pnpm-workspace.yaml         # pnpm 工作区清单
+├── package.json                # 编排脚本（dev / build / start）
+└── tsconfig.base.json          # 共享 TS 编译选项
 ```

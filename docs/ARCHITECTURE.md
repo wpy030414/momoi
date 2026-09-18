@@ -284,6 +284,8 @@ TTS 配置（存储在 settings 表）：
 
 ## 模块依赖关系
 
+> Momoi 为 **pnpm monorepo**（`apps/server` + `apps/web` + `packages/shared`）。`@momoi/shared` 以 TS 源码直引（exports → `./src/*.ts`，零构建），tsup 内联到 server bundle；`data/`、`skills/`、`docs/`、`.env` 位于仓库根目录，`dist/` 为根级构建产物，服务端经 `REPO_ROOT`（向上找 `pnpm-workspace.yaml` 标记）锚定访问。
+
 ```
 routes/chat.ts
   ├── ai/pi-adapter.ts（Pi Agent Core 适配层）
@@ -583,10 +585,10 @@ IP 速率限制：
 
 ```
 开发模式：
-  Vite Dev Server (:5173)  ──proxy──→  Hono (:PORT, 默认 3001)
+  Vite Dev Server (:5173)  ──proxy──→  Hono (:PORT, 默认 11408)
 
 生产模式：
-  Hono (:PORT, 默认 3001)  ── 直接托管 ──→  dist/client/ 静态文件
+  Hono (:PORT, 默认 11408)  ── 直接托管 ──→  dist/client/ 静态文件
               └── API 路由 ──→  /api/*
 
 数据库模式：

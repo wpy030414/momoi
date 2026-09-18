@@ -1,0 +1,17 @@
+{
+  "name": "@momoi/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./types": "./src/types.ts",
+    "./constants": "./src/constants.ts",
+    "./thinking": "./src/thinking.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

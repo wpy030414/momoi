@@ -1,0 +1,52 @@
+{
+  "name": "@momoi/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development tsx watch src/index.ts",
+    "dev:standalone": "cross-env NODE_ENV=development tsx watch src/index.ts --stand-alone",
+    "build": "tsup && node scripts/copy-docs.mjs",
+    "start": "cross-env NODE_ENV=production node dist/index.js",
+    "start:standalone": "cross-env NODE_ENV=production node dist/index.js --stand-alone",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@momoi/shared": "workspace:*",
+    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-ai": "^0.85.1",
+    "@hono/node-server": "^1.19.17",
+    "@sinclair/typebox": "^0.34.52",
+    "adm-zip": "^0.6.0",
+    "docx": "^9.7.1",
+    "dotenv": "^16.6.1",
+    "drizzle-orm": "^0.39.3",
+    "exceljs": "^4.4.0",
+    "hono": "^4.13.7",
+    "jose": "^6.2.12",
+    "mammoth": "^1.12.2",
+    "pdf-parse": "^2.4.5",
+    "pptxgenjs": "^3.12.0",
+    "qrcode": "^1.5.4",
+    "sql.js": "^1.14.2",
+    "word-extractor": "^1.0.4",
+    "ws": "^8.21.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^22.17.0",
+    "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/sql.js": "^1.4.11",
+    "@types/ws": "^8.18.1",
+    "cross-env": "^10.1.0",
+    "drizzle-kit": "^0.30.6",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  },
+  "optionalDependencies": {
+    "pg": "^8.23.0"
+  }
+}

@@ -36,44 +36,56 @@
 
 ## 架构概述
 
-单进程全栈 TypeScript 应用：
+pnpm monorepo（`apps/*` + `packages/*`），纯 workspace 协议，无外部编排工具（Turborepo 等）：
 
-- **前端**：React 19 + shadcn/ui（Radix 原语 + Tailwind CSS 3.4），Vite 8（Rolldown 打包）构建为静态文件，由 Hono 在生产模式下托管
+- **前端**：React 19 + shadcn/ui（Radix 原语 + Tailwind CSS 3.4），Vite 8（Rolldown 打包）构建为静态文件，outDir 指向 `apps/server/dist/client/`，生产模式下由 `@momoi/server` 的 Hono 静态中间件托管
 - **后端**：Hono 4（Node.js），SSE 用于实时聊天流，REST API 用于 CRUD
-- **数据库**：SQLite（sql.js + Drizzle ORM，单文件 `data/momoi.db`）为默认模式；支持通过 `DATABASE_URL` 环境变量切换到 PostgreSQL（node-postgres + Drizzle ORM）
+- **数据库**：SQLite（sql.js + Drizzle ORM，单文件 `data/momoi.db`）为默认模式；支持通过 `DATABASE_URL` 环境变量切换到 PostgreSQL
 - **AI**：OpenAI 兼容的 Chat Completions API，支持流式输出、function calling、多模态附件、思考模式
 - **技能**：SKILL.md 文件（YAML 前置元数据 + Markdown 内容），注入系统提示词
 - **认证**：用户 4 位 PIN（PBKDF2 哈希 + JWT 14 天滑动续期，经 HttpOnly Cookie 传输）；管理员由 `ADMIN` 环境变量用户名名单授权（复用用户 JWT）
+- **共享层**：`@momoi/shared` 以 TS 源码直引（`exports` → `./src/*.ts`，零构建），tsup 内联到 server bundle 使 `apps/server/dist/` 自包含可部署
 
 ### 单机模式（--stand-alone）
 
 服务器以 `--stand-alone` 启动时进入单机模式：固定 `admin` 单用户、Momoi 鉴权全关（`src/server/standalone.ts` 零依赖叶子模块从 `process.argv` 解析，全服务端共享）。`userAuthMiddleware` / `adminAuthMiddleware` 直通并固定 `userId='admin'`，`isAdmin()` 恒真；数据库使用独立的 `data/momoi.stand-alone.db`（忽略 `DATABASE_URL`）；`/api/user` 挂载极简路由（仅 `GET /me`，见 `routes/user-standalone.ts`），`/api/oauth` 不挂载——因此单机模式不可能签发任何 PIN/JWT/Cookie。微信 / QQ 桥接照常（归属 `admin`）。前端经 `GET /api/app-name` 的 `stand_alone` 字段发现模式：自动登录、隐藏改密/改名/关联/登出入口、后台「用户」tab 隐藏。
 
+## 项目结构
+
+pnpm monorepo：应用 (`apps/`) 与可复用包 (`packages/`)，纯 workspace 协议。
+
+| 包 | 位置 | 说明 |
+|---|---|---|
+| `@momoi/server` | `apps/server/` | Hono 后端，入口 `src/index.ts`，自包含产物 `dist/`（含 `client/`） |
+| `@momoi/web` | `apps/web/` | React 前端（Vite），产出物落在 `apps/server/dist/client/` |
+| `@momoi/shared` | `packages/shared/` | 共享类型与常量，TS 源码直引（`exports` → `./src/*.ts`，零构建） |
+
+运行时的用户数据（`data/`、`skills/`、`.env`）在仓库根目录不动。服务端通过 `REPO_ROOT` 锚定访问（向上找到 `pnpm-workspace.yaml` 标记）。
+
 ## 关键目录
 
 | 路径 | 用途 |
 |---|---|
-| `src/shared/` | 客户端与服务端共享的 TypeScript 类型和常量 |
-| `src/client/` | React 前端（入口：`main.tsx`） |
-| `src/server/` | Hono 后端（入口：`index.ts`） |
-| `src/server/ai/` | Pi Agent Core 适配层（`pi-adapter.ts`）+ 群聊编排（`group-orchestrator.ts`）+ 中立 Agent（`neutral-agent.ts`）+ TTS 语音合成（`tts.ts`） |
-| `src/server/tools/` | 内置工具系统（13 个工具：文件/网络/文档/技能/bash/群聊/@提及/ask_user）+ MCP 客户端动态工具注入（`mcp-client.ts`） |
-| `src/server/skills/` | 技能加载和注册（`loader.ts` → `registry.ts`） |
-| `src/server/files/` | 文件附件解析（`parser.ts`：图片→base64、xlsx→csv、pdf→text） |
-| `src/server/middleware/` | 用户 JWT 认证中间件（`userAuth.ts`）+ IP 速率限制（`rateLimiter.ts`） |
-| `src/server/routes/` | API 路由：`chat.ts`、`group.ts`、`conversations.ts`、`admin.ts`、`upload.ts`、`user.ts`、`workspace.ts`、`app.ts`、`oauth.ts`、`wechat.ts`、`qq.ts`、`voice.ts`、`events.ts`、`assets.ts` |
-| `src/server/wechat/` | 微信聊天桥接（`chat.ts`）+ iLink 客户端（`ilink.ts`）+ 消息轮询器（`poller.ts`） |
-| `src/server/qq/` | QQ 聊天桥接（`chat.ts`，流式回发）+ REST 协议客户端（`api.ts`）+ WS 网关连接（`gateway.ts`）+ per-user 连接注册表（`manager.ts`） |
-| `src/server/im/` | 跨渠道共享 per-user 锁（`locks.ts`）——微信/QQ 消息处理串行化 |
-| `src/server/realtime.ts` | 同账号多设备 SSE 实时事件总线（进程内内存态） |
-| `skills/` | 已安装的技能目录 |
-| `data/` | SQLite 数据库文件（`momoi.db`）+ 对话工作区（`workspaces/`，含 `__uploads__/` 上传附件） |
+| `apps/server/src/` | Hono 后端（入口：`index.ts`） |
+| `apps/server/src/ai/` | Pi Agent Core 适配层 + 群聊编排 + 中立 Agent + TTS |
+| `apps/server/src/tools/` | 内置工具系统 + MCP 客户端 |
+| `apps/server/src/skills/` | 技能加载和注册 |
+| `apps/server/src/middleware/` | 用户 JWT 认证中间件 + IP 速率限制 |
+| `apps/server/src/routes/` | API 路由 |
+| `apps/web/src/` | React 前端（入口：`main.tsx`） |
+| `apps/web/src/components/` | UI 组件和业务组件 |
+| `apps/web/src/hooks/` | React Hooks |
+| `apps/web/src/lib/` | API 客户端、工具函数 |
+| `apps/web/src/i18n/` | 国际化 |
+| `packages/shared/src/` | 共享类型 (`types.ts`) 和常量 (`constants.ts`, `thinking.ts`) |
+| `skills/` | 已安装的技能（运行时，根目录） |
+| `data/` | SQLite 数据库 + 对话工作区（运行时，根目录） |
 ## 开发
 
 ```bash
-pnpm dev          # 同时运行 Vite（5173）+ Hono（3001），tsx watch 热重载
-pnpm build        # 构建客户端（Vite）+ 服务端（tsup）
-pnpm start        # 运行生产构建（node dist/index.js）
+pnpm dev          # 同时运行 Vite（5173）+ Hono（11408），tsx watch 热重载
+pnpm build        # 先构建 server（tsup），再 web（Vite）——server 的 tsup --clean 会清掉旧的 client/
+pnpm start        # 运行生产构建（node apps/server/dist/index.js 从仓库根运行）
 ```
 
 ## 代码规范

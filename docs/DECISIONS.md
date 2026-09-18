@@ -1146,3 +1146,38 @@
 - 删除：`QqStreamSender` 类、`sendStreamFrame`、`isQqRateLimitError`、`QqStreamFrameRequest`、`SUGGESTIONS_FENCE` 引用（chat.ts）
 - 简化：`handleQqMessageInner` 回发链路（streamer.complete → 降级 → 直接 sendTextWithRetry）
 - 更新：`docs/specs/module-qq.md`（数据模型/消息流程/行为约束/验收标准/协议附录）
+
+## D46：pnpm Monorepo 工作区——apps/* + packages/* 三层分离
+
+**日期**：2026-09-18
+
+**背景**：项目源码集中在单包全仓（src/client、src/server、src/shared），构建配置（tsup/tsconfig/vite/tailwind/postcss）与运行时数据（data/skills/.env）全部耦合在根目录。随着功能增长，依赖边界需要显式化；标准 monorepo 布局也为未来扩展（CLI、小程序等）预留空间。
+
+**决策**：
+
+1. **apps/server + apps/web + packages/shared** 三层结构（非统一 packages/*，区分为可部署应用与被引用库）
+2. **纯 pnpm workspaces**：`pnpm-workspace.yaml` 的 `packages:` 声明；**无 Turborepo**（三包规模、构建链简单，任务图缓存收益微小但增加工具链与配置维护成本）
+3. **`@momoi/shared` 以 TS 源码直引**：`exports` 指向 `./src/*.ts`，零构建；tsup 通过 `noExternal` 内联到 server bundle 使 `apps/server/dist/` 自包含可部署；web 端由 vite 自然消费
+4. **运行时数据原地不动**：`data/`、`skills/`、`.env`、`docs/` 在仓库根目录；服务端新增 `paths.ts`（`repoRoot()` — 从 `import.meta.url` 向上找 `pnpm-workspace.yaml` 标记 → 兜底 `process.cwd()`）替换所有 `path.resolve('data',...)` 等 cwd 相对路径
+5. **生产产物 = apps/server/dist/**：vite outDir 指向 `../server/dist/client/`，tsup + copy-docs → 自包含 dist（index.js+chunks + client/ + docs/），部署时拷贝整目录 + `.env` + `data/` 即可
+6. **构建顺序 server 先 web 后**：`tsup --clean` 会清掉之前 vite 写入的 `client/` 子目录，强制 server 先在根脚本中执行
+
+**原因**：
+- `@/` 别名仅用于 shared 导入——证明客户端对 shared 的耦合天然是一层有名称的边界
+- 服务端需要 cwd 独立性（monorepo 下 cwd 不再是仓库根）→ `path.resolve('data')` 会静默新建空 data 目录，必须重锚定
+- shared 零运行时依赖——TS 源码直引无编译开销，开发循环即时生效
+- pnpm workspaces 已在用（`allowBuilds`），加入 `packages:` 零额外工具
+
+**备选与权衡**：
+- ❌ Turborepo：三包、两构建步骤，工作区协议编排已足够；远程缓存在当前规模下无实质收益
+- ❌ shared 独立构建：多一步构建循环，shared 仅 3 文件且无外部依赖——独立构建的边际收益为零
+- ❌ 统一 packages/* 扁平化：不区分应用与库，语义模糊
+
+**影响**：
+- 新增：`pnpm-workspace.yaml`（合并 `packages:`）、`tsconfig.base.json`、四个 `package.json`（根瘦编排 + 三个子包）、四个 tsconfig、`paths.ts`、`env.ts`（显式 dotenv 路径替代三处 `import 'dotenv/config'`）、`scripts/copy-docs.mjs`（跨平台替代 POSIX `cp -r`）
+- 移动（git mv 保留历史）：`src/server → apps/server/src`、`src/client → apps/web/src`、`src/shared → packages/shared/src`；`tsup.config → apps/server/`；`vite/tailwind/postcss.config → apps/web/`
+- 导入重写：client `@/shared/ → @momoi/shared/`（11+30 处）；server `'../shared/*.js' → '@momoi/shared/*'`（去 .js，~20 处 + pi-adapter 3 处 inline type import）；`thinking.ts` 补 `.js` 后缀
+- 服务端路径重锚定：~20 处 `path.resolve('x') → path.resolve(repoRoot(), 'x')`
+- 弃用：`rehype-highlight`、`@hono/node-ws`（核实零导入）
+- 首次 typecheck：补 DOM lib + `@types/node` + `dotenv` devDep（web 侧），三个包全绿
+- 文档：README/AGENTS/ARCHITECTURE/DECISIONS 同步更新
