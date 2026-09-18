@@ -14,7 +14,7 @@
     "altAgentAvatar": "エージェントアバター"
   },
   "chat": {
-    "inputPlaceholder": "メッセージを入力...（Enter で送信、Shift+Enter で改行）",
+    "inputPlaceholder": "メッセージを入力...",
     "thinking": "考え中...",
     "thought": "思考完了",
     "thinkingMode": "思考モード",
@@ -51,7 +51,7 @@
     "roleTool": "ツール",
     "roleAssistant": "アシスタント",
     "exportDefaultTitle": "会話",
-    "qqGroupReadonly": "この会話はQQグループチャットからのメッセージのみを受信します。ここから送信できません",
+    "qqGroupReadonly": "この会話は QQ グループチャットからのメッセージのみを受信します。ここから送信できません",
     "askUser": {
       "skip": "スキップ",
       "submit": "送信",

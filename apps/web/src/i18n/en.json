@@ -14,7 +14,7 @@
     "altAgentAvatar": "Agent avatar"
   },
   "chat": {
-    "inputPlaceholder": "Type a message... (Enter to send, Shift+Enter for newline)",
+    "inputPlaceholder": "Type a message...",
     "thinking": "Thinking...",
     "thought": "Thought",
     "thinkingMode": "Thinking Mode",

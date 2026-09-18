@@ -14,7 +14,7 @@
     "altAgentAvatar": "智能体头像"
   },
   "chat": {
-    "inputPlaceholder": "输入消息...（Enter 发送，Shift+Enter 换行）",
+    "inputPlaceholder": "输入消息...",
     "thinking": "思考中...",
     "thought": "已思考",
     "thinkingMode": "思考模式",
@@ -51,7 +51,7 @@
     "roleTool": "工具",
     "roleAssistant": "助手",
     "exportDefaultTitle": "对话",
-    "qqGroupReadonly": "此会话仅接收来自QQ群聊的消息，无法在此处发送",
+    "qqGroupReadonly": "此会话仅接收来自 QQ 群聊的消息，无法在此处发送",
     "askUser": {
       "skip": "跳过",
       "submit": "提交",

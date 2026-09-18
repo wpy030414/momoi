@@ -3,6 +3,7 @@ import { db, conversations, wechatBindings } from '../db.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { withNamedLock } from '../im/locks.js'
+import { broadcastConversationSync } from '../realtime.js'
 import QRCode from 'qrcode'
 
 export const wechatRoute = new Hono()
@@ -196,6 +197,7 @@ wechatRoute.get('/bind/status', userAuthMiddleware, async (c) => {
         return c.json({ status: 'expired', error: '目标会话已删除，请重新选择会话并绑定。' })
       }
 
+      broadcastConversationSync(userId)
       return c.json({ status: 'confirmed' })
     })
   }
@@ -211,5 +213,6 @@ wechatRoute.get('/bind/status', userAuthMiddleware, async (c) => {
 wechatRoute.delete('/bind', userAuthMiddleware, async (c) => {
   const userId = (c as any).get('userId') as string
   await db.delete(wechatBindings).where(eq(wechatBindings.user_id, userId)).run()
+  broadcastConversationSync(userId)
   return c.json({ success: true })
 })

@@ -5,6 +5,7 @@ import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { withNamedLock } from '../im/locks.js'
 import { getAccessToken } from '../qq/api.js'
 import { isBotReady, restartBotForUser, stopBotForUser } from '../qq/manager.js'
+import { broadcastConversationSync } from '../realtime.js'
 
 export const qqRoute = new Hono()
 
@@ -142,6 +143,7 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
 
       // 换凭证即换连接（凭证变更后 open_id 空间随之改变，旧连接立即失效）
       await restartBotForUser(userId, agentId)
+      broadcastConversationSync(userId)
       return c.json({ success: true })
     }
 
@@ -161,6 +163,7 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
         eq(qqBindings.user_id, userId),
         eq(qqBindings.agent_id, agentId),
       )).run()
+      broadcastConversationSync(userId)
       return c.json({ success: true })
     }
     await db.update(qqBindings).set({
@@ -170,6 +173,7 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
       eq(qqBindings.user_id, userId),
       eq(qqBindings.agent_id, agentId),
     )).run()
+    broadcastConversationSync(userId)
     return c.json({ success: true })
   })
 })
@@ -199,5 +203,6 @@ qqRoute.delete('/bind', userAuthMiddleware, async (c) => {
       eq(qqBindings.user_id, userId),
       eq(qqBindings.agent_id, agentId),
     )).run()
+  broadcastConversationSync(userId)
   return c.json({ success: true })
 })
