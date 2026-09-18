@@ -98,6 +98,13 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle>(function Gatewa
           onCheckedChange={(v) => setConfig({ ...config, use_external_image_hosting: v })}
         />
       </div>
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-medium">{t('settings.allowImConversations')}</label>
+        <Switch
+          checked={config.allow_im_conversations !== false}
+          onCheckedChange={(v) => setConfig({ ...config, allow_im_conversations: v })}
+        />
+      </div>
       <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>
   )

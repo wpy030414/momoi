@@ -89,6 +89,7 @@ export function App() {
   const [backgroundImage, setBackgroundImage] = useState('')
   const [supportAttachments, setSupportAttachments] = useState(false)
   const [supportInfiniteMode, setSupportInfiniteMode] = useState(true)
+  const [allowImConversations, setAllowImConversations] = useState(true)
   const [showGithub, setShowGithub] = useState(true)
   const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>([])
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
@@ -296,7 +297,16 @@ export function App() {
       return
     }
     api.getMe()
-      .then((r) => setIsAdminUser(!!r.is_admin))
+      .then((r) => {
+        setIsAdminUser(!!r.is_admin)
+        // 服务器身份权威校验：同一浏览器在常规模式与单机模式之间切换时，
+        // localStorage 可能残留上一模式的用户名（如单机残留 alice 或常规残留 admin）。
+        // /api/user/me 永远返回服务端实际解析出的 userId（常规模式来自 JWT cookie，
+        // 单机模式固定为 'admin'），不一致则强制修正 localStorage + state 并刷新会话列表。
+        if (r.username && r.username !== currentUser) {
+          handleLogin(r.username)
+        }
+      })
       .catch(() => setIsAdminUser(false))
   }, [currentUser, standAlone])
 
@@ -391,6 +401,7 @@ export function App() {
       }
       setSupportAttachments(!!r.support_attachments)
       setSupportInfiniteMode(r.support_infinite_mode !== false)
+      setAllowImConversations(r.allow_im_conversations !== false)
       setShowGithub(r.show_github !== false)
       setRecommendedQuestions(r.recommended_questions || [])
       if (r.agents?.length > 0) {
@@ -412,6 +423,7 @@ export function App() {
         setBackgroundImage(r.app_background || '')
         setSupportAttachments(!!r.support_attachments)
         setSupportInfiniteMode(r.support_infinite_mode !== false)
+        setAllowImConversations(r.allow_im_conversations !== false)
         setShowGithub(r.show_github !== false)
         setRecommendedQuestions(r.recommended_questions || [])
         if (r.agents?.length > 0) {
@@ -663,13 +675,12 @@ export function App() {
             onMerge={handleMergeConversation}
             onExport={chat.exportConversation}
             onManageGroupAgents={handleManageGroupAgents}
-            onContinueOnIm={handleContinueOnIm}
+            onContinueOnIm={allowImConversations ? handleContinueOnIm : undefined}
             appName={appName}
             currentUser={currentUser}
             showGithub={showGithub}
             // Stand-alone mode: the fixed 'admin' identity cannot be renamed,
             // re-PIN'd, OAuth-linked, or logged out — hide those entries.
-            // (onContinueOnIm stays: WeChat/QQ bridging remains available.)
             onChangePin={standAlone ? undefined : () => setChangePinOpen(true)}
             onChangeUsername={standAlone ? undefined : () => setChangeUsernameOpen(true)}
             onLinkAccount={standAlone ? undefined : () => setLinkedAccountsOpen(true)}

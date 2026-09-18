@@ -15,6 +15,7 @@ appRoute.get('/', async (c) => {
     app_background: config.app_background,
     support_attachments: config.support_attachments,
     support_infinite_mode: config.support_infinite_mode,
+    allow_im_conversations: config.allow_im_conversations,
     show_github: config.show_github,
     use_external_image_hosting: config.use_external_image_hosting,
     recommended_questions: config.recommended_questions,

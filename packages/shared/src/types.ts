@@ -83,6 +83,7 @@ export interface AppConfig {
   api_key: string
   support_attachments: boolean
   support_infinite_mode: boolean
+  allow_im_conversations: boolean
   show_github: boolean
   use_external_image_hosting: boolean
   recommended_questions: string[]
