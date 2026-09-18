@@ -237,7 +237,15 @@ chatRoute.post('/', async (c) => {
           tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
           tool_call_id: m.tool_call_id || undefined,
           agent_id: m.agent_id || null,
+          created_at: m.created_at,
         }))
+
+      // 计算 Agent 上次发言时间（最近一条属于该 Agent 的 assistant 消息的 created_at）
+      const lastAgentMsg = historyMsgs
+        .slice(0, -1)
+        .filter((m) => m.role === 'assistant' && m.agent_id === agentId)
+        .at(-1)
+      const lastMessageAt = lastAgentMsg?.created_at
 
       // --- Tell client the conversation ID ---
       streamConvId = convId
@@ -503,7 +511,15 @@ chatRoute.post('/', async (c) => {
           tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
           tool_call_id: m.tool_call_id || undefined,
           agent_id: m.agent_id || null,
+          created_at: m.created_at,
         }))
+      }
+
+      /** 从最新历史中计算 Agent 上次发出 assistant 消息的时间戳 */
+      const computeLastMessageAt = (msgs: ChatMessage[], targetId?: string): number | undefined => {
+        const assistantMsgs = msgs.filter((m) => m.role === 'assistant' && m.created_at)
+        if (!targetId) return assistantMsgs.at(-1)?.created_at
+        return assistantMsgs.filter((m) => m.agent_id === targetId).at(-1)?.created_at
       }
 
       // Helper: check if infinite mode should continue
@@ -547,6 +563,7 @@ chatRoute.post('/', async (c) => {
           agentId: agentId || undefined,
           infiniteMode: isInfinite,
           language,
+          lastMessageAt,
         })
         if (reply) {
           await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)
@@ -598,6 +615,7 @@ chatRoute.post('/', async (c) => {
             agentId: agentId || undefined,
             infiniteMode: isInfinite,
             language,
+            lastMessageAt: computeLastMessageAt(currentHistory, agentId || undefined),
           })
           if (reply) {
             await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)

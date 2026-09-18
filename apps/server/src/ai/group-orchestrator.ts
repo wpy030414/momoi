@@ -313,6 +313,12 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         ? agentNameById.get(protagonistAgentId)
         : undefined
 
+      // 从 per-agent 历史中计算当前 Agent 上次发言时间
+      const lastMsg = perAgentHistory
+        .filter((m) => m.role === 'assistant' && m.agent_id === agentId && m.created_at)
+        .at(-1)
+      const lastMessageAt = lastMsg?.created_at
+
       const { reply, suggestions, thinking, artifacts, trace } = await runPiAgentLoop({
         userMessage,
         history: perAgentHistory,
@@ -332,6 +338,7 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         speakingRole,
         protagonistName,
         language,
+        lastMessageAt,
       })
 
       repliedAgents.add(agentId)

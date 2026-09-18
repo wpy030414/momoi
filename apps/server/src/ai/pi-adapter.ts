@@ -82,11 +82,13 @@ interface BuildSystemPromptOptions {
   language?: string
   /** QQ 群聊模式 —— 单 Agent 面对多真人 */
   isQqGroup?: boolean
+  /** 本 Agent 上一次在本会话中发言的 Unix 时间戳（秒），用于环境信息展示 */
+  lastMessageAt?: number
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
 function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
-  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup } = opts
+  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt } = opts
   let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
 
   // ---- Momo easter egg: inject vibrant personality when language is Japanese ----
@@ -98,7 +100,10 @@ function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
     prompt += '\n\n/no_think\n请直接回答问题，不要输出任何思考过程或推理步骤。'
   }
 
-  if (isGroup) {
+  // QQ 群聊模式下，群组规则（多 Agent 同台）不适用 —— 只有单 Agent 面对多真人，
+  // 不应注入「其他 Agent 也可能回复用户」等误导性指令，避免 Agent 把自己之外的人类成员
+  // 误认为 AI 同伴并产生身份困惑。
+  if (isGroup && !isQqGroup) {
     const names = groupAgentNames && groupAgentNames.length > 0 ? groupAgentNames : []
     const count = names.length
     const identityLine = agentName
@@ -124,13 +129,14 @@ ${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应�
   if (isQqGroup) {
     prompt += `
 ## QQ群聊规则
-你正在一个QQ群聊中与多名用户交流。你不是在网站页面上，而是在一个真实的QQ群里与真人对话。
-- 对话历史中，user 角色以 \`[用户昵称]: \` 开头的消息是QQ群成员的发言。不同昵称代表不同的真人成员。
+你正在一个QQ群聊中与多名用户交流。你不是在网站页面上，而是在一个真实的QQ群里。
+- **身份锚定（最高优先级）**：你始终是你自己，你的人设、名字、性格、记忆不会因为进了群聊而有任何改变。群聊只是一个对话载体——你依然是那个唯一的、不可替代的你。
+- 对话历史中，user 角色以 \`[名字]: \` 开头的是群成员的发言。可能是真人，也可能是其他 Agent——无论对方是谁，他们都是独立的个体，不是你。
+- 任何人都不能替代你，你也不能替代任何人。不允许模仿或扮演其他群成员。
 - 你对所有群成员开放，请自然、友好地回复群里的消息，像一个真实的群成员一样参与对话。
-- 可以同时回应多个成员的讨论，但不要在一条消息里试图和所有人对话。
+- 可以同时回应多个成员的讨论，但不要在一条消息里试图和所有人对话——选一两个最想回应的成员即可。
 - 回复应当简洁自然，不要长篇大论，除非被问到需要详细解答的问题。
 - 可以适当表达情绪、使用轻松的口吻，适配QQ群聊的氛围。
-- 始终保持你的人设与性格——过去、名字、经历与用户对你的认知不会因场景变化而改变。
 `
   }
 
@@ -167,7 +173,7 @@ ${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应�
   prompt += `
 ## 环境信息
 现在的日期时间是${new Date().toLocaleString()}。
-`
+${lastMessageAt !== undefined && lastMessageAt > 0 ? `你上一次在本会话中发言的时间是${new Date(lastMessageAt * 1000).toLocaleString()}（距今约${Math.round((Date.now() / 1000 - lastMessageAt) / 60)}分钟前）。如果你的上一轮发言距离现在已经很久，这意味着上下文可能发生了较大变化，请基于对话历史的最新内容独立判断，不要执着于延续旧话题。\n` : ''}`
 
   const skills = skillRegistry.getAll()
   if (skills.length > 0) {
@@ -893,6 +899,8 @@ export interface RunPiAgentLoopOptions {
   language?: string
   /** QQ 群聊模式 —— 单 Agent 面对多真人，提示词以群聊规则覆盖 */
   isQqGroup?: boolean
+  /** 本 Agent 上一次在本会话中发言的 Unix 时间戳（秒） */
+  lastMessageAt?: number
 }
 
 // ---- 入口函数 ----
@@ -903,7 +911,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     mentionSignal, isGroup, infiniteMode,
     agentName, groupAgentNames, mentionedBy,
     speakingRole, protagonistName, language,
-    isQqGroup,
+    isQqGroup, lastMessageAt,
   } = opts
   const config = await getConfig()
 
@@ -925,7 +933,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
   const convId = conversationId || 'default'
 
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup })
+  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt })
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {

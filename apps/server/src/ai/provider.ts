@@ -17,6 +17,8 @@ export interface ChatMessage {
   tool_call_id?: string
   /** 群聊：该消息由哪个 Agent 产生（用于上下文身份还原） */
   agent_id?: string | null
+  /** Unix 时间戳（秒），用于计算 Agent 上一次发言时间等 */
+  created_at?: number
 }
 
 export interface StreamEvent {

@@ -172,7 +172,14 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
     tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
     tool_call_id: m.tool_call_id || undefined,
     agent_id: m.agent_id || null,
+    created_at: m.created_at,
   }))
+
+  // 计算 Agent 上次发言时间
+  const lastAgentMsg = historyMsgs.slice(0, -1)
+    .filter((m: any) => m.role === 'assistant' && m.agent_id === agentId)
+    .at(-1)
+  const lastMessageAt = lastAgentMsg?.created_at
 
   // ---- Run AI (broadcast to web clients; no QQ streaming — send full text on completion) ----
   // send 回调仅承担实时中继到同账号其他设备（网页端 SSE 通道）
@@ -186,6 +193,7 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
     conversationId: convId,
     userId,
     agentId,
+    lastMessageAt,
   })
 
   // ---- Save assistant message ----
@@ -404,17 +412,41 @@ async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void
 
   // Agent anchor: from opts (already destructured above)
 
-  // 加载历史
+  // 加载历史（含 per-agent 视角转换）
   const historyMsgs = await db.select().from(messages)
     .where(eq(messages.conversation_id, convId))
     .orderBy(messages.created_at).all()
-  const history = historyMsgs.slice(0, -1).map((m: any) => ({
-    role: m.role as any,
-    content: m.content,
-    tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
-    tool_call_id: m.tool_call_id || undefined,
-    agent_id: m.agent_id || null,
-  }))
+
+  // 加载 Agent 名册用于 per-agent 视角转换
+  const allAgents = await listAgents()
+  const agentNameById = new Map(allAgents.map((a) => [a.id, a.name]))
+
+  // QQ 群聊中可能存在多个 Agent（不同 binding 接入同一群），
+  // 需要做 per-agent 视角转换：自己的 assistant 保持原样，别人的转 [名字]: 内容
+  const history = historyMsgs.slice(0, -1).map((m: any) => {
+    if (m.role === 'assistant' && m.agent_id && m.agent_id !== agentId) {
+      const name = agentNameById.get(m.agent_id) || m.agent_id
+      return {
+        role: 'user' as const,
+        content: `[${name}]: ${m.content || ''}`,
+        created_at: m.created_at,
+      }
+    }
+    return {
+      role: m.role as any,
+      content: m.content,
+      tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
+      tool_call_id: m.tool_call_id || undefined,
+      agent_id: m.agent_id || null,
+      created_at: m.created_at,
+    }
+  })
+
+  // 计算 Agent 上次发言时间
+  const lastGroupAgentMsg = historyMsgs.slice(0, -1)
+    .filter((m: any) => m.role === 'assistant' && m.agent_id === agentId)
+    .at(-1)
+  const lastGroupMessageAt = lastGroupAgentMsg?.created_at
 
   // 跑 AI（send 回调仅 broadcastStream，QQ 群不支持流式回发）
   const { reply, suggestions, thinking } = await runPiAgentLoop({
@@ -429,6 +461,7 @@ async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void
     agentId,
     isGroup: true,
     isQqGroup: true,
+    lastMessageAt: lastGroupMessageAt,
   })
 
   // 写 assistant 消息

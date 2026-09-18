@@ -108,7 +108,14 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
     tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
     tool_call_id: m.tool_call_id || undefined,
     agent_id: m.agent_id || null,
+    created_at: m.created_at,
   }))
+
+  // 计算 Agent 上次发言时间
+  const lastWechatMsg = historyMsgs.slice(0, -1)
+    .filter((m: any) => m.role === 'assistant' && m.agent_id === agentId)
+    .at(-1)
+  const lastMessageAt = lastWechatMsg?.created_at
 
   // ---- Run AI (with realtime broadcast to other devices) ----
   // send 回调同时承担两个职责：
@@ -127,6 +134,7 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
     userId,
     agentId,
     language,
+    lastMessageAt,
   })
 
   // ---- Save assistant message ----
