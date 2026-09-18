@@ -117,6 +117,17 @@ export async function initSqlite() {
   // Ensure index exists
   sqlDb.run(`CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id)`)
 
+  // Create user_agent_memories table for existing databases (new installs get it from MIGRATION_SQL)
+  try { sqlDb.run(`CREATE TABLE IF NOT EXISTS user_agent_memories (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'agent',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`) } catch { /* table already exists */ }
+  sqlDb.run(`CREATE INDEX IF NOT EXISTS idx_user_agent_memories ON user_agent_memories(user_id, agent_id)`)
+
   persist()
 
   const db = drizzle(sqlDb, { schema }) as any

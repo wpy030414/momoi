@@ -175,6 +175,8 @@
     "userDeleteConfirm": "Delete user \"{{username}}\"? All their conversations and messages will also be deleted. This action cannot be undone.",
     "noUsers": "No users",
     "toastUserDeleted": "User deleted",
+    "toastUserForgotten": "{{count}} memories cleared",
+    "userForget": "Forget",
     "toastUserBanned": "User banned",
     "toastUserUnbanned": "User unbanned",
     "oauthProviders": "OAuth2 Providers",

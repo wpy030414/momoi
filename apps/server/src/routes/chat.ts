@@ -10,9 +10,9 @@ import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutr
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage, Attachment, TraceEntry } from '@momoi/shared/types'
 import { randomUUID } from 'crypto'
-import { getConfig, listAgents, getAgent } from '../lib/config.js'
-import { resolveQuestion, getPendingQuestion } from '../tools/ask-user-tool.js'
+import { getConfig, listAgents, getAgent, getUserAgentMemories } from '../lib/config.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
+import { resolveQuestion, getPendingQuestion } from '../tools/ask-user-tool.js'
 import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { SandboxFS } from '../tools/workspace.js'
@@ -243,7 +243,7 @@ chatRoute.post('/', async (c) => {
       // 计算 Agent 上次发言时间（最近一条属于该 Agent 的 assistant 消息的 created_at）
       const lastAgentMsg = historyMsgs
         .slice(0, -1)
-        .filter((m) => m.role === 'assistant' && m.agent_id === agentId)
+        .filter((m: typeof messages.$inferSelect) => m.role === 'assistant' && m.agent_id === agentId)
         .at(-1)
       const lastMessageAt = lastAgentMsg?.created_at
 
@@ -334,6 +334,10 @@ chatRoute.post('/', async (c) => {
         try { return JSON.parse(voiceAgent!.voice_settings) } catch { return {} }
       })() : null
       const voiceSpeakerId: string | undefined = voiceSettingsRaw?.speakerId
+
+      // --- Load user-agent memories (skip neutral agent) ---
+      const resolvedMid = agentId && agentId !== NEUTRAL_AGENT_ID ? agentId : null
+      const userMemories = resolvedMid ? await getUserAgentMemories(userId, resolvedMid) : []
 
       // Sentence boundary detection for voice
       const SENTENCE_BOUNDARY_RE = /[。！？.!?\n]/
@@ -564,6 +568,7 @@ chatRoute.post('/', async (c) => {
           infiniteMode: isInfinite,
           language,
           lastMessageAt,
+          userMemories,
         })
         if (reply) {
           await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)
@@ -616,6 +621,7 @@ chatRoute.post('/', async (c) => {
             infiniteMode: isInfinite,
             language,
             lastMessageAt: computeLastMessageAt(currentHistory, agentId || undefined),
+            userMemories,
           })
           if (reply) {
             await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)

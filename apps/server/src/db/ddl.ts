@@ -117,4 +117,14 @@ export const MIGRATION_SQL = `
     PRIMARY KEY (app_id, group_openid)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);`
+  CREATE TABLE IF NOT EXISTS user_agent_memories (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'agent',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
+  CREATE INDEX IF NOT EXISTS idx_user_agent_memories ON user_agent_memories(user_id, agent_id);`

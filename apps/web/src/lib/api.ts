@@ -296,6 +296,11 @@ export const api = {
     request<{ success: boolean; banned: boolean }>(`/api/admin/users/${encodeURIComponent(username)}/ban`, { method: 'PUT', body: JSON.stringify({ banned }) }),
   deleteUser: (username: string) =>
     request<{ success: boolean }>(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' }),
+  forgetUserMemories: (username: string) =>
+    request<{ success: boolean; deleted: number }>(
+      `/api/admin/users/${encodeURIComponent(username)}/forget-memories`,
+      { method: 'POST' }
+    ),
   getDirectRegistration: () =>
     request<{ direct_registration_open: boolean }>('/api/admin/direct-registration'),
   setDirectRegistration: (open: boolean) =>

@@ -4,7 +4,7 @@ import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
 import { Switch } from '../../ui/switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
-import { Plus, Trash2, Pencil, Eye, EyeOff } from 'lucide-react'
+import { Plus, Trash2, Pencil, Eye, EyeOff, Brain } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 import type { AdminUserRow, OAuth2Provider } from '@momoi/shared/types'
@@ -132,6 +132,15 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
     setDeleteUsername(null)
   }
 
+  const handleForgetMemories = async (username: string) => {
+    try {
+      const res = await api.forgetUserMemories(username)
+      toast({ title: t('settings.toastUserForgotten', { count: res.deleted }), variant: 'success' })
+    } catch (err: any) {
+      toast({ title: err.message, variant: 'error' })
+    }
+  }
+
   useImperativeHandle(ref, () => ({}))
 
   const formatTime = (ts: number | null) => ts ? new Date(ts * 1000).toLocaleString() : '-'
@@ -217,6 +226,10 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
                     <td className="px-3 py-2 text-muted-foreground">{formatTime(u.last_active_at ?? u.last_login_at)}</td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="sm" className="text-amber-600 hover:text-amber-700" onClick={() => handleForgetMemories(u.username)}>
+                          <Brain className="h-3.5 w-3.5 mr-1" />
+                          {t('settings.userForget')}
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={() => handleToggleBan(u.username, !u.banned)}>
                           {u.banned ? t('settings.userRestore') : t('settings.userBan')}
                         </Button>

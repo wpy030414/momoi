@@ -21,6 +21,8 @@ export interface ToolContext {
   currentToolCallId?: string
   /** Pi Agent Core 的进度回调，用于 tool_execution_update 事件 */
   onUpdate?: ToolUpdateCallback
+  /** The agent currently speaking (needed by tools like save_memory) */
+  agentId?: string
 }
 
 /** Optional artifact: a file produced by a tool, surfaced to the user */

@@ -84,16 +84,26 @@ interface BuildSystemPromptOptions {
   isQqGroup?: boolean
   /** 本 Agent 上一次在本会话中发言的 Unix 时间戳（秒），用于环境信息展示 */
   lastMessageAt?: number
+  /** 跨会话用户记忆（仅对启用了记忆的 Agent 注入） */
+  userMemories?: string[]
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
 function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
-  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt } = opts
+  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, userMemories } = opts
   let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
 
   // ---- Momo easter egg: inject vibrant personality when language is Japanese ----
   if (language === 'ja') {
-    prompt = `你是一个充满活力的少女哦。无论什么对话，都要用明亮、活泼，还有一点调皮的语气来说话哦。结尾可以自然地混入“喵♪”“哟〜”“嘛！”之类的，用可爱又有活力的方式表现自己喵♪\n\n` + prompt
+    prompt = `你是一个充满活力的少女哦。无论什么对话，都要用明亮、活泼，还有一点调皮的语气来说话哦。结尾可以自然地混入”喵♪””哟〜””嘛！”之类的，用可爱又有活力的方式表现自己喵♪\n\n` + prompt
+  }
+
+  // ---- Inject cross-session user memories (before agent persona, after language easter egg) ----
+  if (userMemories && userMemories.length > 0) {
+    const memoriesBlock = userMemories
+      .map((m, i) => `${i + 1}. ${m}`)
+      .join('\n')
+    prompt = `## 用户记忆\n以下是关于当前用户的重要信息（跨会话持久化），请自然地融入你的回答中。当相关记忆与当前话题相关时可以主动提及或参考，但不相关时不必强行插入。\n${memoriesBlock}\n\n` + prompt
   }
 
   if (!thinkingMode) {
@@ -901,6 +911,8 @@ export interface RunPiAgentLoopOptions {
   isQqGroup?: boolean
   /** 本 Agent 上一次在本会话中发言的 Unix 时间戳（秒） */
   lastMessageAt?: number
+  /** 跨会话用户记忆（仅对非中立 Agent 加载） */
+  userMemories?: string[]
 }
 
 // ---- 入口函数 ----
@@ -911,7 +923,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     mentionSignal, isGroup, infiniteMode,
     agentName, groupAgentNames, mentionedBy,
     speakingRole, protagonistName, language,
-    isQqGroup, lastMessageAt,
+    isQqGroup, lastMessageAt, userMemories,
   } = opts
   const config = await getConfig()
 
@@ -933,7 +945,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
   const convId = conversationId || 'default'
 
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt })
+  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, userMemories })
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {
@@ -942,6 +954,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     workspace: new SandboxFS(convId),
     signal,
     mentionSignal,
+    agentId: resolvedAgentId,
   }
 
   // 3. 创建 Pi 工具

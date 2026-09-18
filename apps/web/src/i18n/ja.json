@@ -175,6 +175,8 @@
     "userDeleteConfirm": "ユーザー「{{username}}」を削除しますか？すべての会話とメッセージも削除されます。この操作は元に戻せません。",
     "noUsers": "ユーザーがありません",
     "toastUserDeleted": "ユーザーを削除しました",
+    "toastUserForgotten": "{{count}}件の記憶を消去しました",
+    "userForget": "忘却",
     "toastUserBanned": "ユーザーを禁止しました",
     "toastUserUnbanned": "ユーザーの禁止を解除しました",
     "oauthProviders": "OAuth2 プロバイダー",

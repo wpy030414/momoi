@@ -2,13 +2,13 @@ import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
 import { adminAuthMiddleware } from '../lib/auth.js'
-import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen, isExternalImageHostingEnabled, getTtsConfig, updateTtsConfig } from '../lib/config.js'
+import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen, isExternalImageHostingEnabled, getTtsConfig, updateTtsConfig, deleteUserMemories } from '../lib/config.js'
 import { base64ToBuffer, uploadToCdn } from '../lib/cdn.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '@momoi/shared/constants'
 import fs from 'fs'
 import path from 'path'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
-import { db, conversations, messages, users, userOauthBindings, agents, wechatBindings, qqBindings, qqGroupConversations } from '../db/index.js'
+import { db, conversations, messages, users, userOauthBindings, agents, wechatBindings, qqBindings, qqGroupConversations, userAgentMemories } from '../db/index.js'
 import { skillRegistry } from '../skills/loader.js'
 import AdmZip from 'adm-zip'
 import { stopBotForUser, stopAllBotsForUser } from '../im/qq/manager.js'
@@ -331,10 +331,30 @@ adminRoute.delete('/users/:username', async (c) => {
     }
   }
   await db.delete(qqBindings).where(eq(qqBindings.user_id, username)).run()
+  // Delete user-agent memories
+  await db.delete(userAgentMemories).where(eq(userAgentMemories.user_id, username)).run()
   // Delete user record
   await db.delete(users).where(eq(users.username, username)).run()
 
   return c.json({ success: true })
+})
+
+// Delete all user-agent memories for a user ("遗忘" / Forget)
+adminRoute.post('/users/:username/forget-memories', async (c) => {
+  const username = c.req.param('username')
+  const adminUser = (c as any).get('userId') as string
+
+  if (username === adminUser) {
+    return c.json({ error: 'Cannot forget own memories' }, 403)
+  }
+
+  const userRow = await db.select().from(users).where(eq(users.username, username)).get()
+  if (!userRow) {
+    return c.json({ error: 'User not found' }, 404)
+  }
+
+  const count = await deleteUserMemories(username)
+  return c.json({ success: true, deleted: count })
 })
 
 // Direct registration toggle

@@ -175,6 +175,8 @@
     "userDeleteConfirm": "确定要删除用户「{{username}}」吗？这将同时删除其所有会话和消息，此操作不可撤销。",
     "noUsers": "暂无用户",
     "toastUserDeleted": "用户已删除",
+    "toastUserForgotten": "已清除 {{count}} 条记忆",
+    "userForget": "遗忘",
     "toastUserBanned": "用户已禁用",
     "toastUserUnbanned": "用户已启用",
     "oauthProviders": "OAuth2 供应商",

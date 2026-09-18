@@ -1,6 +1,6 @@
 import './env.js'
-import { db, settings, agents, mcpServers } from '../db/index.js'
-import { eq } from 'drizzle-orm'
+import { db, settings, agents, mcpServers, userAgentMemories } from '../db/index.js'
+import { eq, and } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import type { AppConfig, Agent, McpServerConfig } from '@momoi/shared/types'
 import {
@@ -259,4 +259,48 @@ export async function deleteMcpServer(id: string): Promise<boolean> {
   if (!existing) return false
   await db.delete(mcpServers).where(eq(mcpServers.id, id)).run()
   return true
+}
+
+// ---- User-Agent Memory CRUD ----
+
+/** Get all memories for a user+agent pair, ordered by creation time */
+export async function getUserAgentMemories(userId: string, agentId: string, limit = 30): Promise<string[]> {
+  const rows = await db.select({ content: userAgentMemories.content })
+    .from(userAgentMemories)
+    .where(and(eq(userAgentMemories.user_id, userId), eq(userAgentMemories.agent_id, agentId)))
+    .orderBy(userAgentMemories.created_at)
+    .limit(limit)
+    .all()
+  return rows.map((r: typeof userAgentMemories.$inferSelect) => r.content)
+}
+
+/** Save a new memory for a user+agent pair */
+export async function saveUserAgentMemory(
+  userId: string,
+  agentId: string,
+  content: string,
+  source: 'agent' | 'user' = 'agent',
+): Promise<void> {
+  await db.insert(userAgentMemories).values({
+    id: randomUUID(),
+    user_id: userId,
+    agent_id: agentId,
+    content,
+    source,
+    created_at: Math.floor(Date.now() / 1000),
+  }).run()
+}
+
+/** Delete all memories for a specific user (admin "forget" action). Returns count deleted. */
+export async function deleteUserMemories(userId: string): Promise<number> {
+  const rows = await db.select({ id: userAgentMemories.id })
+    .from(userAgentMemories)
+    .where(eq(userAgentMemories.user_id, userId))
+    .all()
+  if (rows.length > 0) {
+    await db.delete(userAgentMemories)
+      .where(eq(userAgentMemories.user_id, userId))
+      .run()
+  }
+  return rows.length
 }

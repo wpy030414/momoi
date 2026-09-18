@@ -103,6 +103,15 @@ export const qqBindings = sqliteTable('qq_bindings', {
   pk: primaryKey({ columns: [table.user_id, table.agent_id] }),
 }))
 
+export const userAgentMemories = sqliteTable('user_agent_memories', {
+  id: text('id').primaryKey(),
+  user_id: text('user_id').notNull(),
+  agent_id: text('agent_id').notNull(),
+  content: text('content').notNull(),
+  source: text('source').notNull().default('agent'),
+  created_at: integer('created_at').notNull(),
+})
+
 export const qqGroupConversations = sqliteTable('qq_group_conversations', {
   app_id: text('app_id').notNull(),
   group_openid: text('group_openid').notNull(),

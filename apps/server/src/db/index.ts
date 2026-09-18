@@ -48,4 +48,5 @@ export const {
   wechatBindings,
   qqBindings,
   qqGroupConversations,
+  userAgentMemories,
 } = result.schema
