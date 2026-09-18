@@ -167,7 +167,7 @@
     "toastMcpDeleted": "MCP サーバーを削除しました",
     "userUsername": "ユーザー名",
     "userOauthBindings": "OAuth2 連携済み",
-    "userLastLogin": "最終ログイン",
+    "userLastLogin": "最終アクティブ",
     "userBan": "禁止",
     "userRestore": "復元",
     "userRemove": "削除",

@@ -167,7 +167,7 @@
     "toastMcpDeleted": "MCP 服务器已删除",
     "userUsername": "用户名",
     "userOauthBindings": "已绑定 OAuth2",
-    "userLastLogin": "最后登录",
+    "userLastLogin": "最后活跃",
     "userBan": "封禁",
     "userRestore": "恢复",
     "userRemove": "注销",

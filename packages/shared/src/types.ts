@@ -250,6 +250,7 @@ export interface AdminUserRow {
   username: string
   first_login_at: number | null
   last_login_at: number | null
+  last_active_at: number | null
   banned: boolean
   oauth_providers: string[]  // OAuth2 provider ids linked to this user
 }

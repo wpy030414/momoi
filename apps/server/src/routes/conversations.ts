@@ -6,6 +6,7 @@ import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 import { broadcastConversationSync, broadcastConversationChanged } from '../realtime.js'
 import { stopBotForUser } from '../qq/manager.js'
+import { trackUserActivity } from './user.js'
 
 function getUserId(c: any): string {
   return c.get('userId') || ''
@@ -159,6 +160,7 @@ conversationsRoute.post('/', async (c) => {
   // 侧边栏新会话记录实时同步到同账号其他设备
   broadcastConversationSync(userId)
 
+  trackUserActivity(userId).catch(() => {})
   return c.json({ conversation: conv }, 201)
 })
 
@@ -182,6 +184,7 @@ conversationsRoute.delete('/:id', async (c) => {
   // 侧边栏删除记录实时同步到同账号其他设备
   broadcastConversationSync(userId)
 
+  trackUserActivity(userId).catch(() => {})
   return c.json({ success: true })
 })
 
@@ -201,6 +204,7 @@ conversationsRoute.patch('/:id', async (c) => {
 
   broadcastConversationSync(userId)
 
+  trackUserActivity(userId).catch(() => {})
   return c.json({ conversation: conv })
 })
 
@@ -310,6 +314,7 @@ conversationsRoute.post('/merge', async (c) => {
   broadcastConversationSync(userId)
   broadcastConversationChanged(userId, newId)
 
+  trackUserActivity(userId).catch(() => {})
   return c.json({ conversation: mergedConv })
 })
 

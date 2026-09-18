@@ -8,6 +8,7 @@ import { eq, and, sql, ne } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 import { broadcastGroupMembers } from '../realtime.js'
+import { trackUserActivity } from './user.js'
 
 function getUserId(c: any): string {
   return c.get('userId') || ''
@@ -88,6 +89,7 @@ groupRoute.post('/:id/agents', async (c) => {
   // 群成员变更 —— 同账号其他设备实时刷新成员列表与侧边栏人数
   broadcastGroupMembers(userId, convId)
 
+  trackUserActivity(userId).catch(() => {})
   return c.json({ success: true })
 })
 
@@ -116,5 +118,6 @@ groupRoute.delete('/:id/agents/:agentId', async (c) => {
   // 群成员变更 —— 同账号其他设备实时刷新成员列表与侧边栏人数
   broadcastGroupMembers(userId, convId)
 
+  trackUserActivity(userId).catch(() => {})
   return c.json({ success: true })
 })

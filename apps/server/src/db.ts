@@ -100,6 +100,7 @@ const MIGRATION_SQL = `
     pin_hash TEXT NOT NULL DEFAULT '',
     first_login_at INTEGER NOT NULL,
     last_login_at INTEGER NOT NULL,
+    last_active_at INTEGER,
     banned INTEGER NOT NULL DEFAULT 0
   );
 
@@ -182,6 +183,7 @@ async function initSqlite() {
     `ALTER TABLE agents ADD COLUMN voice_settings TEXT NOT NULL DEFAULT '{}'`,
     `ALTER TABLE messages ADD COLUMN trace TEXT`,
     `ALTER TABLE qq_bindings ADD COLUMN group_enabled INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN last_active_at INTEGER`,
   ]
   for (const stmt of ADDITIVE_MIGRATIONS) {
     try { sqlDb.run(stmt) } catch { /* column already exists */ }
@@ -372,6 +374,7 @@ async function initPg(dbUrl: string, user: string, password: string) {
       pin_hash TEXT NOT NULL DEFAULT '',
       first_login_at INTEGER NOT NULL,
       last_login_at INTEGER NOT NULL,
+      last_active_at INTEGER,
       banned BOOLEAN NOT NULL DEFAULT FALSE
     );
 
@@ -429,6 +432,7 @@ async function initPg(dbUrl: string, user: string, password: string) {
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_settings TEXT NOT NULL DEFAULT '{}';
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS trace TEXT;
     ALTER TABLE qq_bindings ADD COLUMN IF NOT EXISTS group_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at INTEGER;
     -- Migration: qq_bindings composite PK (user_id, agent_id)
     ALTER TABLE qq_bindings ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT '';
     -- Drop old single-column PK if it still exists; add composite PK

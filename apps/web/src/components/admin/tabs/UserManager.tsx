@@ -214,7 +214,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
                         ? u.oauth_providers.map((pid) => oauthProviders.find((p) => p.id === pid)?.name || pid).join(', ')
                         : '-'}
                     </td>
-                    <td className="px-3 py-2 text-muted-foreground">{formatTime(u.last_login_at)}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{formatTime(u.last_active_at ?? u.last_login_at)}</td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <Button variant="ghost" size="sm" onClick={() => handleToggleBan(u.username, !u.banned)}>

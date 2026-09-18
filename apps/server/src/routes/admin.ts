@@ -271,6 +271,7 @@ adminRoute.get('/users', async (c) => {
       username: r.username,
       first_login_at: r.first_login_at,
       last_login_at: r.last_login_at,
+      last_active_at: r.last_active_at ?? null,
       banned: r.banned,
       oauth_providers: bindingsByUser.get(r.username) ?? [],
     })),

@@ -65,6 +65,7 @@ export const users = sqliteTable('users', {
   pin_hash: text('pin_hash').notNull().default(''),
   first_login_at: integer('first_login_at').notNull(),
   last_login_at: integer('last_login_at').notNull(),
+  last_active_at: integer('last_active_at'),
   banned: integer('banned', { mode: 'boolean' }).notNull().default(false),
 })
 

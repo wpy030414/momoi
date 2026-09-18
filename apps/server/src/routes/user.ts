@@ -26,6 +26,11 @@ async function trackUserLogin(username: string) {
   }
 }
 
+export async function trackUserActivity(username: string) {
+  const now = Math.floor(Date.now() / 1000)
+  await db.update(users).set({ last_active_at: now }).where(eq(users.username, username)).run()
+}
+
 // Current user info — used by the client to detect admin status
 userRoute.get('/me', userAuthMiddleware, (c) => {
   const username = (c as any).get('userId') as string

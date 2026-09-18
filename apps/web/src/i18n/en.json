@@ -167,7 +167,7 @@
     "toastMcpDeleted": "MCP server deleted",
     "userUsername": "Username",
     "userOauthBindings": "OAuth2 Linked",
-    "userLastLogin": "Last Login",
+    "userLastLogin": "Last Active",
     "userBan": "Ban",
     "userRestore": "Restore",
     "userRemove": "Remove",

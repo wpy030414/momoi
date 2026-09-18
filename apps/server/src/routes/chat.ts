@@ -18,6 +18,7 @@ import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { SandboxFS } from '../tools/workspace.js'
 import { synthesizeAndSave, markVoiceComplete, createTtsProvider } from '../ai/tts.js'
 import { broadcastStream, broadcastConversationSync } from '../realtime.js'
+import { trackUserActivity } from './user.js'
 
 export const chatRoute = new Hono()
 
@@ -216,6 +217,7 @@ chatRoute.post('/', async (c) => {
           conversation_id: convId,
           event: { type: 'user_message', id: userMsgId, content: message, attachments },
         })
+        trackUserActivity(userId).catch(() => {})
       }
       await db.update(conversations).set({ updated_at: now }).where(eq(conversations.id, convId)).run()
 
@@ -654,5 +656,6 @@ chatRoute.post('/:conversationId/answer', async (c) => {
     return c.json({ error: 'Question already answered or expired' }, 410)
   }
 
+  trackUserActivity(userId).catch(() => {})
   return c.json({ success: true })
 })
