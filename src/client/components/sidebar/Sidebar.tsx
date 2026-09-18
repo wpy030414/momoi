@@ -57,6 +57,10 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
   const [userPopoverOpen, setUserPopoverOpen] = useState(false)
   const [settingsPopoverOpen, setSettingsPopoverOpen] = useState(false)
 
+  // Stand-alone mode passes none of the user-menu callbacks: the popover would
+  // be an empty box, so the user button only displays the identity.
+  const userMenuHasItems = !!(onChangeUsername || onChangePin || onLinkAccount || onLogout)
+
   const closeMenu = useCallback(() => setMenu(null), [])
 
   const closeAllPopovers = useCallback(() => {
@@ -317,7 +321,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
         <button
           ref={userBtnRef}
           className="flex items-center gap-2 min-w-0 hover:bg-accent/50 rounded-md px-2 py-1 transition-colors"
-          onClick={() => { setSettingsPopoverOpen(false); setUserPopoverOpen(!userPopoverOpen) }}
+          onClick={() => { setSettingsPopoverOpen(false); if (userMenuHasItems) setUserPopoverOpen(!userPopoverOpen) }}
         >
           <User className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
           <span className="text-sm truncate">{currentUser}</span>

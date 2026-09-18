@@ -7,6 +7,8 @@ interface AdminSidebarProps {
   activeTab: string
   onTabChange: (tab: string) => void
   onBack: () => void
+  /** Stand-alone mode: the users tab is hidden (single fixed 'admin' user). */
+  standAlone?: boolean
 }
 
 export const ADMIN_TABS = [
@@ -19,7 +21,7 @@ export const ADMIN_TABS = [
   { value: 'review', labelKey: 'settings.tabReview', Icon: MessageSquare },
 ] as const
 
-export function AdminSidebar({ activeTab, onTabChange, onBack }: AdminSidebarProps) {
+export function AdminSidebar({ activeTab, onTabChange, onBack, standAlone }: AdminSidebarProps) {
   const { t } = useTranslation()
 
   return (
@@ -35,10 +37,10 @@ export function AdminSidebar({ activeTab, onTabChange, onBack }: AdminSidebarPro
         <h2 className="text-sm font-semibold truncate">{t('settings.title')}</h2>
       </div>
 
-      {/* Tab list */}
+      {/* Tab list — stand-alone mode hides user management */}
       <ScrollArea className="flex-1">
         <div className="p-2 space-y-0.5">
-          {ADMIN_TABS.map(({ value, labelKey, Icon }) => (
+          {ADMIN_TABS.filter(({ value }) => !(standAlone && value === 'users')).map(({ value, labelKey, Icon }) => (
             <Button
               key={value}
               variant="ghost"

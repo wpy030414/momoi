@@ -94,6 +94,9 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
   // Admin status of the logged-in user (ADMIN usernames from server .env)
   const [isAdminUser, setIsAdminUser] = useState(false)
+  // Stand-alone mode: null = unknown yet (waiting for /api/app-name), true =
+  // single-user no-auth deployment (auto-login as the fixed 'admin')
+  const [standAlone, setStandAlone] = useState<boolean | null>(null)
 
   // OAuth2 callback → sync localStorage from query params, then clean URL
   useEffect(() => {
@@ -260,6 +263,10 @@ export function App() {
   }
 
   const handleLogout = () => {
+    // Stand-alone mode: logging out is not allowed — there is no other session
+    // to go back to (no login screen exists). Also guards the auth:expired
+    // listener below from ever evicting the fixed 'admin' session.
+    if (standAloneRef.current) return
     // Ask the server to clear the HttpOnly cookie (JS cannot delete it)
     api.logout().catch(() => {})
     clearSession()
@@ -276,8 +283,14 @@ export function App() {
     chat.resetChat()
   }
 
-  // Detect admin status for the logged-in user
+  // Detect admin status for the logged-in user.
+  // Stand-alone mode: identity is the fixed 'admin' — always an admin, no
+  // /api/user/me round trip (or its failure mode) needed.
   useEffect(() => {
+    if (standAlone) {
+      setIsAdminUser(true)
+      return
+    }
     if (!currentUser) {
       setIsAdminUser(false)
       return
@@ -285,13 +298,23 @@ export function App() {
     api.getMe()
       .then((r) => setIsAdminUser(!!r.is_admin))
       .catch(() => setIsAdminUser(false))
-  }, [currentUser])
+  }, [currentUser, standAlone])
+
+  // Stand-alone mode: log straight in as the fixed 'admin' user. Also
+  // normalizes a stale localStorage username left over from a multi-user
+  // deployment on the same origin.
+  useEffect(() => {
+    if (!standAlone) return
+    if (currentUser !== 'admin') handleLogin('admin')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [standAlone, currentUser])
 
   // Auto-renew the JWT (14-day TTL) once less than half its life remains —
   // sliding session. While the tab is alive the token never runs out; after
   // 14 days without the app open, the token is gone and PIN login is required.
+  // (Not in stand-alone mode: there is no token at all.)
   useEffect(() => {
-    if (!currentUser) return
+    if (!currentUser || standAlone) return
     // Keep in sync with USER_TOKEN_TTL_SECONDS (src/server/auth.ts)
     const TOKEN_TTL_SEC = 14 * 24 * 60 * 60
     const RENEW_WINDOW_SEC = TOKEN_TTL_SEC / 2 // renew when less than half remains
@@ -330,13 +353,18 @@ export function App() {
       document.removeEventListener('visibilitychange', onWake)
       window.removeEventListener('focus', onWake)
     }
-  }, [currentUser])
+  }, [currentUser, standAlone])
 
   // Most recent successful login (PIN / OAuth / rename re-issue). Used to drop
   // "stale" 401s whose request started BEFORE that moment: their verdict
   // describes the dead old session, and honoring them right after login would
   // /logout and destroy the brand-new cookie — the "instantly kicked out" bug.
   const lastLoginAtRef = useRef(0)
+
+  // Stand-alone mode flag kept in a ref so the []-deps auth:expired listener
+  // closure (registered once on mount) always reads the up-to-date value.
+  const standAloneRef = useRef(false)
+  useEffect(() => { standAloneRef.current = standAlone === true }, [standAlone])
 
   // Listen for auth:expired events dispatched by the API layer
   // when a 401 response is received (token invalid/expired).
@@ -352,6 +380,7 @@ export function App() {
 
   useEffect(() => {
     api.getAppName().then((r) => {
+      setStandAlone(r.stand_alone === true)
       setAppName(r.app_name)
       if (r.app_favicon) {
         const link = document.getElementById('favicon') as HTMLLinkElement | null
@@ -368,7 +397,7 @@ export function App() {
         setAgents(r.agents)
         setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
       }
-    }).catch(() => {}).finally(() => setAgentsLoading(false))
+    }).catch(() => setStandAlone(false)).finally(() => setAgentsLoading(false))
   }, [])
 
   // Re-fetch appName + agents when admin view closes (user may have changed them)
@@ -517,8 +546,9 @@ export function App() {
       const match = window.location.hash.match(/^#\/settings(?:\/(\w+))?$/)
       if (match) {
         if (isAdminUser) {
+          // Stand-alone mode hides the users tab — bounce that hash to the default
           const tab = match[1]
-          if (tab) setAdminTab(tab)
+          if (tab) setAdminTab(standAlone && tab === 'users' ? ADMIN_TABS[0].value : tab)
           setAdminViewOpen(true)
         } else {
           leaveAdminRoute()
@@ -530,7 +560,7 @@ export function App() {
     syncAdminRoute()
     window.addEventListener('hashchange', syncAdminRoute)
     return () => window.removeEventListener('hashchange', syncAdminRoute)
-  }, [isAdminUser])
+  }, [isAdminUser, standAlone])
 
   // Route guard: #/docs/{path} — syncs docs view from hash
   useEffect(() => {
@@ -577,8 +607,12 @@ export function App() {
     )
   }
 
-  // Show login screen if not logged in
+  // Show login screen if not logged in.
+  // Stand-alone boot: hold a blank splash until /api/app-name tells us the
+  // mode — the auto-login effect then signs in as the fixed 'admin' user and
+  // the LoginScreen never appears.
   if (!currentUser) {
+    if (standAlone === null || standAlone) return null
     return <LoginScreen onLogin={handleLogin} />
   }
 
@@ -608,6 +642,7 @@ export function App() {
             activeTab={adminTab}
             onTabChange={handleAdminTabChange}
             onBack={closeAdminView}
+            standAlone={standAlone === true}
           />
         ) : docsViewOpen ? (
           <DocsSidebar
@@ -632,10 +667,13 @@ export function App() {
             appName={appName}
             currentUser={currentUser}
             showGithub={showGithub}
-            onChangePin={() => setChangePinOpen(true)}
-            onChangeUsername={() => setChangeUsernameOpen(true)}
-            onLinkAccount={() => setLinkedAccountsOpen(true)}
-            onLogout={handleLogout}
+            // Stand-alone mode: the fixed 'admin' identity cannot be renamed,
+            // re-PIN'd, OAuth-linked, or logged out — hide those entries.
+            // (onContinueOnIm stays: WeChat/QQ bridging remains available.)
+            onChangePin={standAlone ? undefined : () => setChangePinOpen(true)}
+            onChangeUsername={standAlone ? undefined : () => setChangeUsernameOpen(true)}
+            onLinkAccount={standAlone ? undefined : () => setLinkedAccountsOpen(true)}
+            onLogout={standAlone ? undefined : handleLogout}
             language={i18n.language}
             onLanguageChange={handleLanguageChange}
             theme={theme}
@@ -701,7 +739,7 @@ export function App() {
               {adminTab === 'branding' && <BrandingSettings />}
               {adminTab === 'mcp' && <McpManager ref={mcpRef} />}
               {adminTab === 'skills' && <SkillManager ref={skillRef} />}
-              {adminTab === 'users' && <UserManager ref={userRef} />}
+              {adminTab === 'users' && !standAlone && <UserManager ref={userRef} />}
               {adminTab === 'review' && <ReviewPanel />}
               </Suspense>
             </div>
