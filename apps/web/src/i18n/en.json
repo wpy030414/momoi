@@ -86,11 +86,33 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "docs": "Docs",
+    "memory": "Memories",
     "adminSettings": "Admin"
   },
   "docs": {
     "title": "Docs",
     "empty": "No documents"
+  },
+  "memory": {
+    "title": "Memories",
+    "empty": "No agents",
+    "noEntries": "No memories for this agent yet",
+    "unknownAgent": "Deleted agent",
+    "add": "Add memory",
+    "edit": "Edit memory",
+    "content": "Content",
+    "contentPlaceholder": "Enter what you want the agent to remember...",
+    "contentRequired": "Content is required",
+    "tooLong": "Content too long (max 4000 characters)",
+    "sourceAgent": "By agent",
+    "sourceUser": "Manual",
+    "deleteConfirm": "Delete this memory? This cannot be undone.",
+    "clearAll": "Clear all",
+    "clearAllConfirm": "Clear all {{count}} memories of \"{{name}}\"? This cannot be undone.",
+    "toastSaved": "Memory saved",
+    "toastDeleted": "Memory deleted",
+    "toastCleared": "Cleared {{count}} memories",
+    "pageInfo": "Page {{page}} of {{total}}"
   },
   "settings": {
     "title": "Admin",

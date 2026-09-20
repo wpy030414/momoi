@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
 import { MarqueeText } from '../ui/MarqueeText'
-import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen } from 'lucide-react'
+import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen, Brain } from 'lucide-react'
 import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation } from '@momoi/shared/types'
@@ -34,6 +34,7 @@ interface SidebarProps {
   onThemeChange?: (theme: Theme) => void
   onAdminSettings?: () => void
   onDocs?: () => void
+  onMemory?: () => void
   /** Stand-alone mode: show a badge next to the app name. */
   standAlone?: boolean
 }
@@ -45,7 +46,7 @@ interface MenuState {
 
 // ConversationTitle is now MarqueeText from ../ui/MarqueeText
 
-export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, standAlone }: SidebarProps) {
+export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, standAlone }: SidebarProps) {
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -467,6 +468,16 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
             >
               <BookOpen className="h-3.5 w-3.5" />
               {t('menu.docs')}
+            </button>
+          )}
+          {/* Memory management */}
+          {onMemory && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors mt-1"
+              onClick={() => { closeAllPopovers(); onMemory() }}
+            >
+              <Brain className="h-3.5 w-3.5" />
+              {t('menu.memory')}
             </button>
           )}
           {/* Admin settings */}

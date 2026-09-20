@@ -7,6 +7,9 @@ import { AdminSidebar, ADMIN_TABS } from './components/admin/AdminSidebar'
 import { DocsSidebar } from './components/docs/DocsSidebar'
 import type { DocEntry } from './components/docs/DocsSidebar'
 import { DocsViewer, TocItem } from './components/docs/DocsViewer'
+import { MemorySidebar } from './components/memory/MemorySidebar'
+import { MemoryManager } from './components/memory/MemoryManager'
+import type { UserAgentMemory } from '@momoi/shared/types'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
@@ -47,6 +50,11 @@ export function App() {
   const [docToc, setDocToc] = useState<TocItem[]>([])
   const [tocOpen, setTocOpen] = useState(false)
   const tocWrapRef = useRef<HTMLDivElement>(null)
+  // Memory view state
+  const [memoryViewOpen, setMemoryViewOpen] = useState(false)
+  const [memoryEntries, setMemoryEntries] = useState<UserAgentMemory[]>([])
+  const [memoryAgentId, setMemoryAgentId] = useState<string | null>(null)
+  const [memoriesLoading, setMemoriesLoading] = useState(false)
 
   // 目录气泡：点击外部 / Esc 关闭
   useEffect(() => {
@@ -545,6 +553,51 @@ export function App() {
     }
   }
 
+  const refreshMemories = () => {
+    setMemoriesLoading(true)
+    api.listMemories()
+      .then((r) => setMemoryEntries(r.memories))
+      .catch(() => {})
+      .finally(() => setMemoriesLoading(false))
+  }
+
+  const handleMemory = () => {
+    // Always refetch — agents keep writing memories during chats, no session cache
+    api.listMemories().then((r) => {
+      setMemoryEntries(r.memories)
+      // Default selection: keep the previous agent if still valid, else the agent
+      // of the newest memory, else the first agent
+      const stillValid = (id: string | null): string | null =>
+        id && (agents.some((a) => a.id === id) || r.memories.some((m) => m.agent_id === id)) ? id : null
+      setMemoryAgentId((prev) =>
+        stillValid(prev) ?? stillValid(r.memories[0]?.agent_id ?? null) ?? agents[0]?.id ?? null
+      )
+    }).catch(() => {})
+    history.pushState(null, '', '#/memories')
+    // Radix popover focus management needs a beat before the view swap (same as handleDocs)
+    setTimeout(() => { setMemoryViewOpen(true) }, 100)
+  }
+
+  const handleSelectMemoryAgent = (agentId: string) => {
+    setMemoryAgentId(agentId)
+    history.replaceState(null, '', `#/memories/${encodeURIComponent(agentId)}`)
+  }
+
+  const closeMemoryView = () => {
+    setMemoryViewOpen(false)
+    if (window.location.hash.startsWith('#/memories')) {
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }
+
+  // Effective selected agent — computed at render time: the stored selection wins
+  // when it maps to a live agent OR an orphan with leftover entries (agent deleted),
+  // otherwise falls back to the first agent.
+  const activeMemoryAgent =
+    memoryAgentId && (agents.some((a) => a.id === memoryAgentId) || memoryEntries.some((m) => m.agent_id === memoryAgentId))
+      ? memoryAgentId
+      : agents[0]?.id ?? null
+
   // Route guard: #/settings/{tab} only opens for admins (mount + browser back/forward).
   // Anyone else typing the path is bounced back home.
   useEffect(() => {
@@ -605,6 +658,25 @@ export function App() {
     return () => window.removeEventListener('hashchange', syncDocsRoute)
   }, [docsEntries.length])
 
+  // Route guard: #/memories/{agentId} — syncs memory view from hash
+  // (agent ids are uuids with hyphens, hence [^/]+ instead of \w+)
+  useEffect(() => {
+    const syncMemoryRoute = () => {
+      const match = window.location.hash.match(/^#\/memories(?:\/([^/]+))?$/)
+      if (match) {
+        // Direct URL entry / refresh — fetch fresh data
+        api.listMemories().then((r) => setMemoryEntries(r.memories)).catch(() => {})
+        if (match[1]) setMemoryAgentId(decodeURIComponent(match[1]))
+        setMemoryViewOpen(true)
+      } else {
+        setMemoryViewOpen(false)
+      }
+    }
+    syncMemoryRoute()
+    window.addEventListener('hashchange', syncMemoryRoute)
+    return () => window.removeEventListener('hashchange', syncMemoryRoute)
+  }, [])
+
   // Show OAuth2 registration screen for new OAuth users
   if (oauthRegisterInfo) {
     return (
@@ -663,6 +735,14 @@ export function App() {
             onSelect={handleSelectDoc}
             onBack={closeDocsView}
           />
+        ) : memoryViewOpen ? (
+          <MemorySidebar
+            agents={agents}
+            memories={memoryEntries}
+            activeAgentId={activeMemoryAgent}
+            onSelect={handleSelectMemoryAgent}
+            onBack={closeMemoryView}
+          />
         ) : (
           <Sidebar
             conversations={chat.conversations}
@@ -691,6 +771,7 @@ export function App() {
             onThemeChange={setTheme}
             onAdminSettings={isAdminUser ? handleAdminSettings : undefined}
             onDocs={handleDocs}
+            onMemory={handleMemory}
             standAlone={standAlone === true}
           />
         )}
@@ -804,6 +885,29 @@ export function App() {
               </div>
             </div>
             <DocsViewer docPath={activeDoc} onTocChange={setDocToc} />
+          </div>
+        ) : memoryViewOpen ? (
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Top bar — only the sidebar toggle */}
+            <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 hover:bg-accent/50"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+              >
+                <PanelLeft className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex-1 overflow-y-auto min-h-0 px-6">
+              <MemoryManager
+                agentId={activeMemoryAgent}
+                agent={activeMemoryAgent ? agents.find((a) => a.id === activeMemoryAgent) ?? null : null}
+                memories={memoryEntries}
+                loading={memoriesLoading}
+                onChanged={refreshMemories}
+              />
+            </div>
           </div>
         ) : (
           <div className="flex-1 flex flex-col min-w-0 relative">

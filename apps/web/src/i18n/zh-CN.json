@@ -86,11 +86,33 @@
     "themeLight": "浅色",
     "themeDark": "深色",
     "docs": "文档",
+    "memory": "记忆",
     "adminSettings": "后台管理"
   },
   "docs": {
     "title": "文档",
     "empty": "暂无文档"
+  },
+  "memory": {
+    "title": "记忆管理",
+    "empty": "暂无 Agent",
+    "noEntries": "该 Agent 还没有记忆条目",
+    "unknownAgent": "已删除的 Agent",
+    "add": "新增记忆",
+    "edit": "编辑记忆",
+    "content": "内容",
+    "contentPlaceholder": "输入希望 Agent 跨会话记住的内容...",
+    "contentRequired": "内容不能为空",
+    "tooLong": "内容过长（最多 4000 字符）",
+    "sourceAgent": "Agent 记下",
+    "sourceUser": "手动添加",
+    "deleteConfirm": "确定要删除这条记忆吗？此操作不可撤销。",
+    "clearAll": "清空全部",
+    "clearAllConfirm": "确定要清空「{{name}}」的全部 {{count}} 条记忆吗？此操作不可撤销。",
+    "toastSaved": "记忆已保存",
+    "toastDeleted": "记忆已删除",
+    "toastCleared": "已清空 {{count}} 条记忆",
+    "pageInfo": "第 {{page}} / {{total}} 页"
   },
   "settings": {
     "title": "后台管理",

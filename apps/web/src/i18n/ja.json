@@ -86,11 +86,33 @@
     "themeLight": "ライト",
     "themeDark": "ダーク",
     "docs": "ドキュメント",
+    "memory": "記憶",
     "adminSettings": "管理"
   },
   "docs": {
     "title": "ドキュメント",
     "empty": "ドキュメントがありません"
+  },
+  "memory": {
+    "title": "記憶管理",
+    "empty": "エージェントがいません",
+    "noEntries": "このエージェントにはまだ記憶がありません",
+    "unknownAgent": "削除済みエージェント",
+    "add": "記憶を追加",
+    "edit": "記憶を編集",
+    "content": "内容",
+    "contentPlaceholder": "エージェントに覚えておいてほしい内容を入力…",
+    "contentRequired": "内容を入力してください",
+    "tooLong": "内容が長すぎます（最大4000文字）",
+    "sourceAgent": "エージェント",
+    "sourceUser": "手動",
+    "deleteConfirm": "この記憶を削除しますか？元に戻せません。",
+    "clearAll": "すべて削除",
+    "clearAllConfirm": "「{{name}}」の記憶{{count}}件をすべて削除しますか？元に戻せません。",
+    "toastSaved": "保存しました",
+    "toastDeleted": "削除しました",
+    "toastCleared": "{{count}}件の記憶を削除しました",
+    "pageInfo": "{{total}}ページ中{{page}}ページ目"
   },
   "settings": {
     "title": "管理",
