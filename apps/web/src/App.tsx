@@ -825,16 +825,19 @@ export function App() {
                 )}
             </div>
             </div>
-            <div className="flex-1 overflow-y-auto min-h-0 px-6">
-              <Suspense fallback={<div className="flex items-center justify-center h-32 text-muted-foreground text-sm">{t('common.loading')}</div>}>
-              {adminTab === 'agent' && <AgentManager ref={agentRef} />}
-              {adminTab === 'gateway' && <GatewaySettings ref={gatewayRef} />}
-              {adminTab === 'branding' && <BrandingSettings />}
-              {adminTab === 'mcp' && <McpManager ref={mcpRef} />}
-              {adminTab === 'skills' && <SkillManager ref={skillRef} />}
-              {adminTab === 'users' && !standAlone && <UserManager ref={userRef} />}
-              {adminTab === 'review' && <ReviewPanel />}
-              </Suspense>
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {/* 与文档视图一致：内容限宽水平居中，桌面端两侧留白，移动端自动收缩 */}
+              <div className="max-w-3xl mx-auto px-6 pb-8">
+                <Suspense fallback={<div className="flex items-center justify-center h-32 text-muted-foreground text-sm">{t('common.loading')}</div>}>
+                  {adminTab === 'agent' && <AgentManager ref={agentRef} />}
+                  {adminTab === 'gateway' && <GatewaySettings ref={gatewayRef} />}
+                  {adminTab === 'branding' && <BrandingSettings />}
+                  {adminTab === 'mcp' && <McpManager ref={mcpRef} />}
+                  {adminTab === 'skills' && <SkillManager ref={skillRef} />}
+                  {adminTab === 'users' && !standAlone && <UserManager ref={userRef} />}
+                  {adminTab === 'review' && <ReviewPanel />}
+                </Suspense>
+              </div>
             </div>
           </div>
         ) : docsViewOpen ? (
@@ -899,14 +902,17 @@ export function App() {
                 <PanelLeft className="h-4 w-4" />
               </Button>
             </div>
-            <div className="flex-1 overflow-y-auto min-h-0 px-6">
-              <MemoryManager
-                agentId={activeMemoryAgent}
-                agent={activeMemoryAgent ? agents.find((a) => a.id === activeMemoryAgent) ?? null : null}
-                memories={memoryEntries}
-                loading={memoriesLoading}
-                onChanged={refreshMemories}
-              />
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {/* 与文档视图一致：内容限宽水平居中，桌面端两侧留白，移动端自动收缩 */}
+              <div className="max-w-3xl mx-auto px-6 pb-8">
+                <MemoryManager
+                  agentId={activeMemoryAgent}
+                  agent={activeMemoryAgent ? agents.find((a) => a.id === activeMemoryAgent) ?? null : null}
+                  memories={memoryEntries}
+                  loading={memoriesLoading}
+                  onChanged={refreshMemories}
+                />
+              </div>
             </div>
           </div>
         ) : (

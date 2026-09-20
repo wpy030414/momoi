@@ -116,7 +116,7 @@ export function MemoryManager({ agentId, agent, memories, loading, onChanged }: 
   const agentName = agent?.name ?? t('memory.unknownAgent')
 
   return (
-    <div className="space-y-4 pt-4 max-w-3xl">
+    <div className="space-y-4 pt-4">
       {/* Header — agent name + actions */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
