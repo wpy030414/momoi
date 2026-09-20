@@ -103,7 +103,7 @@ export function MessageContent({ content, streaming, isUser }: MessageContentPro
       {parts.map((part, idx) => {
         if (part.startsWith('```mermaid')) {
           if (streaming) {
-            return <pre key={idx} className="text-xs bg-muted p-2 rounded">{part}</pre>
+            return <pre key={idx} className="text-xs bg-muted p-2 rounded overflow-x-auto">{part}</pre>
           }
           const chart = part.replace(/```mermaid\n?/, '').replace(/\n?```$/, '')
           return <MermaidBlock key={idx} chart={chart} />
