@@ -960,6 +960,7 @@ export function App() {
               onCancel={chat.cancel}
               onRevert={chat.revertMessage}
               onForceRetry={chat.forceComplianceRetry}
+              onForceRetryGroup={chat.forceComplianceRetryGroup}
               backgroundImage={backgroundImage}
               supportAttachments={supportAttachments}
               supportInfiniteMode={supportInfiniteMode}

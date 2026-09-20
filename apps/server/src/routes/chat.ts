@@ -550,6 +550,7 @@ chatRoute.post('/', async (c) => {
           userId,
           agentIds: groupAgentIds,
           language,
+          forceCompliance: _force_compliance === true,
           saveMessage: async (agentId, agentName, reply, thinking, suggestions, artifacts, trace) => {
             await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId, trace)
           },
@@ -603,6 +604,7 @@ chatRoute.post('/', async (c) => {
             userId,
             agentIds: groupAgentIds,
             language,
+            forceCompliance: false,
             saveMessage: async (agentId, agentName, reply, thinking, suggestions, artifacts, trace) => {
               await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId, trace)
             },

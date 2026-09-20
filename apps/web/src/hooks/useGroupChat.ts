@@ -158,8 +158,12 @@ export function useGroupChat() {
     await chat.sendMessage(text, thinkingMode, attachments, null, true, agentIds, infiniteMode)
   }, [chat.sendMessage, groupAgents])
 
-  // 强制合规重试（群聊版）：回退 → 以 force_compliance 重发群聊消息
-  const forceComplianceRetry = useCallback(async (index: number) => {
+  // 强制合规重试（群聊版）：回退 → 以 force_compliance 重发群聊消息。
+  // 命名带 Group 后缀：此处返回值经 {...chat, ...} 合并后直接被 App 使用，
+  // 若与 useChat 的单聊版同名会无条件覆盖 —— 单聊界面点「强制合规重试」
+  // 会误走群聊参数（groupMode=true 不预建流式气泡），token 全部丢弃，
+  // 收尾 refetch 一次性回填，表现为「不流式、一口气全吐出来」。
+  const forceComplianceRetryGroup = useCallback(async (index: number) => {
     const text = await chat.revertMessage(index)
     if (!text) return
     const agentIds = groupAgents.map((a) => a.id)
@@ -201,7 +205,7 @@ export function useGroupChat() {
     addAgentToGroup,
     removeAgentFromGroup,
     sendGroupMessage,
-    forceComplianceRetry,
+    forceComplianceRetryGroup,
     refreshGroupAgents,
   }
 }

@@ -32,7 +32,10 @@ interface ChatPanelProps {
   onSend: (text: string, thinkingMode?: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean) => void | Promise<void>
   onCancel: () => void
   onRevert: (index: number) => Promise<string | null>
+  /** 强制合规重试（单聊）：回退消息后以 _force_compliance 标记重发 */
   onForceRetry?: (index: number) => Promise<void>
+  /** 强制合规重试（群聊）：与 onSendGroup 对应的群聊版重发 */
+  onForceRetryGroup?: (index: number) => Promise<void>
   backgroundImage?: string
   supportAttachments?: boolean
   supportInfiniteMode?: boolean
@@ -67,7 +70,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({
-  messages, loading, onSend, onCancel, onRevert, onForceRetry, backgroundImage, supportAttachments, supportInfiniteMode,
+  messages, loading, onSend, onCancel, onRevert, onForceRetry, onForceRetryGroup, backgroundImage, supportAttachments, supportInfiniteMode,
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
   isGroup, isQqGroup, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
@@ -151,7 +154,13 @@ export function ChatPanel({
   }
 
   const handleForceRetry = async (index: number) => {
-    await onForceRetry?.(index)
+    // 与 handleSend 同款双通道分派：群聊走群聊版（groupMode 重发），
+    // 单聊走单聊版 —— 误走群聊版会因不预建流式气泡而丢失全部 token 事件。
+    if (isGroup && onForceRetryGroup) {
+      await onForceRetryGroup(index)
+    } else {
+      await onForceRetry?.(index)
+    }
   }
 
   const handleExternalValueConsumed = () => {

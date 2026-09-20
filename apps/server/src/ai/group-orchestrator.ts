@@ -26,6 +26,8 @@ interface GroupOrchestratorOptions {
   userId: string
   agentIds: string[]
   language?: string
+  /** 强制合规重试：透传给每个 Agent 的推理循环（原始提问预搬迁至历史绕过审查） */
+  forceCompliance?: boolean
   saveMessage: (
     agentId: string,
     agentName: string,
@@ -341,6 +343,7 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         protagonistName,
         language,
         lastMessageAt,
+        forceCompliance: options.forceCompliance === true,
       })
 
       repliedAgents.add(agentId)
