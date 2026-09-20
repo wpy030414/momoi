@@ -2,7 +2,7 @@ import './env.js'
 import { db, settings, agents, mcpServers, userAgentMemories } from '../db/index.js'
 import { eq, and, desc } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
-import type { AppConfig, Agent, McpServerConfig } from '@momoi/shared/types'
+import type { AppConfig, Agent, McpServerConfig, UserAgentMemory } from '@momoi/shared/types'
 import {
   DEFAULT_APP_NAME,
   DEFAULT_API_ENDPOINT,
@@ -276,21 +276,23 @@ export async function getUserAgentMemories(userId: string, agentId: string, limi
   return rows.map((r: typeof userAgentMemories.$inferSelect) => r.content).reverse()
 }
 
-/** Save a new memory for a user+agent pair */
+/** Save a new memory for a user+agent pair. Returns the created row. */
 export async function saveUserAgentMemory(
   userId: string,
   agentId: string,
   content: string,
   source: 'agent' | 'user' = 'agent',
-): Promise<void> {
-  await db.insert(userAgentMemories).values({
+): Promise<UserAgentMemory> {
+  const row: UserAgentMemory = {
     id: randomUUID(),
     user_id: userId,
     agent_id: agentId,
     content,
     source,
     created_at: Math.floor(Date.now() / 1000),
-  }).run()
+  }
+  await db.insert(userAgentMemories).values(row).run()
+  return row
 }
 
 /** Delete all memories for a specific user (admin "forget" action). Returns count deleted. */
@@ -303,6 +305,47 @@ export async function deleteUserMemories(userId: string): Promise<number> {
     await db.delete(userAgentMemories)
       .where(eq(userAgentMemories.user_id, userId))
       .run()
+  }
+  return rows.length
+}
+
+// ---- User memory management (memory management view) ----
+
+/** All memory rows of a user across agents, newest first (management UI, unpaged). */
+export async function listUserMemories(userId: string): Promise<UserAgentMemory[]> {
+  const rows = await db.select().from(userAgentMemories)
+    .where(eq(userAgentMemories.user_id, userId))
+    .orderBy(desc(userAgentMemories.created_at))
+    .all()
+  return rows as unknown as UserAgentMemory[]
+}
+
+/** Update one memory's content. Scoped to owner (id + user_id); created_at is
+ *  intentionally NOT bumped — it marks creation time, keeping the injection timeline stable. */
+export async function updateUserAgentMemory(userId: string, id: string, content: string): Promise<UserAgentMemory | null> {
+  const scope = and(eq(userAgentMemories.id, id), eq(userAgentMemories.user_id, userId))
+  const existing = await db.select().from(userAgentMemories).where(scope).get()
+  if (!existing) return null
+  await db.update(userAgentMemories).set({ content }).where(scope).run()
+  const row = await db.select().from(userAgentMemories).where(scope).get()
+  return (row as unknown as UserAgentMemory) ?? null
+}
+
+/** Delete one memory. Scoped to owner (id + user_id). Returns true if a row was deleted. */
+export async function deleteUserAgentMemory(userId: string, id: string): Promise<boolean> {
+  const scope = and(eq(userAgentMemories.id, id), eq(userAgentMemories.user_id, userId))
+  const existing = await db.select({ id: userAgentMemories.id }).from(userAgentMemories).where(scope).get()
+  if (!existing) return false
+  await db.delete(userAgentMemories).where(scope).run()
+  return true
+}
+
+/** Delete ALL memories of a user+agent pair ("clear this agent's memories"). Returns count deleted. */
+export async function deleteUserAgentMemories(userId: string, agentId: string): Promise<number> {
+  const scope = and(eq(userAgentMemories.user_id, userId), eq(userAgentMemories.agent_id, agentId))
+  const rows = await db.select({ id: userAgentMemories.id }).from(userAgentMemories).where(scope).all()
+  if (rows.length > 0) {
+    await db.delete(userAgentMemories).where(scope).run()
   }
   return rows.length
 }

@@ -116,6 +116,18 @@ export interface McpServerConfig {
   created_at: number
 }
 
+// ---- User-Agent Memory ----
+
+/** 跨会话记忆条目：某用户对某 Agent 的持久化记忆（user_agent_memories 表） */
+export interface UserAgentMemory {
+  id: string
+  user_id: string
+  agent_id: string
+  content: string
+  source: 'agent' | 'user'  // agent = save_memory 工具写入，user = 用户手动添加
+  created_at: number        // unix 秒
+}
+
 // ---- Tool Definition ----
 
 /** 工具参数 JSON Schema 属性节点（支持嵌套） */
