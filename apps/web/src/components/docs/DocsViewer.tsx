@@ -136,7 +136,19 @@ export function DocsViewer({ docPath, onTocChange }: DocsViewerProps) {
           prose-strong:font-semibold
           prose-hr:my-6
         ">
-          <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+          <Markdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              // 长表格不撑宽限宽列布局：外层包横向滚动容器（与聊天消息的表格处理一致）
+              table: ({ children, ...props }) => (
+                <div className="my-4 overflow-x-auto">
+                  <table {...props}>{children}</table>
+                </div>
+              ),
+            }}
+          >
+            {content}
+          </Markdown>
         </article>
       </div>
     </div>
