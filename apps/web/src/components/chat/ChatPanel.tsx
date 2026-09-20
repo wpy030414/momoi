@@ -57,6 +57,8 @@ interface ChatPanelProps {
   onSendAnswer?: (answer: string, selectedOptions?: string[]) => void
   onSkipAnswer?: () => void
   recommendedQuestions?: string[]
+  /** Admin-configured chat follow-ups (chips above the input bar in non-empty conversations) */
+  followupQuestions?: string[]
   /** Current conversation id for upload scoping */
   conversationId?: string | null
   /** Called when upload needs a conversation but none exists yet */
@@ -72,6 +74,7 @@ export function ChatPanel({
   infiniteMode = false, onInfiniteModeChange,
   pendingQuestion, onSendAnswer, onSkipAnswer,
   recommendedQuestions,
+  followupQuestions,
   conversationId, onEnsureConversation,
   verbose,
 }: ChatPanelProps) {
@@ -275,6 +278,22 @@ export function ChatPanel({
       {/* Input area — hidden in QQ group (read-only: messages only come from QQ) */}
       {hasMessages && !isQqGroupChat && (
         <div className="relative z-10">
+          {/* Follow-up chips (admin-configured) — above the input bar, only in
+              non-empty conversations (the empty state shows recommendedQuestions instead) */}
+          {followupQuestions && followupQuestions.length > 0 && (
+            <div className="max-w-3xl mx-auto w-full px-4 pt-2 pb-1 flex flex-wrap gap-2">
+              {followupQuestions.map((q, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSend(q)}
+                  disabled={loading || !!pendingQuestion}
+                  className="suggestion-chip disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
           <InputBar
             onSend={handleSend}
             disabled={loading || !!pendingQuestion}

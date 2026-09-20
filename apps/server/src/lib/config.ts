@@ -97,6 +97,7 @@ export async function getConfig(): Promise<AppConfig> {
     show_github: (await getSetting('show_github', 'true')) === 'true',
     use_external_image_hosting: (await getSetting('use_external_image_hosting', 'false')) === 'true',
     recommended_questions: JSON.parse(await getSetting('recommended_questions', '[]')),
+    followup_questions: JSON.parse(await getSetting('followup_questions', '[]')),
     oauth_providers: JSON.parse(await getSetting('oauth_providers', '[]')),
   }
 }
@@ -105,7 +106,7 @@ export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConf
   for (const [key, value] of Object.entries(partial)) {
     if (value !== undefined) {
       const boolKeys = ['support_attachments', 'support_infinite_mode', 'allow_im_conversations', 'show_github', 'use_external_image_hosting']
-      const jsonKeys = ['recommended_questions', 'oauth_providers']
+      const jsonKeys = ['recommended_questions', 'followup_questions', 'oauth_providers']
       let stored: string
       if (jsonKeys.includes(key)) {
         stored = JSON.stringify(value)

@@ -14,7 +14,7 @@
 | `src/server/routes/app.ts` | 公开端点（`GET /api/app-name`，对外暴露品牌信息与 Agent 列表） |
 | `src/client/components/settings/AgentManager.tsx` | 管理面板中的 Agent 管理界面 |
 | `src/client/components/settings/GatewaySettings.tsx` | 管理面板中的网关配置界面 |
-| `src/client/components/settings/BrandingTab.tsx` | 品牌配置界面 |
+| `src/client/components/admin/tabs/ExperienceSettings.tsx` | 体验配置界面（应用外观 + 首页推荐问题 + 聊天常用追问） |
 
 ## 配置层级
 
@@ -49,6 +49,8 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 | `api_key` | string | `OPENAI_API_KEY` | `""` | API 密钥 |
 | `support_attachments` | boolean | — | `false` | 全局附件开关 |
 | `show_github` | boolean | — | `true` | 是否在界面中显示 GitHub 链接 |
+| `recommended_questions` | string[]（JSON） | — | `[]` | 首页推荐问题（空对话展示，最多 3 条） |
+| `followup_questions` | string[]（JSON） | — | `[]` | 聊天常用追问（非空对话输入框上方气泡，最多 5 条） |
 
 ## 环境变量层（env 对象）
 

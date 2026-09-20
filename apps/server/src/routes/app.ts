@@ -19,6 +19,7 @@ appRoute.get('/', async (c) => {
     show_github: config.show_github,
     use_external_image_hosting: config.use_external_image_hosting,
     recommended_questions: config.recommended_questions,
+    followup_questions: config.followup_questions,
     // The client's single discovery channel for stand-alone mode (auto-login
     // as the fixed 'admin' user, hide auth-related UI entries).
     stand_alone: STAND_ALONE,

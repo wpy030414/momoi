@@ -246,13 +246,14 @@ SQLite / PostgreSQL settings 表（可热更新）
 getConfig() → 运行时配置（优先使用 DB 值）
   ↓
 AppConfig 字段：
-  app_name, app_favicon, app_background            — 品牌
+  app_name, app_favicon, app_background            — 体验（应用外观定制）
   api_endpoint, api_key                             — LLM 连接
   support_attachments                               — 附件开关
   support_infinite_mode                             — 无限模式开关
   show_github                                       — 显示 GitHub 链接
   use_external_image_hosting                        — 外部图床开关
-  recommended_questions                             — 推荐问题列表（JSON）
+  recommended_questions                             — 首页推荐问题列表（JSON，空对话展示）
+  followup_questions                                — 聊天常用追问（JSON，最多 5 条，非空对话输入框上方气泡）
   oauth_providers                                   — OAuth2 提供商配置（JSON）
 
 Agent 级配置（存储在 agents 表）：
@@ -525,7 +526,7 @@ App
 ├── AdminScreen（密钥认证）
 │     ├── AgentManager（Agent CRUD + TTS 语音配置）
 │     ├── GatewaySettings（API 地址 + 密钥）
-│     ├── BrandingSettings（应用名称 + Favicon + 背景图）
+│     ├── ExperienceSettings（应用名称 + Favicon + 背景图 + 首页推荐问题 + 聊天常用追问）
 │     ├── SkillManager（技能管理）
 │     ├── McpServerManager（MCP 服务器 CRUD）
 │     └── StatsPanel（统计 + 对话浏览）

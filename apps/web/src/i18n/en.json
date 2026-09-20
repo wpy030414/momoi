@@ -116,7 +116,7 @@
   },
   "settings": {
     "title": "Admin",
-    "tabBranding": "Branding",
+    "tabExperience": "Experience",
     "appName": "App Name",
     "appNamePlaceholder": "Momoi",
     "appFavicon": "Favicon",
@@ -225,6 +225,9 @@
     "recommendedQuestions": "Recommended Questions",
     "questionTooLong": "Each question must be 20 characters or fewer",
     "questionPlaceholder": "Question {{n}}",
+    "followupQuestions": "Chat Follow-ups",
+    "followupPlaceholder": "Follow-up {{n}}",
+    "followupTooLong": "Each follow-up must be 20 characters or fewer",
     "reviewRoleUser": "User",
     "reviewRoleSystem": "System",
     "reviewRoleTool": "Tool",

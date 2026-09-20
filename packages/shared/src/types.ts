@@ -87,6 +87,8 @@ export interface AppConfig {
   show_github: boolean
   use_external_image_hosting: boolean
   recommended_questions: string[]
+  /** 聊天常用追问（最多 5 条，非空对话输入框上方气泡） */
+  followup_questions: string[]
   oauth_providers: OAuth2Provider[]
 }
 

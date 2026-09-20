@@ -13,7 +13,7 @@ interface AdminSidebarProps {
 
 export const ADMIN_TABS = [
   { value: 'gateway', labelKey: 'settings.tabGateway', Icon: Globe },
-  { value: 'branding', labelKey: 'settings.tabBranding', Icon: Palette },
+  { value: 'experience', labelKey: 'settings.tabExperience', Icon: Palette },
   { value: 'agent', labelKey: 'settings.tabAgent', Icon: Bot },
   { value: 'mcp', labelKey: 'settings.tabMcp', Icon: Server },
   { value: 'skills', labelKey: 'settings.tabSkills', Icon: Puzzle },

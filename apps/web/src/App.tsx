@@ -20,7 +20,7 @@ import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
 // Admin tab components — lazy loaded (only admins see them)
 const AgentManager = lazy(() => import('./components/admin/tabs/AgentManager').then(m => ({ default: m.AgentManager })))
 const GatewaySettings = lazy(() => import('./components/admin/tabs/GatewaySettings').then(m => ({ default: m.GatewaySettings })))
-const BrandingSettings = lazy(() => import('./components/admin/tabs/BrandingSettings').then(m => ({ default: m.BrandingSettings })))
+const ExperienceSettings = lazy(() => import('./components/admin/tabs/ExperienceSettings').then(m => ({ default: m.ExperienceSettings })))
 const McpManager = lazy(() => import('./components/admin/tabs/McpManager').then(m => ({ default: m.McpManager })))
 const SkillManager = lazy(() => import('./components/admin/tabs/SkillManager').then(m => ({ default: m.SkillManager })))
 const ReviewPanel = lazy(() => import('./components/admin/tabs/ReviewPanel').then(m => ({ default: m.ReviewPanel })))
@@ -100,6 +100,7 @@ export function App() {
   const [allowImConversations, setAllowImConversations] = useState(true)
   const [showGithub, setShowGithub] = useState(true)
   const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>([])
+  const [followupQuestions, setFollowupQuestions] = useState<string[]>([])
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
   // Admin status of the logged-in user (ADMIN usernames from server .env)
   const [isAdminUser, setIsAdminUser] = useState(false)
@@ -412,6 +413,7 @@ export function App() {
       setAllowImConversations(r.allow_im_conversations !== false)
       setShowGithub(r.show_github !== false)
       setRecommendedQuestions(r.recommended_questions || [])
+      setFollowupQuestions(r.followup_questions || [])
       if (r.agents?.length > 0) {
         setAgents(r.agents)
         setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
@@ -434,6 +436,7 @@ export function App() {
         setAllowImConversations(r.allow_im_conversations !== false)
         setShowGithub(r.show_github !== false)
         setRecommendedQuestions(r.recommended_questions || [])
+        setFollowupQuestions(r.followup_questions || [])
         if (r.agents?.length > 0) {
           setAgents(r.agents)
           setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
@@ -611,9 +614,13 @@ export function App() {
       const match = window.location.hash.match(/^#\/settings(?:\/(\w+))?$/)
       if (match) {
         if (isAdminUser) {
-          // Stand-alone mode hides the users tab — bounce that hash to the default
+          // Stand-alone mode hides the users tab — bounce that hash to the default.
+          // 'branding' predates the rename to 体验 — map it so old bookmarks still land.
           const tab = match[1]
-          if (tab) setAdminTab(standAlone && tab === 'users' ? ADMIN_TABS[0].value : tab)
+          if (tab) {
+            const normalized = tab === 'branding' ? 'experience' : tab
+            setAdminTab(standAlone && normalized === 'users' ? ADMIN_TABS[0].value : normalized)
+          }
           setAdminViewOpen(true)
         } else {
           leaveAdminRoute()
@@ -831,7 +838,7 @@ export function App() {
                 <Suspense fallback={<div className="flex items-center justify-center h-32 text-muted-foreground text-sm">{t('common.loading')}</div>}>
                   {adminTab === 'agent' && <AgentManager ref={agentRef} />}
                   {adminTab === 'gateway' && <GatewaySettings ref={gatewayRef} />}
-                  {adminTab === 'branding' && <BrandingSettings />}
+                  {adminTab === 'experience' && <ExperienceSettings />}
                   {adminTab === 'mcp' && <McpManager ref={mcpRef} />}
                   {adminTab === 'skills' && <SkillManager ref={skillRef} />}
                   {adminTab === 'users' && !standAlone && <UserManager ref={userRef} />}
@@ -971,6 +978,7 @@ export function App() {
               onSendAnswer={(answer, selectedOptions) => chat.sendAnswer(chat.pendingQuestion?.question_id || '', answer, selectedOptions)}
               onSkipAnswer={() => chat.sendAnswer(chat.pendingQuestion?.question_id || '', '', [])}
               recommendedQuestions={recommendedQuestions}
+              followupQuestions={followupQuestions}
               conversationId={chat.activeId}
               onEnsureConversation={ensureConversation}
             />

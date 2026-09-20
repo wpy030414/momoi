@@ -6,34 +6,46 @@ import { Switch } from '../../ui/switch'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 
-export function BrandingSettings() {
+/** 首页推荐问题条数（空对话展示） */
+const RECOMMENDED_QUESTION_COUNT = 3
+/** 聊天常用追问条数上限（非空对话输入框上方气泡） */
+const FOLLOWUP_QUESTION_COUNT = 5
+/** 每条问题的软性长度上限 */
+const QUESTION_MAX_LENGTH = 20
+
+export function ExperienceSettings() {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [config, setConfig] = useState<any>(null)
   const [saving, setSaving] = useState(false)
-  const [question1, setQuestion1] = useState('')
-  const [question2, setQuestion2] = useState('')
-  const [question3, setQuestion3] = useState('')
+  const [questions, setQuestions] = useState<string[]>(() => Array(RECOMMENDED_QUESTION_COUNT).fill(''))
+  const [followups, setFollowups] = useState<string[]>(() => Array(FOLLOWUP_QUESTION_COUNT).fill(''))
   const faviconInputRef = useRef<HTMLInputElement>(null)
   const backgroundInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     api.getConfig().then((c) => {
       setConfig(c)
-      const questions = c.recommended_questions || []
-      setQuestion1(questions[0] || '')
-      setQuestion2(questions[1] || '')
-      setQuestion3(questions[2] || '')
+      const rq = c.recommended_questions || []
+      setQuestions((prev) => prev.map((_, i) => rq[i] || ''))
+      const fq = c.followup_questions || []
+      setFollowups((prev) => prev.map((_, i) => fq[i] || ''))
     }).catch(console.error)
   }, [])
 
   const handleSave = async () => {
     setSaving(true)
     try {
-      const questions = [question1.trim(), question2.trim(), question3.trim()].filter(Boolean)
+      const rq = questions.map((q) => q.trim()).filter(Boolean)
+      const fq = followups.map((q) => q.trim()).filter(Boolean)
       // Soft limit: each question must be ≤20 chars
-      if (questions.some((q) => q.length > 20)) {
+      if (rq.some((q) => q.length > QUESTION_MAX_LENGTH)) {
         toast({ title: t('settings.questionTooLong'), variant: 'error' })
+        setSaving(false)
+        return
+      }
+      if (fq.some((q) => q.length > QUESTION_MAX_LENGTH)) {
+        toast({ title: t('settings.followupTooLong'), variant: 'error' })
         setSaving(false)
         return
       }
@@ -42,7 +54,8 @@ export function BrandingSettings() {
         app_favicon: config.app_favicon,
         app_background: config.app_background,
         show_github: config.show_github,
-        recommended_questions: questions,
+        recommended_questions: rq,
+        followup_questions: fq,
       })
       toast({ title: t('settings.toastSaved'), variant: 'success' })
     } catch (err) {
@@ -70,6 +83,29 @@ export function BrandingSettings() {
     }
     reader.readAsDataURL(file)
   }
+
+  /** 通用问题输入组：带长度计数器，超长标红 */
+  const renderQuestionInputs = (values: string[], setValues: (v: string[]) => void, placeholderKey: string) => (
+    <div className="space-y-2 mt-1">
+      {values.map((val, i) => (
+        <div className="relative" key={i}>
+          <Input
+            value={val}
+            onChange={(e) => {
+              const next = [...values]
+              next[i] = e.target.value
+              setValues(next)
+            }}
+            placeholder={t(placeholderKey, { n: i + 1 })}
+            className="pr-12"
+          />
+          <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs ${val.length > QUESTION_MAX_LENGTH ? 'text-destructive' : 'text-muted-foreground'}`}>
+            {val.length}/{QUESTION_MAX_LENGTH}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
 
   if (!config) return <div className="py-8 text-center text-muted-foreground">{t('common.loading')}</div>
 
@@ -128,24 +164,11 @@ export function BrandingSettings() {
       </div>
       <div>
         <label className="text-sm font-medium">{t('settings.recommendedQuestions')}</label>
-        <div className="space-y-2 mt-1">
-          {([question1, question2, question3] as const).map((val, i) => (
-            <div className="relative" key={i}>
-              <Input
-                value={val}
-                onChange={(e) => {
-                  const setter = [setQuestion1, setQuestion2, setQuestion3][i]
-                  setter(e.target.value)
-                }}
-                placeholder={t('settings.questionPlaceholder', { n: i + 1 })}
-                className="pr-12"
-              />
-              <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs ${val.length > 20 ? 'text-destructive' : 'text-muted-foreground'}`}>
-                {val.length}/20
-              </span>
-            </div>
-          ))}
-        </div>
+        {renderQuestionInputs(questions, setQuestions, 'settings.questionPlaceholder')}
+      </div>
+      <div>
+        <label className="text-sm font-medium">{t('settings.followupQuestions')}</label>
+        {renderQuestionInputs(followups, setFollowups, 'settings.followupPlaceholder')}
       </div>
       <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>

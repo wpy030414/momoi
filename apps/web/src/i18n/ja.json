@@ -116,7 +116,7 @@
   },
   "settings": {
     "title": "管理",
-    "tabBranding": "ブランド",
+    "tabExperience": "体験",
     "appName": "アプリ名",
     "appNamePlaceholder": "Momoi",
     "appFavicon": "ファビコン",
@@ -225,6 +225,9 @@
     "recommendedQuestions": "おすすめの質問",
     "questionTooLong": "各質問は 20 文字以内にしてください",
     "questionPlaceholder": "質問 {{n}}",
+    "followupQuestions": "チャットの追加質問",
+    "followupPlaceholder": "追加質問 {{n}}",
+    "followupTooLong": "各追加質問は 20 文字以内にしてください",
     "reviewRoleUser": "ユーザー",
     "reviewRoleSystem": "システム",
     "reviewRoleTool": "ツール",
