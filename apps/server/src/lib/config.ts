@@ -1,6 +1,6 @@
 import './env.js'
 import { db, settings, agents, mcpServers, userAgentMemories } from '../db/index.js'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, desc } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import type { AppConfig, Agent, McpServerConfig } from '@momoi/shared/types'
 import {
@@ -263,15 +263,17 @@ export async function deleteMcpServer(id: string): Promise<boolean> {
 
 // ---- User-Agent Memory CRUD ----
 
-/** Get all memories for a user+agent pair, ordered by creation time */
+/** Latest N memories for a user+agent pair, returned in chronological order
+ *  (oldest first) so the injected numbered list reads as a timeline. */
 export async function getUserAgentMemories(userId: string, agentId: string, limit = 30): Promise<string[]> {
   const rows = await db.select({ content: userAgentMemories.content })
     .from(userAgentMemories)
     .where(and(eq(userAgentMemories.user_id, userId), eq(userAgentMemories.agent_id, agentId)))
-    .orderBy(userAgentMemories.created_at)
+    .orderBy(desc(userAgentMemories.created_at))
     .limit(limit)
     .all()
-  return rows.map((r: typeof userAgentMemories.$inferSelect) => r.content)
+  // Take the latest N, then restore chronological order for prompt injection.
+  return rows.map((r: typeof userAgentMemories.$inferSelect) => r.content).reverse()
 }
 
 /** Save a new memory for a user+agent pair */
