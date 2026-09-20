@@ -2,8 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, getUser, clearSession, notifyAuthExpired, getDeviceIdForRequest, subscribeRealtime, connectRealtime } from '../lib/api'
 import type { Conversation, Attachment, TraceEntry } from '@momoi/shared/types'
-import type { ThinkingSegment } from '@momoi/shared/thinking'
-import { decodeThinkingToSegments, thinkingSegmentHeader } from '@momoi/shared/thinking'
+import { THINKING_SEGMENT_OPEN } from '@momoi/shared/constants'
 
 /** runtime tracer — 定位串会话竞态，修完即删 */
 function tracer(tag: string, ...args: any[]) {
@@ -15,13 +14,7 @@ interface ChatMessage {
   id?: number
   role: 'user' | 'assistant'
   content: string
-  /** 兼容字段：DB 里存的是含分隔符的纯文本；历史消息用它。 */
-  thinking?: string
-  /** 结构化分块：按工具轮 round 分组。优先于 thinking 渲染。 */
-  thinkingSegments?: ThinkingSegment[]
   toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
-  /** 时间线：按实际发生顺序交织排列思考与工具调用。
-   *  流式时逐条追加；历史消息由 mapServerMessage 从 segments+toolCalls 重建。 */
   trace?: TraceEntry[]
   suggestions?: string[]
   attachments?: Attachment[]
@@ -50,84 +43,17 @@ const isDraftKey = (k: string) => k.startsWith(DRAFT_PREFIX)
  *  超过本地也会放弃的时长，才视为结束。 */
 const REMOTE_STREAM_TTL_MS = 60_000
 
-/** 从历史消息的 segments + toolCalls 重建时间线。
- *  DB 不存交织顺序，只能按 segments 顺序插入对应 round 的工具调用。
- *  单段思考（历史纯文本）退化为 trace 里一个 thinking 条目。
- *  content（最终回复文本）作为最后一个 text 条目追加。 */
-function buildTraceFromHistory(
-  segments: ThinkingSegment[],
-  toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>,
-  content?: string,
-): TraceEntry[] {
-  const trace: TraceEntry[] = []
-  // 按 round 分组的工具调用（round = segments 中的位置索引，最后一个 thinking 后面的 tool 归入末尾）
-  const tcByRound: Array<typeof toolCalls> = []
-  if (toolCalls && toolCalls.length > 0) {
-    // 简单策略：工具调用按数组顺序均匀分配到 segments 之间
-    // round 0 = 第 1 段思考之后，round 1 = 第 2 段思考之后，...
-    // 如果工具比思考多（少见），多余的归入最后一段
-    const segCount = Math.max(segments.length, 1)
-    for (let i = 0; i < segCount; i++) {
-      tcByRound.push([])
-    }
-    toolCalls.forEach((tc, idx) => {
-      const bucket = Math.min(idx, segCount - 1)
-      const arr = tcByRound[bucket]
-      if (arr) arr.push(tc)
-    })
-  }
-
-  if (segments.length === 0) {
-    // 无思考但有工具
-    if (toolCalls && toolCalls.length > 0) {
-      for (const tc of toolCalls) {
-        trace.push({ type: 'tool_call', ...tc })
-      }
-    }
-    // 追加最终文本
-    if (content) trace.push({ type: 'text', text: content })
-    return trace
-  }
-
-  for (let i = 0; i < segments.length; i++) {
-    trace.push({ type: 'thinking', text: segments[i].text })
-    const tcs = tcByRound[i] || []
-    for (const tc of tcs) {
-      trace.push({ type: 'tool_call', ...tc })
-    }
-  }
-  // 如果工具调用比思考段多（极端情况），剩余的工具追加到末尾
-  if (toolCalls && toolCalls.length > trace.filter((e) => e.type === 'tool_call').length) {
-    const usedIds = new Set(
-      trace
-        .filter((e): e is Extract<TraceEntry, { type: 'tool_call' }> => e.type === 'tool_call' && !!e.id)
-        .map((e) => e.id!),
-    )
-    for (const tc of toolCalls) {
-      if (!tc.id || !usedIds.has(tc.id)) {
-        trace.push({ type: 'tool_call', ...tc })
-      }
-    }
-  }
-  // 追加最终文本
-  if (content) trace.push({ type: 'text', text: content })
-  return trace
-}
-
 /** 服务端 Message → 本地 ChatMessage 映射（历史加载 / 收尾 refetch / 会话切换共用） */
-function mapServerMessage(m: { id: number; role: string; content: string; thinking?: string | null; tool_calls?: unknown; suggestions?: unknown; attachments?: unknown; agent_id?: string | null; trace?: unknown }): ChatMessage {
-  const thinkingSegments = decodeThinkingToSegments(m.thinking)
+function mapServerMessage(m: { id: number; role: string; content: string; tool_calls?: unknown; suggestions?: unknown; attachments?: unknown; agent_id?: string | null; trace?: unknown }): ChatMessage {
   const toolCalls = m.tool_calls as any || undefined
   const dbTrace = m.trace as any
   const trace = Array.isArray(dbTrace) && dbTrace.length > 0
     ? dbTrace as TraceEntry[]
-    : buildTraceFromHistory(thinkingSegments, toolCalls, m.content)
+    : undefined
   return {
     id: m.id,
     role: m.role as 'user' | 'assistant',
     content: m.content,
-    thinking: m.thinking || undefined,
-    thinkingSegments,
     toolCalls,
     trace,
     suggestions: m.suggestions as any || undefined,
@@ -457,7 +383,7 @@ export function useChat() {
     tracer('send:start', streamKey, activeIdRef.current, draftKeyRef.current, activeKeyRef.current)
 
     const userMsg: ChatMessage = { role: 'user', content: text, attachments }
-    const assistantMsg: ChatMessage = { role: 'assistant', content: '', streaming: true, thinkingSegments: [], trace: [] }
+    const assistantMsg: ChatMessage = { role: 'assistant', content: '', streaming: true, trace: [] }
     updateMessages(streamKey, (prev) => [...prev, userMsg, ...(groupMode ? [] : [assistantMsg])])
 
     const entry: LocalStream = { abort: new AbortController(), infinite: !!infiniteMode, group: !!groupMode }
@@ -701,7 +627,7 @@ export function useChat() {
           return [
             ...prev,
             userBubble,
-            { role: 'assistant' as const, content: '', streaming: true, thinkingSegments: [], trace: [] },
+            { role: 'assistant' as const, content: '', streaming: true, trace: [] },
           ]
         })
         break
@@ -733,26 +659,11 @@ export function useChat() {
         break
 
       case 'thinking': {
-        // 「唯一事实源」：thinking 纯文本（即服务端下发序列，含分隔符）作为真源，
-        // thinkingSegments 每次都从它派生（同一套 decode 也用于历史加载）。
-        const segRound = typeof msg.round === 'number' ? msg.round : undefined
         updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
-          const newThinking = (last.thinking || '') + msg.text
-          // 是否为本轮第一条 thinking（服务端会在每轮首个 thinking 前先下发分隔符事件）
-          const isSegmentHeader = typeof segRound === 'number' && msg.text === thinkingSegmentHeader(segRound)
-          let segments = last.thinkingSegments || []
-          if (isSegmentHeader) {
-            segments = [...segments, { round: segRound, text: '' }]
-          } else if (segments.length === 0) {
-            segments = [{ round: 0, text: msg.text }]
-          } else {
-            const updated = [...segments]
-            updated[updated.length - 1] = { ...updated[updated.length - 1], text: updated[updated.length - 1].text + msg.text }
-            segments = updated
-          }
-          // 同步 trace：分隔符 = 新开 thinking 条目；正文 = 追加到最后一个 thinking 条目
+          // Separator = new round header; text = append to the last thinking entry in trace
+          const isSegmentHeader = msg.text.startsWith(THINKING_SEGMENT_OPEN)
           let trace = last.trace || []
           if (isSegmentHeader) {
             trace = [...trace, { type: 'thinking' as const, text: '' }]
@@ -766,7 +677,7 @@ export function useChat() {
             }
             trace = updated
           }
-          return [...prev.slice(0, -1), { ...last, thinking: newThinking, thinkingSegments: segments, trace, ...(remote && !last.streaming ? { streaming: true } : {}) }]
+          return [...prev.slice(0, -1), { ...last, trace, ...(remote && !last.streaming ? { streaming: true } : {}) }]
         })
         break
       }
@@ -897,7 +808,6 @@ export function useChat() {
             streaming: true,
             agent_id: msg.agent_id,
             agent_name: msg.agent_name,
-            thinkingSegments: [],
             trace: [],
           },
         ])
@@ -976,7 +886,7 @@ export function useChat() {
           }
           // For direct chat: also create the streaming assistant bubble
           if (!isGroupChat) {
-            updated.push({ role: 'assistant' as const, content: '', streaming: true, thinkingSegments: [], trace: [] })
+            updated.push({ role: 'assistant' as const, content: '', streaming: true, trace: [] })
           }
           return updated
         })

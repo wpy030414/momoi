@@ -134,43 +134,6 @@ export async function initPg(dbUrl: string, user: string, password: string) {
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
     CREATE INDEX IF NOT EXISTS idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
 
-    -- Additive column migrations for existing PG databases
-    ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_enabled BOOLEAN NOT NULL DEFAULT FALSE;
-    ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_sample_url TEXT NOT NULL DEFAULT '';
-    ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_settings TEXT NOT NULL DEFAULT '{}';
-    ALTER TABLE messages ADD COLUMN IF NOT EXISTS trace TEXT;
-    ALTER TABLE qq_bindings ADD COLUMN IF NOT EXISTS group_enabled BOOLEAN NOT NULL DEFAULT FALSE;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at INTEGER;
-    -- Migration: qq_bindings composite PK (user_id, agent_id)
-    ALTER TABLE qq_bindings ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT '';
-    -- Drop old single-column PK if it still exists; add composite PK
-    DO $$ BEGIN
-      IF EXISTS (SELECT 1 FROM information_schema.table_constraints
-                 WHERE constraint_name = 'qq_bindings_pkey' AND table_name = 'qq_bindings') THEN
-        ALTER TABLE qq_bindings DROP CONSTRAINT qq_bindings_pkey;
-      END IF;
-    END $$;
-    -- Add composite PK if not already present (idempotent: errors if exists, so wrap)
-    DO $$ BEGIN
-      ALTER TABLE qq_bindings ADD PRIMARY KEY (user_id, agent_id);
-    EXCEPTION WHEN others THEN
-      -- PK already exists (composite or otherwise), skip
-    END $$;
-    -- Migration: qq_group_conversations — revert to (app_id, group_openid) PK;
-    -- drop stale columns (user_id, group_name, group_chain_id) from auto-merge experiment.
-    DO $$ BEGIN
-      ALTER TABLE qq_group_conversations DROP CONSTRAINT IF EXISTS qq_group_conversations_pkey;
-    EXCEPTION WHEN others THEN END $$;
-    ALTER TABLE qq_group_conversations DROP COLUMN IF EXISTS user_id;
-    ALTER TABLE qq_group_conversations DROP COLUMN IF EXISTS group_name;
-    ALTER TABLE qq_group_conversations DROP COLUMN IF EXISTS group_chain_id;
-    DROP INDEX IF EXISTS idx_qq_group_conv_user;
-    DROP INDEX IF EXISTS idx_qq_group_conv_chain;
-    DO $$ BEGIN
-      ALTER TABLE qq_group_conversations ADD PRIMARY KEY (app_id, group_openid);
-    EXCEPTION WHEN others THEN END $$;
-    CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
-
     CREATE TABLE IF NOT EXISTS user_agent_memories (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

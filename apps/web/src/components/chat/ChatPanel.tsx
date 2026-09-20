@@ -5,7 +5,7 @@ import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { QuestionBar } from './QuestionBar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
-import type { Attachment, ThinkingSegment, AskUserQuestion } from '@momoi/shared/types'
+import type { Attachment, AskUserQuestion } from '@momoi/shared/types'
 
 interface AgentBrief {
   id: string
@@ -18,8 +18,6 @@ interface ChatMessage {
   id?: number
   role: 'user' | 'assistant'
   content: string
-  thinking?: string
-  thinkingSegments?: ThinkingSegment[]
   toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
   suggestions?: string[]
   attachments?: Attachment[]

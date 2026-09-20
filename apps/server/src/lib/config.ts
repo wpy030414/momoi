@@ -6,11 +6,7 @@ import type { AppConfig, Agent, McpServerConfig, UserAgentMemory } from '@momoi/
 import {
   DEFAULT_APP_NAME,
   DEFAULT_API_ENDPOINT,
-  DEFAULT_AGENT_NAME,
-  DEFAULT_AGENT_MODEL,
-  DEFAULT_AGENT_SYSTEM_PROMPT,
   DEFAULT_MODEL,
-  NEUTRAL_AGENT_NAME,
   NEUTRAL_AGENT_ID,
   DEFAULT_TTS_ENDPOINT,
   DEFAULT_TTS_PROVIDER,
@@ -133,9 +129,9 @@ export async function listAgents(): Promise<Agent[]> {
     avatar: r.avatar,
     role: r.role as Agent['role'],
     created_at: r.created_at,
-    voice_enabled: (r as any).voice_enabled ?? false,
-    voice_sample_url: (r as any).voice_sample_url ?? '',
-    voice_settings: (r as any).voice_settings ?? '{}',
+    voice_enabled: r.voice_enabled,
+    voice_sample_url: r.voice_sample_url,
+    voice_settings: r.voice_settings,
   }))
 }
 
@@ -150,9 +146,9 @@ export async function getAgent(id: string): Promise<Agent | null> {
     avatar: row.avatar,
     role: row.role as Agent['role'],
     created_at: row.created_at,
-    voice_enabled: (row as any).voice_enabled ?? false,
-    voice_sample_url: (row as any).voice_sample_url ?? '',
-    voice_settings: (row as any).voice_settings ?? '{}',
+    voice_enabled: row.voice_enabled,
+    voice_sample_url: row.voice_sample_url,
+    voice_settings: row.voice_settings,
   }
 }
 
@@ -196,24 +192,6 @@ export async function deleteAgent(id: string): Promise<boolean> {
   if (!existing) return false
   await db.delete(agents).where(eq(agents.id, id)).run()
   return true
-}
-
-// ---- Migration: auto-create Default agent + Neutral Agent from legacy global config ----
-
-export async function migrateDefaultAgent(): Promise<void> {
-  const existingAgents = await listAgents()
-  if (existingAgents.length > 0) return
-
-  // Read old global model/prompt from settings (may have been set by previous versions)
-  const oldModel = await getSetting('model', env.OPENAI_MODEL || DEFAULT_AGENT_MODEL)
-  const oldPrompt = await getSetting('system_prompt', DEFAULT_AGENT_SYSTEM_PROMPT)
-
-  await createAgent(DEFAULT_AGENT_NAME, oldModel, oldPrompt)
-  console.log(`[migrate] Created default agent "${DEFAULT_AGENT_NAME}" with model "${oldModel}"`)
-
-  // Create neutral agent: reuses first agent's model, no name/avatar editing
-  await createAgent(NEUTRAL_AGENT_NAME, oldModel, '', '', 'neutral')
-  console.log(`[migrate] Created neutral agent "${NEUTRAL_AGENT_NAME}" with model "${oldModel}"`)
 }
 
 // ---- MCP Server CRUD ----

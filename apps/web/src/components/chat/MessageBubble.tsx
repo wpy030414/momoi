@@ -5,14 +5,12 @@ import { ThinkingBlock } from './ThinkingBlock'
 import { AttachmentCard, AttachmentList } from './AttachmentCard'
 import { VoicePlayButton } from '../voice/VoicePlayButton'
 import { Bot, Undo2, Check, X, ChevronRight } from 'lucide-react'
-import type { Attachment, ThinkingSegment, TraceEntry } from '@momoi/shared/types'
+import type { Attachment, TraceEntry } from '@momoi/shared/types'
 
 interface ChatMessage {
   id?: number
   role: 'user' | 'assistant'
   content: string
-  thinking?: string
-  thinkingSegments?: ThinkingSegment[]
   toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
   trace?: TraceEntry[]
   suggestions?: string[]
@@ -66,66 +64,24 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
             <div className={`text-xs text-muted-foreground mb-1 ${isUser ? 'mr-1' : 'ml-1'}`}>{agentName}</div>
           )}
 
-          {/* Trace-driven rendering: thinking + text + tool calls in chronological order.
-              Falls back to legacy grouped rendering if trace is absent (defensive). */}
+          {/* Trace-driven rendering: thinking + tool calls + text in chronological order. */}
           {!isUser && message.trace && message.trace.length > 0 ? (
             <>
               {groupAndRenderTrace(message.trace, message.streaming, verbose)}
             </>
           ) : !isUser ? (
-            /* Legacy fallback: grouped rendering for messages without trace */
-            <>
-              {message.thinking && (
-                <ThinkingBlock
-                  content={message.thinking}
-                  segments={message.thinkingSegments}
-                  done={!message.streaming}
-                  verbose={verbose}
-                />
-              )}
-              {message.toolCalls && message.toolCalls.length > 0 && (
-                <div className="mb-2 space-y-1">
-                  {message.toolCalls.map((tc, idx) => (
-                    <div key={tc.id || idx}>
-                      <div className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0">
-                        <span className="font-medium truncate">{tc.name}</span>
-                        {tc.status === 'running' && (
-                          <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block flex-shrink-0" />
-                        )}
-                        {tc.result && <span className="text-muted-foreground ml-1 truncate">{tc.result}</span>}
-                      </div>
-                      {tc.artifacts && tc.artifacts.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-1">
-                          {tc.artifacts.map((art, i) => (
-                            <AttachmentCard key={i} attachment={{
-                              url: art.downloadUrl,
-                              name: art.displayName,
-                              size: 0,
-                              type: art.mimeType,
-                            }} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+            /* Streaming placeholder — content not yet arrived */
+            <div className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-card/75 border`}>
+              {message.streaming && !message.content ? (
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
+              ) : (
+                <MessageContent content={message.content} streaming={message.streaming} isUser={false} />
               )}
-              {/* Content block — only shown in legacy path (no trace).
-                  max-w-full caps the shrink-to-fit inline-block at the column width,
-                  so wide code blocks / mermaid scroll inside the bubble instead of
-                  stretching the chat into horizontal scrolling. */}
-              <div className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-card/75 border`}>
-                {message.streaming && !message.content ? (
-                  <div className="flex gap-1">
-                    <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                ) : (
-                  <MessageContent content={message.content} streaming={message.streaming} isUser={false} />
-                )}
-              </div>
-            </>
+            </div>
           ) : null}
 
           {/* Attachments */}

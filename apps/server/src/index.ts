@@ -4,13 +4,9 @@ import { serve } from '@hono/node-server'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 
-import { env, migrateDefaultAgent } from './lib/config.js'
+import { env } from './lib/config.js'
 import { STAND_ALONE } from './lib/standalone.js'
 import { db, users } from './db/index.js'
-
-// config.ts transitively imports db.ts which has top-level await for database initialization.
-// Auto-create Default agent from legacy global config if no agents exist
-await migrateDefaultAgent()
 
 // Stand-alone mode: seed the fixed 'admin' user row (idempotent) so the users
 // table (and /api/admin/stats' total_users) reflects the single fixed identity.

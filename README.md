@@ -1,33 +1,26 @@
 # Momoi
 
-轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过内置工具执行文件读写、Shell 命令、网络请求、文档处理等任务，通过技能注入系统提示词，支持文件附件多模态交互，管理员由 `.env` 的 `ADMIN` 用户名名单指定。支持微信 / QQ 绑定、OAuth 登录、TTS 语音合成、多设备实时同步。
+轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过内置工具执行文件读写、Shell 命令、网络请求、文档处理等任务，通过技能注入系统提示词，支持文件附件多模态交互。支持微信 / QQ 绑定、OAuth 登录、TTS 语音合成、多设备实时同步。
 
 ## 核心特性
 
-- **PIN 认证登录** — 用户名 + 4 位 PIN，PBKDF2 安全哈希，JWT 经 HttpOnly Cookie 传输（XSS 不可窃取）+ 14 天滑动续期（应用开着永不过期，超过 14 天未使用需重新登录）
-- **OAuth 登录** — 支持 OAuth2 提供商登录，可绑定已有账号或创建新账号
+- **PIN 认证登录** — 用户名 + 4 位 PIN，PBKDF2 安全哈希，JWT 经 HttpOnly Cookie 传输 + 14 天滑动续期
+- **OAuth 登录** — 支持 OAuth2 提供商登录与账号绑定
 - **流式对话** — React + shadcn/ui 聊天界面，SSE 实时流式输出（token、思考过程、工具调用）
-- **思考模式** — 支持 AI 扩展推理（DashScope 兼容 `enable_thinking`），可折叠展示思考过程
-- **文件附件** — 支持图片（多模态）、Excel（转 CSV）、PDF（提取文本）等附件，管理员可开关
-- **内置工具系统** — AI 可执行文件读写、Shell 命令、网络请求、文档处理（DOCX/PPTX/XLSX/PDF），沙盒隔离；支持 `ask_user` 阻塞式询问用户
-- **技能系统** — SKILL.md 摘要注入系统提示词，完整内容通过 `load_skill` 工具按需加载；支持嵌套技能目录递归扫描
-- **Mermaid 图表** — AI 回复中的 mermaid 代码块自动渲染为图表
-- **后续建议** — AI 每次回复末尾自动生成 3 条可点击的追问建议
-- **消息回退** — 可从任意历史消息处回退，删除该消息及之后所有消息
-- **对话导出** — 将对话导出为格式化 TXT 文件
-- **统计面板** — 管理员可查看用户/对话/消息统计，浏览所有对话和消息
-- **管理员面板** — 密钥认证 + JWT，在线修改模型、提示词、品牌、技能
+- **思考模式** — 支持 AI 扩展推理，可折叠展示思考过程
+- **文件附件** — 支持图片、Excel、PDF 等附件，管理员可开关
+- **内置工具系统** — AI 可执行文件读写、Shell 命令、网络请求、文档处理，沙盒隔离
+- **技能系统** — SKILL.md 摘要注入系统提示词，完整内容按需加载
+- **Agent 多智能体** — 每个 Agent 独立模型、提示词、头像，支持群聊对话
+- **无限演算模式** — 中立 Agent 自动追问，支持个体聊天和群聊
+- **TTS 语音合成** — GPT-SoVITS / CosyVoice 双引擎，Agent 可配置独立声音
+- **微信 / QQ 绑定** — 扫码或凭证绑定，在 IM 中与 AI 对话
+- **多设备实时同步** — 同账号多设备间聊天流实时中继
+- **管理员面板** — 在线修改模型、提示词、品牌、技能、MCP 服务器
+- **国际化** — 中文 / 英文双语支持
 - **白标品牌** — 自定义应用名称、Favicon、聊天背景图
-- **持久化存储** — SQLite 单文件数据库（或 PostgreSQL 远程模式），对话历史自动保存
-- **国际化** — 中文/英文双语支持
-- **Agent 多智能体** — 每个 Agent 独立模型、提示词、头像，支持创建/编辑/删除
-- **群聊对话** — 多 Agent 串行回复，@mention 点名对话，Agent 身份感知
-- **无限演算模式** — 中立 Agent 自动追问，支持个体聊天和群聊，实现持续对话
-- **TTS 语音合成** — 支持 GPT-SoVITS / CosyVoice 语音合成，Agent 可配置独立声音
-- **微信绑定** — 扫码绑定微信，在微信中与 AI 对话，支持会话锚定与换绑
-- **QQ 绑定** — 填入 QQ 机器人（q.qq.com）的 AppID / AppSecret 即可绑定，在 QQ 私聊中与 AI 流式对话，与微信绑定正交可并存
-- **多设备实时同步** — 同账号多设备登录时，聊天流实时中继，会话列表自动同步
-- **IP 速率限制** — PIN 连续 5 次错误封禁 5 分钟
+
+完整功能列表与用例见 `docs/PRD.md`。
 
 ## 快速开始
 
@@ -48,18 +41,16 @@ pnpm dev
 
 ### 单机模式
 
-启动服务器时追加 `--stand-alone` 即进入单机模式——单用户、无 Momoi 鉴权的本机部署：
+启动服务器时追加 `--stand-alone` 进入单机模式——单用户、无鉴权的本机部署：
 
 ```bash
-pnpm dev:standalone     # 开发模式（Vite 5173 + Hono 11408）
-pnpm start:standalone   # 生产模式（node dist/index.js --stand-alone）
+pnpm dev:standalone     # 开发模式
+pnpm start:standalone   # 生产模式
 ```
 
-- **独立数据库**：使用 `data/momoi.stand-alone.db`，与多租户主库 `data/momoi.db` 完全隔离（若配置了 `DATABASE_URL` 会被忽略并告警，强制走本地 SQLite）
-- **直接进入**：打开网页即以固定 `admin` 用户身份登录——没有登录页，不可改名、改 PIN、OAuth 关联或退出登录
-- **鉴权全关**：无 PIN / 密码、无 JWT、无 HttpOnly Cookie；`userAuthMiddleware` / `adminAuthMiddleware` 直通并固定 `userId='admin'`；`/api/user` 仅保留 `GET /me`，登录相关端点全部不存在；OAuth 路由不挂载
-- **后台永远开启**：管理面板（Gateway/品牌/智能体/MCP/技能/审查）始终可访问，「用户」tab 不显示
-- **微信 / QQ 绑定照常**：IM 桥接不是 Momoi 鉴权体系的一部分，绑定归属 `admin` 用户，poller / QQ 网关照常启动
+- 固定 `admin` 用户，无登录页，不可改密/改名/登出
+- 独立数据库 `data/momoi.stand-alone.db`
+- 后台始终可用，「用户」tab 不显示
 
 > ⚠️ 单机模式不做任何鉴权，仅适合本机或可信内网使用，请勿暴露到公网。
 
@@ -69,177 +60,45 @@ pnpm start:standalone   # 生产模式（node dist/index.js --stand-alone）
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `ADMIN` | （空） | 管理员用户名名单，逗号分隔（如 `ADMIN=xrl,咕咕,k3p0`）。名单在进程生命周期内固定，修改需停机改 `.env` 后重启；留空或缺省即无管理员，不影响运行 |
-| `JWT_SECRET` | （自动生成） | JWT 签名密钥；缺省时首次启动自动生成 32 字节随机密钥并持久化到数据库（重启不失效） |
+| `ADMIN` | （空） | 管理员用户名名单，逗号分隔 |
+| `JWT_SECRET` | （自动生成） | JWT 签名密钥 |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容 API 地址 |
 | `OPENAI_API_KEY` | | API 密钥 |
 | `OPENAI_MODEL` | `gpt-4o` | 模型名称 |
 | `PORT` | `11408` | 服务端端口 |
 
-## 配置项
-
-管理员面板或 API 可在运行时修改以下配置：
-
-| 配置项 | 类型 | 说明 |
-|---|---|---|
-| `app_name` | string | 应用名称（白标） |
-| `app_favicon` | string | Favicon base64 data URL（白标） |
-| `app_background` | string | 聊天背景图 base64 data URL（白标） |
-| `support_attachments` | boolean | 是否启用文件附件上传 |
-| `show_github` | boolean | 是否在界面中显示 GitHub 链接 |
-
-## 登录与认证
-
-1. 输入用户名
-2. 首次使用：设置 4 位数字 PIN
-3. 再次登录：验证 PIN 即可进入
-4. PIN 使用 PBKDF2 加盐哈希安全存储于 SQLite（参数详见 `docs/specs/module-auth.md`）
-5. 验证成功后 JWT 经 **HttpOnly Cookie** 保存在浏览器（JS 不可读取，XSS 无法窃取；14 天有效）；应用打开期间会在剩余不足一半时自动续期，超过 14 天未打开则需重新登录
-
 ## 管理面板
 
-在 `.env` 的 `ADMIN` 名单中的用户，登录后点击侧边栏设置图标即可看到「后台设置」入口，无需输入任何密钥（Agent/Gateway/品牌/技能/统计）。普通用户没有该入口；直接访问 `#/settings` 会被路由守卫遣返回首页。
+`ADMIN` 名单内用户登录后点击侧边栏设置图标进入后台，无需额外密钥：
 
-- **Agent** — 创建/编辑/删除 Agent，每个 Agent 独立配置模型、API 地址、密钥和系统提示词
-- **Gateway** — 全局 API 地址和密钥配置
-- **品牌** — 修改应用名称、Favicon、聊天背景图
-- **技能** — 上传/卸载技能（.zip 文件）
-- **统计** — 查看用户数、对话数、消息数，浏览所有对话详情
-
-## 内置工具
-
-AI 在对话中可自动调用以下内置工具（沙盒隔离，每对话独立工作区，Pi 式并行批执行）：
-
-| 工具 | 说明 |
-|------|------|
-| `read_file` | 读取工作区文件（text/base64） |
-| `write_file` | 写入文件到工作区（产物可下载；第 2 次起温和提醒，不强制拒绝） |
-| `list_files` | 列出工作区文件 |
-| `delete_file` | 删除工作区文件 |
-| `bash` | 在工作区沙盒中执行 Shell 命令（受限 bash，带超时与输出截断，破坏性命令被拦截） |
-| `http_request` | 发起出站 HTTP 请求（SSRF 防护） |
-| `read_document` | 读取文档内容（DOCX/DOC/PPTX/XLSX/XLS/PDF/CSV） |
-| `write_document` | 生成文档文件（DOCX/PPTX/XLSX，产物可下载） |
-| `load_skill` | 按需加载技能完整内容 |
-| `list_skill_files` | 列出技能目录中的文件 |
-| `at_mention` | 群聊中 @ 点名其他 Agent（触发即时应答） |
-| `ask_user` | 阻塞式询问用户，等待用户选择或输入后继续执行 |
-| `{serverName}/{toolName}` | MCP 工具（动态注入，来自外部 MCP 服务器） |
-
-所有工具在 `data/workspaces/{conversationId}/` 沙盒内执行，防止访问宿主文件系统。MCP 工具通过 HTTP+SSE 连接外部 MCP 服务器，工具列表缓存 5 分钟。详见 `docs/specs/module-tool-system.md`。
-
-## AI 循环
-
-采用 Pi Agent Core（@earendil-works/pi-agent-core）作为 Agent 循环内核，核心特点：
-
-- **并行工具执行** — 同一轮中无依赖的工具并发执行
-- **多轮工具调用** — 模型自行决定何时停止，系统提示词约束防无限循环
-- **TypeBox 参数校验** — 工具参数严格类型校验
-- **流式事件映射** — Pi AgentEvent → SSE ServerMessage 完整映射
-- **系统提示词硬性规则** — 防漂移、写文件节制、工具节制由提示词约束而非代码补丁
-
-## SSE 事件
-
-服务端通过 Server-Sent Events 向客户端推送以下事件类型：
-
-| 事件类型 | 说明 |
-|---|---|
-| `token` | AI 回复文本片段 |
-| `thinking` | AI 思考过程文本 |
-| `tool_call` | AI 请求调用工具（含工具名称和参数） |
-| `tool_execution_start` | 工具开始执行（与 `tool_call` 分离，独立事件） |
-| `tool_result` | 工具执行结果（含摘要和产物下载链接） |
-| `done` | 本轮回复完成（含最终回复文本和后续建议） |
-| `error` | 错误信息 |
-| `agent_start` | 群聊中某个 Agent 开始回复 |
-| `agent_done` | 群聊中某个 Agent 回复完成 |
-| `group_start` | 群聊开始 |
-| `group_done` | 群聊结束 |
-| `follow_up` | 无限模式追问 |
-| `infinite_mode_off` | 无限模式关闭 |
-| `ask_user` | 阻塞式询问用户（含问题 ID 和选项） |
-| `voice_segment` | TTS 语音片段 |
-| `voice_done` | TTS 语音合成完成 |
-| `suggestions` | 中立 Agent 补发的追问建议 |
-
-## 技能开发
-
-技能放在 `skills/` 目录下。系统会递归扫描整个技能目录树，任何包含 `SKILL.md` 的目录自动注册为技能：
-
-```
-skills/
-├── my-skill/
-│   ├── SKILL.md    # YAML 前置元数据 + Markdown 指令内容
-│   └── README.md
-└── nested/
-    └── sub-skill/         # 嵌套在子目录中，也会被自动发现
-        ├── SKILL.md
-        └── references/
-```
-
-**SKILL.md：**
-```markdown
----
-name: my-skill
-description: 帮助处理 X 类任务
-version: 1.0.0
----
-
-当用户询问关于 X 的问题时，请遵循以下准则：
-1. 首先确认用户的需求
-2. 给出具体可行的建议
-3. 提供相关示例
-```
-
-技能的名称和描述会在每次对话时注入系统提示词的 `## Available Skills` 部分，完整内容通过 `load_skill` 工具按需加载。`list_skill_files` 工具可列出技能目录下的所有文件，帮助 AI 发现子技能和参考资料。
+- **Agent** — 创建/编辑/删除 Agent，独立配置模型与提示词
+- **Gateway** — 全局 API 地址和密钥
+- **体验** — 应用名称、Favicon、背景图、推荐问题
+- **技能** — 上传/卸载技能
+- **MCP** — 外部 MCP 服务器管理
+- **统计** — 用户/对话/消息统计
 
 ## 生产部署
 
 ```bash
-# 构建（前端 Vite + 后端 tsup）
-pnpm build
-
-# 启动生产服务（Hono 同时提供 API 和静态文件）
-pnpm start
-# 等效于 node dist/index.js
+pnpm build          # 构建（server tsup + web Vite）
+pnpm start          # 启动（node apps/server/dist/index.js）
 ```
-
-生产模式下 Hono 直接托管前端构建产物，无需额外的 Web 服务器。
 
 ## 技术栈
 
-- **前端**：React 19 + shadcn/ui（Radix 原语 + Tailwind CSS）+ Vite 8（Rolldown）
-- **后端**：Hono 4 + Drizzle ORM（SQLite sql.js 或 PostgreSQL 远程模式）
+- **前端**：React 19 + shadcn/ui（Radix + Tailwind）+ Vite 8
+- **后端**：Hono 4 + Pi Agent Core + Drizzle ORM
+- **数据库**：SQLite（sql.js）默认；可选 PostgreSQL
 - **实时通信**：SSE（Server-Sent Events）
-- **AI**：Pi Agent Core（@earendil-works/pi-agent-core）+ OpenAI 兼容 API
-- **认证**：PBKDF2 PIN 哈希 + JWT（jose）+ HttpOnly Cookie + IP 速率限制 + OAuth2
-- **数据库**：SQLite（单文件，零配置）或 PostgreSQL（远程模式）
-- **文件解析**：xlsx（Excel→CSV）、pdf-parse（PDF→文本）、mammoth（DOCX）、word-extractor（DOC）
-- **TTS**：GPT-SoVITS / CosyVoice 语音合成
-- **微信集成**：iLink 企业微信机器人 API
-- **QQ 集成**：QQ 开放平台机器人 API（手写最小协议客户端，WS 网关 + C2C 流式消息）
+- **认证**：PBKDF2 PIN + JWT（HttpOnly Cookie）+ OAuth2
+- **文件解析**：xlsx、pdf-parse、mammoth、word-extractor
 
-## 项目结构
+## 文档
 
-```
-momoi/                          # 仓库根（pnpm monorepo）
-├── apps/
-│   ├── server/                 # @momoi/server — Hono 后端
-│   │   ├── src/                # 源码（index.ts 入口）
-│   │   ├── dist/               # 自包含产物：index.js + client/ + docs/
-│   │   └── scripts/copy-docs.mjs
-│   └── web/                    # @momoi/web — React 前端（Vite）
-│       ├── src/                # 源码（main.tsx 入口）
-│       ├── index.html / public/
-│       └── vite.config.ts
-├── packages/
-│   └── shared/                 # @momoi/shared — 共享类型与常量（TS 源码直引，零构建）
-│       └── src/                # types.ts / constants.ts / thinking.ts
-├── data/                       # SQLite 数据库（运行时，原地不动）
-├── skills/                     # 已安装的技能目录（运行时，原地不动）
-├── docs/                       # 项目文档
-├── .env                        # 环境变量
-├── pnpm-workspace.yaml         # pnpm 工作区清单
-├── package.json                # 编排脚本（dev / build / start）
-└── tsconfig.base.json          # 共享 TS 编译选项
-```
+| 文档 | 职责 |
+|---|---|
+| `docs/PRD.md` | 为什么做、做什么（目标/场景/功能/范围） |
+| `docs/ARCHITECTURE.md` | 系统如何组织（模块/关系/数据流/边界） |
+| `docs/DECISIONS.md` | 为何选此方案、备选与权衡 |
+| `docs/specs/module-*.md` | 具体模块的表现契约、约束与验收标准 |

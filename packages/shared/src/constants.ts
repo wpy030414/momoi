@@ -14,9 +14,6 @@ export const DEFAULT_API_ENDPOINT = 'https://api.openai.com/v1'
 export const DEFAULT_MODEL = 'gpt-4o'
 
 // Agent 默认值
-export const DEFAULT_AGENT_NAME = 'Momoi'
-export const DEFAULT_AGENT_MODEL = 'gpt-4o'
-export const DEFAULT_AGENT_SYSTEM_PROMPT = ''
 export const NEUTRAL_AGENT_NAME = '中立 Agent'
 export const NEUTRAL_AGENT_ID = 'neutral-agent'
 

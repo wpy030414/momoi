@@ -697,9 +697,9 @@ async function getAgentStub(id: string): Promise<import('@momoi/shared/types').A
     avatar: row.avatar,
     role: row.role as any,
     created_at: row.created_at,
-    voice_enabled: (row as any).voice_enabled ?? false,
-    voice_sample_url: (row as any).voice_sample_url ?? '',
-    voice_settings: (row as any).voice_settings ?? '{}',
+    voice_enabled: row.voice_enabled,
+    voice_sample_url: row.voice_sample_url,
+    voice_settings: row.voice_settings,
   }
 }
 
