@@ -4,7 +4,7 @@ import { serve } from '@hono/node-server'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 
-import { env } from './lib/config.js'
+import { env, bootstrapAgents } from './lib/config.js'
 import { STAND_ALONE } from './lib/standalone.js'
 import { db, users } from './db/index.js'
 
@@ -17,6 +17,9 @@ if (STAND_ALONE) {
     .onConflictDoNothing()
     .run()
 }
+
+// Ensure neutral agent + at least one non-neutral agent exist on every startup.
+await bootstrapAgents()
 
 import { conversationsRoute } from './routes/conversations.js'
 import { adminRoute } from './routes/admin.js'

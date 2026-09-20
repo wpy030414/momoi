@@ -8,6 +8,7 @@ import {
   DEFAULT_API_ENDPOINT,
   DEFAULT_MODEL,
   NEUTRAL_AGENT_ID,
+  NEUTRAL_AGENT_NAME,
   DEFAULT_TTS_ENDPOINT,
   DEFAULT_TTS_PROVIDER,
 } from '@momoi/shared/constants'
@@ -192,6 +193,23 @@ export async function deleteAgent(id: string): Promise<boolean> {
   if (!existing) return false
   await db.delete(agents).where(eq(agents.id, id)).run()
   return true
+}
+
+// ---- Bootstrap: ensure neutral + at least one non-neutral agent exist ----
+
+export async function bootstrapAgents(): Promise<void> {
+  const all = await listAgents()
+  const model = env.OPENAI_MODEL
+
+  if (!all.some((a) => a.id === NEUTRAL_AGENT_ID)) {
+    await createAgent(NEUTRAL_AGENT_NAME, model, '', '', 'neutral')
+    console.log(`[bootstrap] Created neutral agent "${NEUTRAL_AGENT_NAME}" with model "${model}"`)
+  }
+
+  if (!all.some((a) => a.role !== 'neutral')) {
+    await createAgent('Momoi', model, '')
+    console.log(`[bootstrap] Created default agent "Momoi" with model "${model}"`)
+  }
 }
 
 // ---- MCP Server CRUD ----
