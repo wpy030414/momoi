@@ -99,8 +99,9 @@
   → 加载历史消息（最近 20 条）
   → 解析附件
   → runPiAgentLoop()
-    → buildSystemPrompt()（注入 Agent 提示词 + 技能摘要 + 硬性规则）
-    → createToolAdapter()（12 个 ToolModule → Pi AgentTool）
+    → 加载跨会话用户记忆（最近 30 条；中立 Agent / 身份未知 / QQ 群聊时跳过）
+    → buildSystemPrompt()（注入 Agent 提示词 + 用户记忆 + 跨会话记忆规则 + 技能摘要 + 硬性规则）
+    → createToolAdapter()（12 个 ToolModule → Pi AgentTool；中立 Agent / QQ 群聊剔除 save_memory）
     → createStreamFn()（provider.ts → Pi StreamFn）
     → runAgentLoop()（Pi 原生循环，并行工具执行）
       → SSE 事件流：token / thinking / tool_call / tool_result
@@ -491,6 +492,14 @@ qq_bindings
 ├── error TEXT                     -- 最近一次错误信息
 ├── created_at INTEGER             -- Unix epoch (秒)
 └── updated_at INTEGER             -- Unix epoch (秒)
+
+user_agent_memories
+├── id TEXT PRIMARY KEY            -- UUID
+├── user_id TEXT                   -- 本地用户名
+├── agent_id TEXT                  -- Agent ID（按 (user, agent) 二元组隔离；Agent 删除后留孤儿行）
+├── content TEXT                   -- 记忆正文（上限 4000 字符）
+├── source TEXT                    -- 'agent'（save_memory 写入）| 'user'（界面手动添加）
+└── created_at INTEGER             -- Unix epoch (秒)
 ```
 
 ### PostgreSQL 模式索引
@@ -500,6 +509,7 @@ qq_bindings
 CREATE INDEX idx_messages_conv        ON messages(conversation_id, created_at);
 CREATE INDEX idx_conversations_user   ON conversations(user_id, updated_at);
 CREATE INDEX idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
+CREATE INDEX idx_user_agent_memories  ON user_agent_memories(user_id, agent_id);
 ```
 
 ## 前端组件树

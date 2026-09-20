@@ -10,7 +10,7 @@ import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutr
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage, Attachment, TraceEntry } from '@momoi/shared/types'
 import { randomUUID } from 'crypto'
-import { getConfig, listAgents, getAgent, getUserAgentMemories } from '../lib/config.js'
+import { getConfig, listAgents, getAgent } from '../lib/config.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 import { resolveQuestion, getPendingQuestion } from '../tools/ask-user-tool.js'
 import { parseAttachment } from '../files/parser.js'
@@ -335,9 +335,7 @@ chatRoute.post('/', async (c) => {
       })() : null
       const voiceSpeakerId: string | undefined = voiceSettingsRaw?.speakerId
 
-      // --- Load user-agent memories (skip neutral agent) ---
-      const resolvedMid = agentId && agentId !== NEUTRAL_AGENT_ID ? agentId : null
-      const userMemories = resolvedMid ? await getUserAgentMemories(userId, resolvedMid) : []
+      // 跨会话记忆的加载已下沉进 runPiAgentLoop（所有渠道共用，且与工具执行时的 Agent 身份一致）
 
       // Sentence boundary detection for voice
       const SENTENCE_BOUNDARY_RE = /[。！？.!?\n]/
@@ -568,7 +566,6 @@ chatRoute.post('/', async (c) => {
           infiniteMode: isInfinite,
           language,
           lastMessageAt,
-          userMemories,
         })
         if (reply) {
           await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)
@@ -621,7 +618,6 @@ chatRoute.post('/', async (c) => {
             infiniteMode: isInfinite,
             language,
             lastMessageAt: computeLastMessageAt(currentHistory, agentId || undefined),
-            userMemories,
           })
           if (reply) {
             await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)

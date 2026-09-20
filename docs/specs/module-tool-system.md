@@ -132,6 +132,7 @@
 | `src/server/tools/skill-tools.ts` | 技能工具：`load_skill`、`list_skill_files` |
 | `src/server/tools/bash-tool.ts` | Bash 命令执行：`bash`（受限沙盒执行） |
 | `src/server/tools/ask-user-tool.ts` | 阻塞式用户提问：`ask_user`（Promise 挂起机制，120s 超时） |
+| `src/server/tools/memory-tool.ts` | 跨会话记忆工具：`save_memory`（完整契约见 [module-memory.md](./module-memory.md)） |
 | `src/server/tools/group-mention-tool.ts` | @mention 工具：`at_mention`（Agent 间点名调用） |
 | `src/server/tools/mcp-client.ts` | MCP 客户端：HTTP+SSE 连接外部 MCP 服务器，动态注入工具 |
 | `src/server/tools/index.ts` | 统一导出 |
@@ -509,6 +510,39 @@ export class SandboxFS {
 - 问题信息通过 SSE 推送 —— 与现有事件体系一致，不新增轮询端点
 - 全局 `questionMap` —— 服务重启时所有挂起问题自然丢失（内存中），避免持久化复杂性
 
+### 8. 记忆工具（`memory-tool.ts`）
+
+#### save_memory
+
+把关于当前用户的重要信息写入跨会话长期记忆：写入后持久保存，并在之后每次会话开始时自动注入系统提示词。
+
+**参数**：
+
+- `content` (string, required): 记忆正文，写为脱离当前对话也能读懂的陈述句
+
+**行为流程**：
+
+1. `content` 去空白 → 空则报错
+2. 长度 > 4000 则报错
+3. `ctx.agentId` 缺失则报错
+4. `saveUserAgentMemory(userId, agentId, content, 'agent')` → 返回 `Memory saved for all future sessions: "…"`
+
+**错误与边界情况**：
+
+| 场景 | 行为 |
+|---|---|
+| 内容为空 / 超长 | 返回 error，不写库 |
+| `ctx.agentId` 缺失 | `Cannot save memory: agent identity unknown.` |
+| 中立 Agent | 工具**不暴露**——`createToolAdapter` 按 `ctx.agentId` 过滤，而非执行时报错 |
+| 上下文禁用记忆（QQ 群聊） | 工具**不暴露**（按 `ctx.memoryDisabled` 过滤）；即使被调用也返回错误、不写库（执行层兜底） |
+
+**设计意图**：
+
+- 工具描述内含「必须调用 / 主动调用 / 不要调用」三档触发规则（与系统提示词的 `## 跨会话记忆` 规则块逐字一致），使"用户说「记住」"直接映射到工具调用
+- 只写不改：修改与遗忘由用户在记忆管理界面执行，Agent 不能改写对用户的既有认知
+
+> 完整契约（注入位置、加载链路、API、验收标准）见 [module-memory.md](./module-memory.md)。
+
 ## 工作区生命周期
 
 ### 创建
@@ -773,6 +807,13 @@ HTTP 工具在发起请求前：
 36. ✅ 工具调用在消息气泡中显示为 `🔧 {name} → {summary}`
 37. ✅ 产物文件显示为下载卡片，点击可下载
 38. ✅ 下载请求携带 JWT，未认证返回 401
+
+### 记忆工具验收
+
+39. ✅ `save_memory` 保存的条目在后续会话中被注入系统提示词（最近 30 条、时间正序）
+40. ✅ 用户在对话中明确要求记住时，Agent 在同一轮内调用 `save_memory`（仅口头答应不算）
+41. ✅ `save_memory` 在内容为空 / 超长 / Agent 身份缺失时返回错误且不写库
+42. ✅ 中立 Agent 的工具列表中不含 `save_memory`
 
 ## 外部依赖
 

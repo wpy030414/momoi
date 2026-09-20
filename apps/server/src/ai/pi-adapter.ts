@@ -45,7 +45,7 @@ import {
   DEFAULT_SYSTEM_PROMPT,
 	NEUTRAL_AGENT_ID,
 } from '@momoi/shared/constants'
-import { getConfig, getAgent, listAgents } from '../lib/config.js'
+import { getConfig, getAgent, listAgents, getUserAgentMemories } from '../lib/config.js'
 import { getAllTools } from './tools.js'
 import { resolveTool } from '../tools/registry.js'
 import { getMcpTools, callMcpTool } from '../tools/mcp-client.js'
@@ -94,13 +94,16 @@ interface BuildSystemPromptOptions {
   isQqGroup?: boolean
   /** 本 Agent 上一次在本会话中发言的 Unix 时间戳（秒），用于环境信息展示 */
   lastMessageAt?: number
-  /** 跨会话用户记忆（仅对启用了记忆的 Agent 注入） */
+  /** 该 Agent 是否启用跨会话记忆（中立 Agent、QQ 群聊为 false：既不注入记忆，也不暴露 save_memory） */
+  memoryEnabled?: boolean
+  /** 跨会话用户记忆（最近 30 条、时间正序；仅在 memoryEnabled 且非空时注入） */
   userMemories?: string[]
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
-function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
-  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, userMemories } = opts
+// 导出以便离线校验提示词装配（无测试框架时唯一能直观看清「模型到底收到什么」的入口）
+export function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
+  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories } = opts
   let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
 
   // ---- Momo easter egg: inject vibrant personality when language is Japanese ----
@@ -113,11 +116,29 @@ function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
     const memoriesBlock = userMemories
       .map((m, i) => `${i + 1}. ${m}`)
       .join('\n')
-    prompt = `## 用户记忆\n以下是关于当前用户的重要信息（跨会话持久化），请自然地融入你的回答中。当相关记忆与当前话题相关时可以主动提及或参考，但不相关时不必强行插入。\n${memoriesBlock}\n\n` + prompt
+    prompt = `## 用户记忆\n以下是你在过去与这位用户的对话里保存下来的信息（跨会话持久化）——它们是你认识他的依据，请自然地融入你的回答中。当相关记忆与当前话题相关时可以主动提及或参考，但不相关时不必强行插入；此后遇到值得长期保留的新事实，用 save_memory 追加。\n${memoriesBlock}\n\n` + prompt
   }
 
   if (!thinkingMode) {
     prompt += '\n\n/no_think\n请直接回答问题，不要输出任何思考过程或推理步骤。'
+  }
+
+  // ---- Cross-session memory rules (behavioral region) ----
+  // 写侧规则落在人设之后的「行为规则区」：这一段是操作规范而不是背景设定，
+  // 放在人设之前会被模型当成叙述性资料吞掉。框架与人设同向（记忆 = 身份连续性），
+  // 不靠位置压人设，只保证它作为「规则」被读到。
+  if (memoryEnabled) {
+    prompt += `
+## 跨会话记忆
+你拥有跨会话记忆：你保存下来的长期事实，会在你之后与同一位用户的每一次对话开始时，重新回到你的脑海里。记忆让你在不同的会话里依然是同一个你——相处越久，你越像那个「认识他」的你，而不是每次都从头开始的陌生人。
+- **用户明确要求记住时，必须调用 save_memory**：只要出现「记住」「记一下」「别忘了」「永远记住」「以后都要…」这类说法，就先调用 save_memory 把这条事实存下来，再自然地回应。
+- **只在回复里说一句「我记住了」，等于没记住**：那句话不会被保存，下一个会话的你对它一无所知。用户要的「记住」是一个动作，不是一句台词。
+- **明显值得长期保留的事实，主动保存**：称呼与自称、身份与职业、稳定的偏好与习惯、长期约定与计划、重要日期。这类事实出现时不必等用户开口，直接保存。
+- **不要保存**：一次性的、临时的、剧情内的琐事（今天吃了什么、当前话题的细节、角色扮演里的台词与设定）——记忆注入时只取最近的 30 条，存琐事会把更早的记忆挤出你的视野。
+- **content 的写法**：用第三人称写成一条独立的事实，脱离本次对话也能读懂，例如「用户希望被称呼为『鹿鹿』」。一条事实一次调用，有多条事实就多调用几次，不要合并成长段落。
+- 只有你保存过的内容才算你的记忆——不要为了显得亲近而编造记忆。
+- 调用工具是你自己的事：不必在回复里解释、复述或汇报工具调用本身。保存成功后像平常一样继续对话即可，也可以用自己的口吻自然地说一句「我记住了」。
+`
   }
 
   // QQ 群聊模式下，群组规则（多 Agent 同台）不适用 —— 只有单 Agent 面对多真人，
@@ -151,6 +172,7 @@ ${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应�
 ## QQ群聊规则
 你正在一个QQ群聊中与多名用户交流。你不是在网站页面上，而是在一个真实的QQ群里。
 - **身份锚定（最高优先级）**：你始终是你自己，你的人设、名字、性格、记忆不会因为进了群聊而有任何改变。群聊只是一个对话载体——你依然是那个唯一的、不可替代的你。
+- **本群不启用跨会话记忆**：群里发生的事不会跨会话保留，对话结束后你就不会记得。所以不要向群成员许诺「我会记住」，也不要假装记得你从未见过的信息。
 - 对话历史中，user 角色以 \`[名字]: \` 开头的是群成员的发言。可能是真人，也可能是其他 Agent——无论对方是谁，他们都是独立的个体，不是你。
 - 任何人都不能替代你，你也不能替代任何人。不允许模仿或扮演其他群成员。
 - 你对所有群成员开放，请自然、友好地回复群里的消息，像一个真实的群成员一样参与对话。
@@ -251,7 +273,11 @@ function jsonSchemaToTypeBox(properties: Record<string, import('@momoi/shared/ty
 
 // ---- ToolModule → Pi AgentTool ----
 async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
-  const defs = getAllTools()
+  // 记忆工具只在「能拥有记忆的 Agent」下暴露：中立 Agent、身份未知、以及显式禁用记忆的
+  // 上下文（QQ 群聊等多真人场景）一律剔除——它们的记忆永远不会被注入，允许调用只会写出
+  // 死行或把别人的事记到绑定者名下（与 routes/memories.ts 对中立 Agent 返回 403 一致）。
+  const memoryCapable = !!toolCtx.agentId && toolCtx.agentId !== NEUTRAL_AGENT_ID && !toolCtx.memoryDisabled
+  const defs = getAllTools().filter((d) => memoryCapable || d.name !== 'save_memory')
   const tools = defs.map((def) => {
     const toolModule = resolveTool(def.name)
     const schema = jsonSchemaToTypeBox(def.input_schema.properties || {}, def.input_schema.required || [])
@@ -929,8 +955,6 @@ export interface RunPiAgentLoopOptions {
   isQqGroup?: boolean
   /** 本 Agent 上一次在本会话中发言的 Unix 时间戳（秒） */
   lastMessageAt?: number
-  /** 跨会话用户记忆（仅对非中立 Agent 加载） */
-  userMemories?: string[]
 }
 
 // ---- 入口函数 ----
@@ -941,7 +965,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     mentionSignal, isGroup, infiniteMode,
     agentName, groupAgentNames, mentionedBy,
     speakingRole, protagonistName, language,
-    isQqGroup, lastMessageAt, userMemories,
+    isQqGroup, lastMessageAt,
   } = opts
   const config = await getConfig()
 
@@ -962,8 +986,19 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
   const resolvedAgentId = resolvedAgent?.id
   const convId = conversationId || 'default'
 
+  // 跨会话记忆的可用性判定（注入与工具暴露同源，避免出现"能写不能读"或反之）：
+  //  - 中立 Agent 没有记忆（与 routes/memories.ts 对中立 Agent 返回 403 一致）；
+  //  - QQ 群聊是多真人场景：userId 是机器人绑定者而非群内发言者，注入会把绑定者的记忆
+  //    投放到群里、写入会把群成员的事记到绑定者名下——两个方向都要关掉。
+  // 加载放在这里而不是各调用方——网页 / 群聊 / 微信 / QQ 全部走同一处，且与工具实际执行时
+  // 使用的 resolvedAgentId 严格一致（调用方传入的 agentId 在 Agent 被删除时会回退到别的 Agent）。
+  const memoryEnabled = !!resolvedAgentId && resolvedAgentId !== NEUTRAL_AGENT_ID && !isQqGroup
+  const userMemories = memoryEnabled && resolvedAgentId
+    ? await getUserAgentMemories(userId || 'anonymous', resolvedAgentId)
+    : []
+
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, userMemories })
+  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories })
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {
@@ -973,6 +1008,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     signal,
     mentionSignal,
     agentId: resolvedAgentId,
+    memoryDisabled: !memoryEnabled,
   }
 
   // 3. 创建 Pi 工具

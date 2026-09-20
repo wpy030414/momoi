@@ -7,7 +7,7 @@ import type { ChatMessage, ContentPart } from './provider.js'
 import type { ServerMessage, Agent, TraceEntry } from '@momoi/shared/types'
 import type { ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
-import { getAgent, getConfig, getUserAgentMemories } from '../lib/config.js'
+import { getAgent, getConfig } from '../lib/config.js'
 import { decideGroupSpeakerOrder, type SpeakerOrder } from './neutral-agent.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 
@@ -319,10 +319,7 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         .at(-1)
       const lastMessageAt = lastMsg?.created_at
 
-      // Load user-agent memories for this specific agent (skip neutral agent)
-      const agentUserMemories = agent.role !== 'neutral'
-        ? await getUserAgentMemories(userId, agentId)
-        : []
+      // 跨会话记忆的加载已下沉进 runPiAgentLoop（与本 Agent 的执行身份一致）
 
       const { reply, suggestions, thinking, artifacts, trace } = await runPiAgentLoop({
         userMessage,
@@ -344,7 +341,6 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         protagonistName,
         language,
         lastMessageAt,
-        userMemories: agentUserMemories,
       })
 
       repliedAgents.add(agentId)

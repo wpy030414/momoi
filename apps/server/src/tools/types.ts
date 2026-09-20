@@ -23,6 +23,12 @@ export interface ToolContext {
   onUpdate?: ToolUpdateCallback
   /** The agent currently speaking (needed by tools like save_memory) */
   agentId?: string
+  /**
+   * 本次运行禁用跨会话记忆（QQ 群聊等多真人场景）。
+   * 双重兜底：`createToolAdapter` 据此剔除 save_memory 工具，
+   * 工具执行层（memory-tool.ts）也会拒绝写入——不依赖"工具没被暴露"这一层假设。
+   */
+  memoryDisabled?: boolean
 }
 
 /** Optional artifact: a file produced by a tool, surfaced to the user */
