@@ -32,6 +32,7 @@ interface ChatPanelProps {
   onSend: (text: string, thinkingMode?: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean) => void | Promise<void>
   onCancel: () => void
   onRevert: (index: number) => Promise<string | null>
+  onForceRetry?: (index: number) => Promise<void>
   backgroundImage?: string
   supportAttachments?: boolean
   supportInfiniteMode?: boolean
@@ -66,7 +67,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({
-  messages, loading, onSend, onCancel, onRevert, backgroundImage, supportAttachments, supportInfiniteMode,
+  messages, loading, onSend, onCancel, onRevert, onForceRetry, backgroundImage, supportAttachments, supportInfiniteMode,
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
   isGroup, isQqGroup, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
@@ -147,6 +148,10 @@ export function ChatPanel({
     if (text) {
       setRevertedText(text)
     }
+  }
+
+  const handleForceRetry = async (index: number) => {
+    await onForceRetry?.(index)
   }
 
   const handleExternalValueConsumed = () => {
@@ -253,6 +258,7 @@ export function ChatPanel({
               else onSend(text, thinkingMode, undefined, selectedAgentId, false, undefined, infiniteMode)
             }}
             onRevert={handleRevert}
+            onForceRetry={handleForceRetry}
             agentAvatar={isGroup ? null : directAgentAvatar}
             agents={isGroup ? (groupAgents || []) : agents}
             fallbackAgentName={isGroup ? undefined : directAgent?.name}

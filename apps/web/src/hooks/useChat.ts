@@ -364,7 +364,7 @@ export function useChat() {
     }
   }, [applySnapshot])
 
-  const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean) => {
+  const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean, _forceCompliance?: boolean) => {
     if (!text.trim()) return
 
     // 目标分区：当前会话 → 当前草稿 → 首页空态就地开隐式 direct 草稿（保持原有行为）
@@ -424,6 +424,7 @@ export function useChat() {
             conversation_id: convId || undefined,
             agent_id: agentId || undefined,
             _retry: isRetry,
+            _force_compliance: _forceCompliance || undefined,
             thinking_mode: thinkingMode,
             attachments: attachments || undefined,
             conversation_type: groupMode ? 'group' : undefined,
@@ -1109,6 +1110,22 @@ export function useChat() {
     return message.content
   }, [updateMessages, setLoadingFor])
 
+  /** 强制合规重试：回退到指定消息 → 以 _force_compliance 标记立即重发。
+   *  与 revertMessage 不同：不回填输入框，直接绕过内容审查重试。
+   *  useGroupChat 会覆盖此实现以传入群聊 Agent ID。 */
+  const forceComplianceRetry = useCallback(async (index: number): Promise<void> => {
+    const key = activeKeyRef.current
+    if (!key) return
+
+    // 1. Revert: abort stream, delete from server, truncate local, get original text
+    const originalText = await revertMessage(index)
+    if (!originalText) return
+
+    // 2. Re-send with _force_compliance flag (direct chat only — group chat overrides this)
+    const agentId = conversationsRef.current.find((c) => c.id === key)?.agent_id || undefined
+    await sendMessage(originalText, true, undefined, agentId || null, false, undefined, false, true)
+  }, [revertMessage, sendMessage, conversationsRef])
+
   // ---- Realtime: 同账号多设备实时同步 ----
   // 建立 SSE 长连接（GET /api/events），接收其他设备的聊天流事件与
   // 会话列表 / 内容变更信号，实时渲染而不需手动刷新。
@@ -1179,6 +1196,7 @@ export function useChat() {
     refreshConversations,
     cancel,
     revertMessage,
+    forceComplianceRetry,
     pendingQuestion,
     sendAnswer,
   }

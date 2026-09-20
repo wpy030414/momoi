@@ -35,6 +35,8 @@
     "connectionTimeout": "连接超时，请重试",
     "revert": "回退",
     "revertConfirmAction": "确认回退",
+    "forceComplianceRetry": "强制合规重试",
+    "moreActions": "更多操作",
     "greetingMorning": "早上好",
     "greetingAfternoon": "下午好",
     "greetingEvening": "晚上好",

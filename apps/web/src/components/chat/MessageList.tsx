@@ -23,6 +23,7 @@ interface MessageListProps {
   messages: ChatMessage[]
   onSuggestion?: (text: string) => void
   onRevert?: (index: number) => void
+  onForceRetry?: (index: number) => void
   agentAvatar?: string | null
   /** Group chat: agent lookup by id */
   agents?: AgentBrief[]
@@ -45,7 +46,7 @@ function parseQqSender(content: string): { senderName: string; cleanContent: str
   return { senderName: m[1], cleanContent: m[2] }
 }
 
-export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose, isQqGroup }: MessageListProps) {
+export function MessageList({ messages, onSuggestion, onRevert, onForceRetry, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose, isQqGroup }: MessageListProps) {
   // Only the last assistant message shows its suggestion chips — older ones
   // were for a past turn and are meaningless as "what to ask next".
   const lastAssistantIdx = [...messages]
@@ -92,11 +93,12 @@ export function MessageList({ messages, onSuggestion, onRevert, agentAvatar, age
         }
         return (
           <MessageBubble
-            key={msg.id || idx}
+            key={msg.id != null ? `db-${msg.id}` : `idx-${idx}`}
             message={{ ...msg, content: displayContent }}
             onSuggestion={onSuggestion}
             showSuggestions={idx === lastAssistantIdxFromEnd}
             onRevert={msg.role === 'user' ? () => onRevert?.(idx) : undefined}
+            onForceRetry={msg.role === 'user' ? () => onForceRetry?.(idx) : undefined}
             agentAvatar={msgAgentAvatar}
             agentName={msgAgentName || msg.agent_name || (msg.role === 'user' && !isQqGroup ? undefined : fallbackAgentName)}
             voiceEnabled={msgVoiceEnabled}

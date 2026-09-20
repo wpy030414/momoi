@@ -158,6 +158,14 @@ export function useGroupChat() {
     await chat.sendMessage(text, thinkingMode, attachments, null, true, agentIds, infiniteMode)
   }, [chat.sendMessage, groupAgents])
 
+  // 强制合规重试（群聊版）：回退 → 以 force_compliance 重发群聊消息
+  const forceComplianceRetry = useCallback(async (index: number) => {
+    const text = await chat.revertMessage(index)
+    if (!text) return
+    const agentIds = groupAgents.map((a) => a.id)
+    await chat.sendMessage(text, true, undefined, null, true, agentIds, false, true)
+  }, [chat.sendMessage, chat.revertMessage, groupAgents])
+
   // Refresh group agents from server
   const refreshGroupAgents = useCallback(async () => {
     if (!chat.activeId) return
@@ -193,6 +201,7 @@ export function useGroupChat() {
     addAgentToGroup,
     removeAgentFromGroup,
     sendGroupMessage,
+    forceComplianceRetry,
     refreshGroupAgents,
   }
 }

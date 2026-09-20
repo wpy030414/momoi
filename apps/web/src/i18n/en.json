@@ -35,6 +35,8 @@
     "connectionTimeout": "Connection lost, please retry",
     "revert": "Revert",
     "revertConfirmAction": "Yes, revert",
+    "forceComplianceRetry": "Force Compliance Retry",
+    "moreActions": "More Actions",
     "greetingMorning": "Good morning",
     "greetingAfternoon": "Good afternoon",
     "greetingEvening": "Good evening",

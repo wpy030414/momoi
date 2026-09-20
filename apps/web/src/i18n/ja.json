@@ -35,6 +35,8 @@
     "connectionTimeout": "接続が切断されました。再試行してください",
     "revert": "元に戻す",
     "revertConfirmAction": "はい、元に戻します",
+    "forceComplianceRetry": "強制コンプライアンス再試行",
+    "moreActions": "その他の操作",
     "greetingMorning": "おはようございます",
     "greetingAfternoon": "こんにちは",
     "greetingEvening": "こんばんは",

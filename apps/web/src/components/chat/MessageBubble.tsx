@@ -4,7 +4,13 @@ import { MessageContent } from './MessageContent'
 import { ThinkingBlock } from './ThinkingBlock'
 import { AttachmentCard, AttachmentList } from './AttachmentCard'
 import { VoicePlayButton } from '../voice/VoicePlayButton'
-import { Bot, Undo2, Check, X, ChevronRight } from 'lucide-react'
+import { Bot, MoreHorizontal, Undo2, Check, X, ChevronRight } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../ui/dropdown-menu'
 import type { Attachment, TraceEntry } from '@momoi/shared/types'
 
 interface ChatMessage {
@@ -25,6 +31,8 @@ interface MessageBubbleProps {
   showSuggestions?: boolean
   /** Called when user clicks revert button on a user message */
   onRevert?: () => void
+  /** Called when user clicks force compliance retry on a user message */
+  onForceRetry?: () => void
   /** Agent avatar URL (base64 data URL) */
   agentAvatar?: string | null
   /** Group chat: agent display name */
@@ -37,10 +45,11 @@ interface MessageBubbleProps {
   verbose?: boolean
 }
 
-export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, agentAvatar, agentName, voiceEnabled, activeAgentId, verbose }: MessageBubbleProps) {
+export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, onForceRetry, agentAvatar, agentName, voiceEnabled, activeAgentId, verbose }: MessageBubbleProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const [confirmingRevert, setConfirmingRevert] = useState(false)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''} group`}>
@@ -132,7 +141,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
           )}
         </div>
 
-        {/* Revert button — user messages only, positioned on the visual left */}
+        {/* Actions column — user messages only, positioned on the visual left */}
         {isUser && onRevert && (
           <div className="flex-shrink-0 flex items-center">
             {confirmingRevert ? (
@@ -158,14 +167,37 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setConfirmingRevert(true)}
-                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors inline-flex items-center gap-1"
-                title={t('chat.revert')}
-              >
-                <Undo2 className="h-3 w-3" />
-                {t('chat.revert')}
-              </button>
+              <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors"
+                    title={t('chat.moreActions')}
+                  >
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="left" align="start">
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setConfirmingRevert(true)
+                    }}
+                  >
+                    <Undo2 className="h-3 w-3 mr-2" />
+                    {t('chat.revert')}
+                  </DropdownMenuItem>
+                  {onForceRetry && (
+                    <DropdownMenuItem
+                      destructive
+                      onClick={() => {
+                        onForceRetry()
+                      }}
+                    >
+                      <Undo2 className="h-3 w-3 mr-2" />
+                      {t('chat.forceComplianceRetry')}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         )}
