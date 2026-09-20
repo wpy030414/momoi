@@ -149,7 +149,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
     <div className="flex flex-col h-full w-72 bg-card">
       {/* App name + GitHub */}
       <div className="flex items-center justify-between px-4 border-b" style={{ height: '60px' }}>
-        <h1 className="text-lg font-semibold flex items-center gap-1.5">{appName}{standAlone && <span className="inline-flex items-center justify-center h-[18px] w-[18px] rounded-[4px] bg-black text-white text-[11px] font-bold leading-none">S</span>}</h1>
+        <h1 className="text-lg font-semibold flex items-center gap-1.5">{appName}{standAlone && <span className="inline-flex items-center justify-center h-[18px] w-[18px] rounded-[4px] bg-black text-white dark:bg-white dark:text-black text-[11px] font-bold leading-none">S</span>}</h1>
         {showGithub && (
           <a
             href="https://github.com/wpy030414/momoi"
