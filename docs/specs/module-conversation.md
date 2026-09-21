@@ -8,10 +8,10 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/routes/conversations.ts` | REST API 路由 |
-| `src/server/db.ts` | 数据库连接和迁移 |
-| `src/server/schema.ts` | Drizzle ORM 表定义 |
-| `src/server/middleware/userAuth.ts` | 用户 JWT 认证中间件（从 HttpOnly Cookie `momoi_token` 提取 JWT） |
+| `apps/server/src/routes/conversations.ts` | REST API 路由 |
+| `apps/server/src/db.ts` | 数据库连接和迁移 |
+| `apps/server/src/schema.ts` | Drizzle ORM 表定义 |
+| `apps/server/src/middleware/userAuth.ts` | 用户 JWT 认证中间件（从 HttpOnly Cookie `momoi_token` 提取 JWT） |
 
 ## 接口契约
 

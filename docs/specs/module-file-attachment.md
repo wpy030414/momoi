@@ -8,11 +8,11 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/routes/upload.ts` | 文件上传与下载服务 |
-| `src/server/files/parser.ts` | 附件解析（图片/Excel/PDF/文本/二进制） |
-| `src/server/routes/chat.ts` | 把解析结果拼装成模型消息 |
-| `src/client/components/chat/InputBar.tsx` | 附件选择与上传交互 |
-| `src/client/components/chat/AttachmentCard.tsx` | 消息中的附件卡片展示 |
+| `apps/server/src/routes/upload.ts` | 文件上传与下载服务 |
+| `apps/server/src/files/parser.ts` | 附件解析（图片/Excel/PDF/文本/二进制） |
+| `apps/server/src/routes/chat.ts` | 把解析结果拼装成模型消息 |
+| `apps/web/src/components/chat/InputBar.tsx` | 附件选择与上传交互 |
+| `apps/web/src/components/chat/AttachmentCard.tsx` | 消息中的附件卡片展示 |
 
 ## 数据模型
 
@@ -112,8 +112,8 @@ interface Attachment {
 
 **修复内容**：
 
-1. `src/client/components/chat/InputBar.tsx` — 上传 `fetch` 不设 `Content-Type`（交给浏览器生成 multipart boundary）；认证经同源 HttpOnly Cookie 自动携带；`catch` 分支有内联可见的错误提示（`uploadError` state + 可关闭的 `bg-destructive` 提示条）
-2. `src/client/components/chat/AttachmentCard.tsx` — `downloadFile` 的 `fetch` 同样经 HttpOnly Cookie 认证
+1. `apps/web/src/components/chat/InputBar.tsx` — 上传 `fetch` 不设 `Content-Type`（交给浏览器生成 multipart boundary）；认证经同源 HttpOnly Cookie 自动携带；`catch` 分支有内联可见的错误提示（`uploadError` state + 可关闭的 `bg-destructive` 提示条）
+2. `apps/web/src/components/chat/AttachmentCard.tsx` — `downloadFile` 的 `fetch` 同样经 HttpOnly Cookie 认证
 3. i18n：`chat.uploadFailed` 键（zh-CN / en）
 
 **实测验证**（隔离临时库，带 JWT 上传→200，带 JWT 下载→200 且返回原内容，无 JWT 上/下载→401）。

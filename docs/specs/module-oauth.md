@@ -14,11 +14,11 @@ OAuth2 模块提供第三方身份提供商（Identity Provider, IdP）登录能
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/routes/oauth.ts` | OAuth2 完整服务端实现：登录发起、回调处理、注册完成 |
-| `src/server/schema.ts` | `user_oauth_bindings` 表定义 |
-| `src/server/config.ts` | `oauth_providers` 配置管理（DB 持久化、运行时读取）+ `oauth_registration_open` 开关 |
-| `src/server/auth.ts` | JWT 签发（`signUserToken`）、Cookie 管理（`setAuthCookie`/`getAuthToken`/`verifyUserToken`）、PIN 哈希与校验（`hashPin`/`verifyPin`） |
-| `src/shared/types.ts` | `OAuth2Provider` 类型定义 |
+| `apps/server/src/routes/oauth.ts` | OAuth2 完整服务端实现：登录发起、回调处理、注册完成 |
+| `apps/server/src/schema.ts` | `user_oauth_bindings` 表定义 |
+| `apps/server/src/config.ts` | `oauth_providers` 配置管理（DB 持久化、运行时读取）+ `oauth_registration_open` 开关 |
+| `apps/server/src/auth.ts` | JWT 签发（`signUserToken`）、Cookie 管理（`setAuthCookie`/`getAuthToken`/`verifyUserToken`）、PIN 哈希与校验（`hashPin`/`verifyPin`） |
+| `packages/shared/src/types.ts` | `OAuth2Provider` 类型定义 |
 
 ## 数据模型
 

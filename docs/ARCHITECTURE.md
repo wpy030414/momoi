@@ -75,7 +75,7 @@
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
 │  │                       数据层                                            │  │
 │  │  ┌────────────────────────────────────────────────────────────────┐    │  │
-│  │  │  db.ts — SQLite (@libsql/sql.js + Drizzle ORM)                │    │  │
+│  │  │  db.ts — SQLite (sql.js + Drizzle ORM)                                │    │  │
 │  │  │  PostgreSQL (pg + Drizzle ORM, DATABASE_URL 环境变量切换)       │    │  │
 │  │  │  conversations | messages | settings | agents                 │    │  │
 │  │  │  group_conversation_agents | mcp_servers | users              │    │  │
@@ -420,7 +420,7 @@ settings
 ├── key TEXT PRIMARY KEY           -- 配置键
 └── value TEXT                     -- 配置值
   常用键：
-    pin:{username}                 — PBKDF2 PIN 哈希
+    pin:{username}                 — PBKDF2 PIN 哈希（已迁移至 users.pin_hash，此行仅用于向后兼容说明）
     app_name, app_favicon, app_background
     api_endpoint, api_key
     support_attachments, support_infinite_mode, show_github

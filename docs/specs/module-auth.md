@@ -10,21 +10,21 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/auth.ts` | PIN 哈希/校验 + 用户 JWT 签发验证 + 签名密钥管理 + `isAdmin()`/`adminAuthMiddleware` + Cookie 操作 |
-| `src/server/middleware/userAuth.ts` | 独立的用户 JWT 认证中间件（严格模式，仅从 HttpOnly Cookie 取 token） |
-| `src/server/routes/user.ts` | 用户端点（状态查询/验证/设置/修改/重命名/OAuth 绑定管理）+ `GET /me` |
-| `src/server/standalone.ts` | 单机模式标志（`--stand-alone` CLI 参数，零依赖叶子模块） |
-| `src/server/routes/user-standalone.ts` | 单机模式极简用户路由（仅 `GET /me`） |
-| `src/server/config.ts` | `env.ADMIN` 名单解析、`env.JWT_SECRET` 读取、注册开关（`isDirectRegistrationOpen` / `isOauthRegistrationOpen`） |
-| `src/server/rateLimiter.ts` | IP 速率限制器（PIN 暴力破解防护） |
-| `src/client/components/auth/LoginScreen.tsx` | 三步登录 UI |
-| `src/client/components/settings/ChangePinDialog.tsx` | 修改 PIN 表单 |
+| `apps/server/src/auth.ts` | PIN 哈希/校验 + 用户 JWT 签发验证 + 签名密钥管理 + `isAdmin()`/`adminAuthMiddleware` + Cookie 操作 |
+| `apps/server/src/middleware/userAuth.ts` | 独立的用户 JWT 认证中间件（严格模式，仅从 HttpOnly Cookie 取 token） |
+| `apps/server/src/routes/user.ts` | 用户端点（状态查询/验证/设置/修改/重命名/OAuth 绑定管理）+ `GET /me` |
+| `apps/server/src/standalone.ts` | 单机模式标志（`--stand-alone` CLI 参数，零依赖叶子模块） |
+| `apps/server/src/routes/user-standalone.ts` | 单机模式极简用户路由（仅 `GET /me`） |
+| `apps/server/src/config.ts` | `env.ADMIN` 名单解析、`env.JWT_SECRET` 读取、注册开关（`isDirectRegistrationOpen` / `isOauthRegistrationOpen`） |
+| `apps/server/src/rateLimiter.ts` | IP 速率限制器（PIN 暴力破解防护） |
+| `apps/web/src/components/auth/LoginScreen.tsx` | 三步登录 UI |
+| `apps/web/src/components/settings/ChangePinDialog.tsx` | 修改 PIN 表单 |
 
 ## 单机模式（--stand-alone）
 
 服务器以 `--stand-alone` 启动时，整个 Momoi 鉴权体系被关闭，应用变为固定 `admin` 单用户模式：
 
-- **标志解析**：`src/server/standalone.ts` 导出 `STAND_ALONE`（`process.argv.includes('--stand-alone')`）。该模块零 import——ESM 中依赖体先于引用体执行，因此无论谁先导入（db.ts 的顶层 await 初始化、auth.ts 等）都能读到正确值
+- **标志解析**：`apps/server/src/standalone.ts` 导出 `STAND_ALONE`（`process.argv.includes('--stand-alone')`）。该模块零 import——ESM 中依赖体先于引用体执行，因此无论谁先导入（db.ts 的顶层 await 初始化、auth.ts 等）都能读到正确值
 - **中间件直通**：`userAuthMiddleware` 与 `adminAuthMiddleware` 开头短路，`c.set('userId', 'admin')` 后直接 `next()`；`isAdmin()` 恒真（后台面板永远可用）
 - **端点裁剪**：`/api/user` 挂载 `routes/user-standalone.ts`（仅 `GET /me` → `{username:'admin', is_admin:true}`，无中间件）；`/api/oauth` 整个不挂载。因此 verify/set-pin/change-pin/rename/logout/refresh/oauth-bindings/status 全部不存在，且**不可能签发任何 JWT 或 Cookie**（所有签发点都在这两个路由文件内）
 - **数据库**：使用独立的 `data/momoi.stand-alone.db`；启动时 seed 固定 `admin` 用户行（幂等）
@@ -126,7 +126,7 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 
 1. 管理员在后台配置 OAuth2 Provider（存储在 `settings` 表的 `oauth_providers` JSON 中）
 2. 前端登录页调用 `GET /api/user/status` 获取 `oauth_registration_open` 决定是否显示 OAuth 按钮
-3. 用户点击「通过 XX 登录」→ 前端调 `GET /api/oauth/:providerId/authorize` 获取重定向 URL
+3. 用户点击「通过 XX 登录」→ 前端调 `GET /api/oauth/:providerId/login` 获取重定向 URL
 4. 服务端生成 state token（15 分钟有效期），重定向到 OAuth Provider
 5. 用户授权后回调 `GET /api/oauth/:providerId/callback`
 6. 服务端用 token → userinfo → 查找或创建用户 → 签发 JWT → Set-Cookie → 重定向回前端
@@ -157,8 +157,8 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 
 | 导出位置 | 是否被路由使用 | 行为 |
 |---|---|---|
-| `src/server/middleware/userAuth.ts`（用户） | 是（chat / conversations / upload / workspace + user 的 `/me`、`/refresh`、`/rename`、`/oauth-bindings`） | 从 HttpOnly Cookie `momoi_token` 提取 JWT 并验签 |
-| `src/server/auth.ts` 的 `adminAuthMiddleware`（管理员） | 是（admin 路由） | 同上取 token，另加 `ADMIN` 名单校验（401/403） |
+| `apps/server/src/middleware/userAuth.ts`（用户） | 是（chat / conversations / upload / workspace + user 的 `/me`、`/refresh`、`/rename`、`/oauth-bindings`） | 从 HttpOnly Cookie `momoi_token` 提取 JWT 并验签 |
+| `apps/server/src/auth.ts` 的 `adminAuthMiddleware`（管理员） | 是（admin 路由） | 同上取 token，另加 `ADMIN` 名单校验（401/403） |
 
 **实际行为**：
 

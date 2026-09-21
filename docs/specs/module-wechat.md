@@ -10,14 +10,14 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/schema.ts` | `wechatBindings` 表定义（Drizzle ORM schema） |
-| `src/server/db.ts` | `wechat_bindings` 迁移 SQL（SQLite / PostgreSQL 双方言） |
-| `src/server/routes/wechat.ts` | 微信绑定 REST API（绑定、状态轮询、解绑） |
-| `src/server/wechat/ilink.ts` | iLink Bot 协议客户端（轮询消息、发送回复、解析入站消息） |
-| `src/server/wechat/poller.ts` | 微信消息轮询器（setInterval 定时遍历所有已绑定用户） |
-| `src/server/wechat/chat.ts` | 微信消息处理核心（路由到 AI、去重、并发锁、内部命令） |
-| `src/server/index.ts` | 服务启动时调用 `startWechatPoller()` |
-| `src/server/routes/conversations.ts` | 软删/硬删会话时调用 `unbindConversationWechat()` 自动解绑 |
+| `apps/server/src/schema.ts` | `wechatBindings` 表定义（Drizzle ORM schema） |
+| `apps/server/src/db.ts` | `wechat_bindings` 迁移 SQL（SQLite / PostgreSQL 双方言） |
+| `apps/server/src/routes/wechat.ts` | 微信绑定 REST API（绑定、状态轮询、解绑） |
+| `apps/server/src/wechat/ilink.ts` | iLink Bot 协议客户端（轮询消息、发送回复、解析入站消息） |
+| `apps/server/src/wechat/poller.ts` | 微信消息轮询器（setInterval 定时遍历所有已绑定用户） |
+| `apps/server/src/wechat/chat.ts` | 微信消息处理核心（路由到 AI、去重、并发锁、内部命令） |
+| `apps/server/src/index.ts` | 服务启动时调用 `startWechatPoller()` |
+| `apps/server/src/routes/conversations.ts` | 软删/硬删会话时调用 `unbindConversationWechat()` 自动解绑 |
 
 ## 数据模型
 
@@ -175,7 +175,7 @@ Per-user Promise 链，防止两个并发的扫码确认交叉覆盖对方的 `b
 ### 会话删除联动（unbindConversationWechat）
 
 ```typescript
-// src/server/routes/conversations.ts
+// apps/server/src/routes/conversations.ts
 export async function unbindConversationWechat(userId: string, conversationId: string): Promise<void> {
   const binding = await db.select().from(wechatBindings)
     .where(eq(wechatBindings.user_id, userId)).get()
@@ -232,7 +232,7 @@ export async function unbindConversationWechat(userId: string, conversationId: s
 
 ### 轮询器详细行为
 
-- **启动**：`startWechatPoller()` 在 `src/server/index.ts` 服务启动时调用，默认间隔 5000ms。
+- **启动**：`startWechatPoller()` 在 `apps/server/src/index.ts` 服务启动时调用，默认间隔 5000ms。
 - **递归调度**：`setTimeout` 递归（非 `setInterval`），每次 poll 完成后再排下一次，防止堆积。
 - **Per-user guard**：`busyUsers` Set 防止同一用户的上一次轮询未完成时再次进入。
 - **writeGuard**：pollUser 闭包持有绑定行快照，UPDATE 时限定 `bot_token` 等于快照值。防止：用户换绑后 bot_token 变更，但仍在飞行中的旧轮询返回 errcode=-14 污染新绑定的 `session_expired` 或游标。

@@ -8,13 +8,13 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/config.ts` | 环境变量读取 + DB 配置读写（`getConfig` / `updateConfig`） |
-| `src/server/shared/constants.ts` | 默认值常量 |
-| `src/server/routes/admin.ts` | 管理员 API 端点（`GET/PUT /api/admin/config`） |
-| `src/server/routes/app.ts` | 公开端点（`GET /api/app-name`，对外暴露品牌信息与 Agent 列表） |
-| `src/client/components/settings/AgentManager.tsx` | 管理面板中的 Agent 管理界面 |
-| `src/client/components/settings/GatewaySettings.tsx` | 管理面板中的网关配置界面 |
-| `src/client/components/admin/tabs/ExperienceSettings.tsx` | 体验配置界面（应用外观 + 首页推荐问题 + 聊天常用追问） |
+| `apps/server/src/config.ts` | 环境变量读取 + DB 配置读写（`getConfig` / `updateConfig`） |
+| `packages/shared/src/constants.ts` | 默认值常量 |
+| `apps/server/src/routes/admin.ts` | 管理员 API 端点（`GET/PUT /api/admin/config`） |
+| `apps/server/src/routes/app.ts` | 公开端点（`GET /api/app-name`，对外暴露品牌信息与 Agent 列表） |
+| `apps/web/src/components/settings/AgentManager.tsx` | 管理面板中的 Agent 管理界面 |
+| `apps/web/src/components/settings/GatewaySettings.tsx` | 管理面板中的网关配置界面 |
+| `apps/web/src/components/admin/tabs/ExperienceSettings.tsx` | 体验配置界面（应用外观 + 首页推荐问题 + 聊天常用追问） |
 
 ## 配置层级
 
@@ -51,6 +51,13 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 | `show_github` | boolean | — | `true` | 是否在界面中显示 GitHub 链接 |
 | `recommended_questions` | string[]（JSON） | — | `[]` | 首页推荐问题（空对话展示，最多 3 条） |
 | `followup_questions` | string[]（JSON） | — | `[]` | 聊天常用追问（非空对话输入框上方气泡，最多 5 条） |
+| `support_infinite_mode` | boolean | — | `false` | 无限演算模式开关 |
+| `use_external_image_hosting` | boolean | — | `false` | 外部图床开关 |
+| `oauth_providers` | JSON | — | `[]` | OAuth2 提供商配置 |
+| `tts_api_endpoint` | string | — | `""` | TTS 服务地址 |
+| `tts_provider` | string | — | `gpt-sovits` | TTS Provider（`gpt-sovits` / `cosyvoice`） |
+| `direct_registration_open` | boolean | — | `true` | PIN 直接注册开关 |
+| `oauth_registration_open` | boolean | — | `true` | OAuth 新用户注册开关 |
 
 ## 环境变量层（env 对象）
 
@@ -60,11 +67,12 @@ export const env = {
   JWT_SECRET: process.env.JWT_SECRET || '',
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || DEFAULT_API_ENDPOINT,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
-  PORT: parseInt(process.env.PORT || '3001', 10),
+  OPENAI_MODEL: process.env.OPENAI_MODEL || DEFAULT_MODEL,
+  PORT: parseInt(process.env.PORT || '11408', 10),
 }
 ```
 
-- `dotenv/config` 在 `server/index.ts` 和 `config.ts` 中分别加载
+- `dotenv/config` 在 `lib/env.ts` 中一次性加载，`config.ts` 和 `index.ts` 均通过 `import './env.js'` 引入
 - `env` 对象在启动时初始化，运行时不可变（`ADMIN` 名单因此全程固定，改名单须停机重启）
 - 只包含无 DB 回退的配置（`ADMIN`、`JWT_SECRET`、`PORT`）和 DB 回退的默认值（`api_endpoint`、`api_key`）
 
@@ -76,7 +84,11 @@ export const env = {
 | `JWT_SECRET` | JWT 签名密钥（可选；缺省时自动生成并持久化到 DB） |
 | `OPENAI_BASE_URL` | API 地址 |
 | `OPENAI_API_KEY` | API 密钥 |
-| `PORT` | 服务端口（默认 3001） |
+| `OPENAI_MODEL` | 模型名称（可选；缺省时使用 `shared/constants.ts` 中的默认值） |
+| `PORT` | 服务端口（默认 11408） |
+| `DATABASE_URL` | PostgreSQL 连接 URL（可选；不设则用 sql.js） |
+| `DATABASE_USER` | PostgreSQL 用户名（可选） |
+| `DATABASE_SECRET` | PostgreSQL 密码（可选） |
 
 ## 运行时 DB 层
 
@@ -150,14 +162,14 @@ Agent 是独立配置的 AI 角色，每个 Agent 拥有独立的模型和系统
 | `createAgent(name, model, systemPrompt, avatar?, role?)` | 创建 Agent，中立 Agent 使用固定 ID |
 | `updateAgent(id, partial)` | 部分更新 Agent 字段 |
 | `deleteAgent(id)` | 删除 Agent（中立 Agent 不可删除） |
-| `migrateDefaultAgent()` | 首次启动迁移：从旧全局配置创建默认 Agent 和中立 Agent |
+| `bootstrapAgents()` | 首次启动确保：中立 Agent 和默认 Agent 至少各存在一个 |
 
-### 迁移逻辑
+### 迁移/引导逻辑
 
-`migrateDefaultAgent()` 在 `index.ts` 启动时调用，若 `agents` 表为空则：
-1. 从 settings 表读取旧 `model` 和 `system_prompt`（兼容旧版本数据）
-2. 创建默认 Agent（名称 `Momoi`，使用旧配置或默认值）
-3. 创建中立 Agent（名称 `中立 Agent`，固定 ID `neutral-agent`，复用默认 Agent 的模型）
+`bootstrapAgents()` 在 `index.ts` 启动时调用，若 `agents` 表中缺失中立 Agent 或默认 Agent 则自动补建：
+
+1. 检查中立 Agent（`NEUTRAL_AGENT_ID`）是否存在 → 不存在则使用 `env.OPENAI_MODEL` 创建
+2. 检查是否存在非中立 Agent → 不存在则使用 `env.OPENAI_MODEL` 创建默认 Agent（名称 `Momoi`）
 
 ## 接口契约
 

@@ -4,7 +4,7 @@
 
 QQ 绑定系统让用户把自己在 [QQ 开放平台](https://q.qq.com)（q.qq.com）创建的个人机器人的 **AppID + AppSecret** 填入 Momoi，实现「在 QQ 里私聊 / 群聊机器人继续和 AI 对话」。核心链路为：网页端填写凭证 → 服务端校验（获取 access_token）→ 为该用户建立 WebSocket 网关长连接（出站连接，无需公网 IP）→ C2C 私聊 / 群 @机器人消息推送到达 → 桥接到 AI 对话引擎生成回复 → 统一一次性发送回复（无流式）。群聊需用户在绑定时或绑定后手动开启 `group_enabled` 开关。
 
-与微信渠道同构：**单表 `qq_bindings`**、`user_id` 主键、1 用户 : 1 机器人 : 1 会话。**两渠道完全正交**——同一会话可同时绑定微信与 QQ，各自独立路由、互不干扰；跨渠道经共享的 per-user 锁串行化（见 `src/server/im/locks.ts`）。
+与微信渠道同构：**单表 `qq_bindings`**、`user_id` 主键、1 用户 : 1 机器人 : 1 会话。**两渠道完全正交**——同一会话可同时绑定微信与 QQ，各自独立路由、互不干扰；跨渠道经共享的 per-user 锁串行化（见 `apps/server/src/im/locks.ts`）。
 
 **无认领模型**：QQ 个人机器人在未发布状态下只有创建者本人能私聊，发送消息者必然是用户本人，因此**不存储 / 不校验 openid 归属**（openid 仅在收到消息时从事件中取出用于回复）。
 
@@ -14,20 +14,20 @@ QQ 绑定系统让用户把自己在 [QQ 开放平台](https://q.qq.com)（q.qq.
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/schema.ts` / `schema.pg.ts` | `qqBindings` 表定义（Drizzle ORM，双方言） |
-| `src/server/db.ts` | `qq_bindings` 迁移 SQL（SQLite / PostgreSQL 双方言） |
-| `src/server/routes/qq.ts` | QQ 绑定 REST API（查询、绑定/换绑、解绑） |
-| `src/server/qq/api.ts` | QQ 开放平台 REST 协议纯函数客户端（token 缓存、发 C2C 文本、发群文本、网关地址） |
-| `src/server/qq/gateway.ts` | WS 网关连接状态机（心跳、IDENTIFY/RESUME、关闭码策略重连；处理 C2C_MESSAGE_CREATE 与 GROUP_AT_MESSAGE_CREATE） |
-| `src/server/qq/manager.ts` | per-user 连接注册表（启停/重启/启动恢复；连线 onGroupMessage 回调） |
-| `src/server/qq/chat.ts` | QQ 消息处理核心（去重、跨渠道锁、C2C 路由 + 群聊懒创建会话、统一单次回发） |
-| `src/server/im/locks.ts` | 跨渠道共享 per-user 锁（微信/QQ 消息串行化） |
-| `src/server/index.ts` | 服务启动时挂载路由并调用 `initQqBots()` 恢复连接 |
-| `src/server/routes/conversations.ts` | 软删会话时调用 `unbindConversationQq()` 清除路由（保留凭证） |
-| `src/server/routes/user.ts` / `admin.ts` | 改名换 key 重启连接 / 删用户停连接 |
-| `src/client/components/chat/ImBindDialog.tsx` | 「在 IM 上继续」渠道选择外壳（微信 / QQ 两卡片） |
-| `src/client/components/chat/WechatBindPanel.tsx` | 微信绑定面板（原 WechatBindDialog 去 Dialog 壳） |
-| `src/client/components/chat/QqBindPanel.tsx` | QQ 绑定面板（凭证表单 / 已绑定视图） |
+| `apps/server/src/schema.ts` / `schema.pg.ts` | `qqBindings` 表定义（Drizzle ORM，双方言） |
+| `apps/server/src/db.ts` | `qq_bindings` 迁移 SQL（SQLite / PostgreSQL 双方言） |
+| `apps/server/src/routes/qq.ts` | QQ 绑定 REST API（查询、绑定/换绑、解绑） |
+| `apps/server/src/qq/api.ts` | QQ 开放平台 REST 协议纯函数客户端（token 缓存、发 C2C 文本、发群文本、网关地址） |
+| `apps/server/src/qq/gateway.ts` | WS 网关连接状态机（心跳、IDENTIFY/RESUME、关闭码策略重连；处理 C2C_MESSAGE_CREATE 与 GROUP_AT_MESSAGE_CREATE） |
+| `apps/server/src/qq/manager.ts` | per-user 连接注册表（启停/重启/启动恢复；连线 onGroupMessage 回调） |
+| `apps/server/src/qq/chat.ts` | QQ 消息处理核心（去重、跨渠道锁、C2C 路由 + 群聊懒创建会话、统一单次回发） |
+| `apps/server/src/im/locks.ts` | 跨渠道共享 per-user 锁（微信/QQ 消息串行化） |
+| `apps/server/src/index.ts` | 服务启动时挂载路由并调用 `initQqBots()` 恢复连接 |
+| `apps/server/src/routes/conversations.ts` | 软删会话时调用 `unbindConversationQq()` 清除路由（保留凭证） |
+| `apps/server/src/routes/user.ts` / `admin.ts` | 改名换 key 重启连接 / 删用户停连接 |
+| `apps/web/src/components/chat/ImBindDialog.tsx` | 「在 IM 上继续」渠道选择外壳（微信 / QQ 两卡片） |
+| `apps/web/src/components/chat/WechatBindPanel.tsx` | 微信绑定面板（原 WechatBindDialog 去 Dialog 壳） |
+| `apps/web/src/components/chat/QqBindPanel.tsx` | QQ 绑定面板（凭证表单 / 已绑定视图） |
 
 ## 数据模型
 

@@ -113,18 +113,18 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/tools/memory-tool.ts` | 唯一的写入入口：`save_memory` 工具（描述即触发规则的一部分；执行层兜底拒绝 `ctx.memoryDisabled`） |
-| `src/server/tools/types.ts` | `ToolContext.memoryDisabled`：本次运行禁用记忆的上下文标记（QQ 群聊） |
-| `src/server/tools/registry.ts` | 静态注册 `memoryTool`；`pi-adapter` 按 Agent 身份过滤后才暴露 |
-| `src/server/ai/pi-adapter.ts` | 记忆加载（`memoryEnabled` 判定 + `getUserAgentMemories`）、读块注入（人设之前）、写规则块注入（人设之后的行为规则区） |
-| `src/server/lib/config.ts` | 6 个 CRUD 函数 + 注入上限 `limit = 30` |
-| `src/server/routes/memories.ts` | 用户自助管理 API（`/api/memories`） |
-| `src/server/routes/admin.ts` | 管理员遗忘端点（`/users/:username/forget-memories`） |
-| `src/server/db/{ddl.ts,schema.sqlite.ts,schema.pg.ts,pg.ts,sqlite.ts}` | 建表 + 索引 `idx_user_agent_memories(user_id, agent_id)` |
-| `src/client/components/memory/{MemoryManager,MemorySidebar}.tsx` | 记忆管理视图（主内容区 + 按 Agent 导航） |
-| `src/client/App.tsx` | `#/memories/{agentId}` 路由与视图状态 |
-| `src/client/lib/api.ts` | 记忆 CRUD 客户端（5 个方法） |
-| `src/client/i18n/{zh-CN,en,ja}.json` | `menu.memory` / `memory.*` 文案 |
+| `apps/server/src/tools/memory-tool.ts` | 唯一的写入入口：`save_memory` 工具（描述即触发规则的一部分；执行层兜底拒绝 `ctx.memoryDisabled`） |
+| `apps/server/src/tools/types.ts` | `ToolContext.memoryDisabled`：本次运行禁用记忆的上下文标记（QQ 群聊） |
+| `apps/server/src/tools/registry.ts` | 静态注册 `memoryTool`；`pi-adapter` 按 Agent 身份过滤后才暴露 |
+| `apps/server/src/ai/pi-adapter.ts` | 记忆加载（`memoryEnabled` 判定 + `getUserAgentMemories`）、读块注入（人设之前）、写规则块注入（人设之后的行为规则区） |
+| `apps/server/src/lib/config.ts` | 6 个 CRUD 函数 + 注入上限 `limit = 30` |
+| `apps/server/src/routes/memories.ts` | 用户自助管理 API（`/api/memories`） |
+| `apps/server/src/routes/admin.ts` | 管理员遗忘端点（`/users/:username/forget-memories`） |
+| `apps/server/src/db/{ddl.ts,schema.sqlite.ts,schema.pg.ts,pg.ts,sqlite.ts}` | 建表 + 索引 `idx_user_agent_memories(user_id, agent_id)` |
+| `apps/web/src/components/memory/{MemoryManager,MemorySidebar}.tsx` | 记忆管理视图（主内容区 + 按 Agent 导航） |
+| `apps/web/src/App.tsx` | `#/memories/{agentId}` 路由与视图状态 |
+| `apps/web/src/lib/api.ts` | 记忆 CRUD 客户端（5 个方法） |
+| `apps/web/src/i18n/{zh-CN,en,ja}.json` | `menu.memory` / `memory.*` 文案 |
 
 > 注入对渠道无感：网页单聊 / 网页群聊 / 无限模式 / 微信 / QQ 私聊 **全部由 `runPiAgentLoop` 内部完成**，各调用方不感知记忆的存在（见 D-M05）。
 >

@@ -10,10 +10,10 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/skills/loader.ts` | 加载技能文件 + 解析前置元数据（支持折叠/字面块标量）+ 注册表 |
-| `src/server/ai/pi-adapter.ts` | `buildSystemPrompt()` 中注入技能摘要 |
-| `src/server/tools/skill-tools.ts` | `load_skill` / `list_skill_files` 工具实现 |
-| `src/server/routes/admin.ts` | 管理员上传/卸载技能 |
+| `apps/server/src/skills/loader.ts` | 加载技能文件 + 解析前置元数据（支持折叠/字面块标量）+ 注册表 |
+| `apps/server/src/ai/pi-adapter.ts` | `buildSystemPrompt()` 中注入技能摘要 |
+| `apps/server/src/tools/skill-tools.ts` | `load_skill` / `list_skill_files` 工具实现 |
+| `apps/server/src/routes/admin.ts` | 管理员上传/卸载技能 |
 
 ## 技能目录结构
 

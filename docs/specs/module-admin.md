@@ -8,10 +8,10 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/auth.ts` | `isAdmin()` 名单判定 + `adminAuthMiddleware`（用户 JWT + 名单校验） |
-| `src/server/config.ts` | 环境变量读取（含 `ADMIN` 名单解析）+ DB 配置读写 |
-| `src/server/routes/admin.ts` | 管理员 REST API（含统计、技能上传/卸载） |
-| `src/client/components/admin/AdminScreen.tsx` | 管理面板（6 标签页：Agent/Gateway/Branding/MCP/Skills/Stats） |
+| `apps/server/src/auth.ts` | `isAdmin()` 名单判定 + `adminAuthMiddleware`（用户 JWT + 名单校验） |
+| `apps/server/src/config.ts` | 环境变量读取（含 `ADMIN` 名单解析）+ DB 配置读写 |
+| `apps/server/src/routes/admin.ts` | 管理员 REST API（含统计、技能上传/卸载） |
+| `apps/web/src/components/admin/AdminScreen.tsx` | 管理面板（6 标签页：Agent/Gateway/Branding/MCP/Skills/Stats） |
 
 ## 认证流程
 
@@ -209,7 +209,7 @@
 
 **需求（PRD F7「API Key 脱敏显示」）与实现不符。**
 
-`src/server/config.ts:getConfig()` 原样回传 `api_key`，`GET /api/admin/config` 返回**完整明文密钥**。已实测确认：
+`apps/server/src/config.ts:getConfig()` 原样回传 `api_key`，`GET /api/admin/config` 返回**完整明文密钥**。已实测确认：
 
 ```
 {"api_key":"<完整密钥明文>", ...}

@@ -1,30 +1,30 @@
-# Spec — Voice Simulation（声线模拟）
+# Spec — 声线模拟（Voice Simulation）
 
 ## 概述
 
 为 Agent 增加声线模拟能力：上传参考音频 → 克隆声线 → AI 回复后自动分句合成语音（GPT-SoVITS / CosyVoice）→ SSE 实时推送分段音频 → 消息气泡顶部播放按钮。
 
-**TTS 提供商接口** (`src/server/ai/tts.ts` 中的 `TtsProvider`) 定义了两个操作：`registerVoice(audioPath)` 上传参考音频并返回 `speakerId`，以及 `synthesize(text, speakerId, settings)` 按句合成并返回 WAV `Buffer`。GPT-SoVITS（默认）和 CosyVoice 各有一个实现，通过工厂函数 `createTtsProvider(config)` 创建。
+**TTS 提供商接口** (`apps/server/src/ai/tts.ts` 中的 `TtsProvider`) 定义了两个操作：`registerVoice(audioPath)` 上传参考音频并返回 `speakerId`，以及 `synthesize(text, speakerId, settings)` 按句合成并返回 WAV `Buffer`。GPT-SoVITS（默认）和 CosyVoice 各有一个实现，通过工厂函数 `createTtsProvider(config)` 创建。
 
 ## 涉及文件
 
 | 文件 | 职责 |
 |---|---|
-| `src/shared/types.ts` | `VoiceSettings`、`VoiceAudioSegment` 类型；`Agent` 接口中的 `voice_enabled`/`voice_sample_url`/`voice_settings` 字段；`ServerMessage` 联合类型中的 `voice_segment`/`voice_done` 事件 |
-| `src/shared/constants.ts` | `DEFAULT_TTS_ENDPOINT`（`http://localhost:9880`）、`DEFAULT_TTS_PROVIDER`（`gpt-sovits`） |
-| `src/server/schema.ts` | `agents` 表：`voice_enabled`（boolean）、`voice_sample_url`（text）、`voice_settings`（text, JSON） |
-| `src/server/config.ts` | `getTtsConfig()` / `updateTtsConfig()` — TTS endpoint + provider 的热配置；Agent CRUD 对 voice 字段的读写 |
-| `src/server/ai/tts.ts` | TTS 引擎：`TtsProvider` 接口、GPT-SoVITS / CosyVoice 实现、工厂函数、`synthesizeAndSave()` / `markVoiceComplete()` |
-| `src/server/routes/admin.ts` | Agent 声线上传/克隆/状态查询/清除端点 + TTS 全局配置读写 |
-| `src/server/routes/voice.ts` | REST 回退：`POST /api/voice/segments` 查询已合成语音分段 |
-| `src/server/routes/assets.ts` | `GET /api/assets/voice/:agent_id/:message_id/:filename` — 音频文件静态服务（需用户 JWT，有路径穿越防护） |
-| `src/server/routes/chat.ts` | 后置分句 TTS 合成集成：AI 回复完成后异步分句 → 调 `synthesizeAndSave()` → SSE 推送 `voice_segment`/`voice_done` |
-| `src/client/components/voice/VoicePlayButton.tsx` | 播放按钮组件 |
-| `src/client/hooks/useVoice.ts` | 语音状态管理 hook |
-| `src/client/lib/audio/AudioPlaybackManager.ts` | Web Audio API 播放器 |
-| `src/client/hooks/useChat.ts` | SSE `voice_segment` → `voice:segment` CustomEvent；`voice_done` → `voice:done` CustomEvent |
-| `src/client/components/chat/MessageBubble.tsx` | 集成播放按钮 |
-| `src/client/components/admin/tabs/AgentManager.tsx` | 声线配置 UI |
+| `packages/shared/src/types.ts` | `VoiceSettings`、`VoiceAudioSegment` 类型；`Agent` 接口中的 `voice_enabled`/`voice_sample_url`/`voice_settings` 字段；`ServerMessage` 联合类型中的 `voice_segment`/`voice_done` 事件 |
+| `packages/shared/src/constants.ts` | `DEFAULT_TTS_ENDPOINT`（`http://localhost:9880`）、`DEFAULT_TTS_PROVIDER`（`gpt-sovits`） |
+| `apps/server/src/schema.ts` | `agents` 表：`voice_enabled`（boolean）、`voice_sample_url`（text）、`voice_settings`（text, JSON） |
+| `apps/server/src/config.ts` | `getTtsConfig()` / `updateTtsConfig()` — TTS endpoint + provider 的热配置；Agent CRUD 对 voice 字段的读写 |
+| `apps/server/src/ai/tts.ts` | TTS 引擎：`TtsProvider` 接口、GPT-SoVITS / CosyVoice 实现、工厂函数、`synthesizeAndSave()` / `markVoiceComplete()` |
+| `apps/server/src/routes/admin.ts` | Agent 声线上传/克隆/状态查询/清除端点 + TTS 全局配置读写 |
+| `apps/server/src/routes/voice.ts` | REST 回退：`POST /api/voice/segments` 查询已合成语音分段 |
+| `apps/server/src/routes/assets.ts` | `GET /api/assets/voice/:agent_id/:message_id/:filename` — 音频文件静态服务（需用户 JWT，有路径穿越防护） |
+| `apps/server/src/routes/chat.ts` | 后置分句 TTS 合成集成：AI 回复完成后异步分句 → 调 `synthesizeAndSave()` → SSE 推送 `voice_segment`/`voice_done` |
+| `apps/web/src/components/voice/VoicePlayButton.tsx` | 播放按钮组件 |
+| `apps/web/src/hooks/useVoice.ts` | 语音状态管理 hook |
+| `apps/web/src/lib/audio/AudioPlaybackManager.ts` | Web Audio API 播放器 |
+| `apps/web/src/hooks/useChat.ts` | SSE `voice_segment` → `voice:segment` CustomEvent；`voice_done` → `voice:done` CustomEvent |
+| `apps/web/src/components/chat/MessageBubble.tsx` | 集成播放按钮 |
+| `apps/web/src/components/admin/tabs/AgentManager.tsx` | 声线配置 UI |
 
 ## 数据模型
 

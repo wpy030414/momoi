@@ -13,10 +13,10 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/db.ts` | 数据库客户端初始化 + 方言选择 + 迁移逻辑 |
-| `src/server/schema.ts` | Drizzle ORM SQLite 表定义（9 张表） |
-| `src/server/schema.pg.ts` | Drizzle ORM PostgreSQL 表定义（9 张表） |
-| `src/server/routes/*.ts` | 各路由通过 `db` 查询数据 |
+| `apps/server/src/db.ts` | 数据库客户端初始化 + 方言选择 + 迁移逻辑 |
+| `apps/server/src/schema.ts` | Drizzle ORM SQLite 表定义（12 张表） |
+| `apps/server/src/schema.pg.ts` | Drizzle ORM PostgreSQL 表定义（12 张表） |
+| `apps/server/src/routes/*.ts` | 各路由通过 `db` 查询数据 |
 
 ## 数据库位置与初始化
 
@@ -293,14 +293,14 @@ PostgreSQL 版本（`schema.pg.ts`）与上面对应，差异点：
 **SQLite 路径**：
 
 1. 加载或创建 `sql.js` 数据库
-2. `sqlDb.run(MIGRATION_SQL)` 执行全部 DDL（9 张表 + 3 个索引），`IF NOT EXISTS` 保证幂等
+2. `sqlDb.run(MIGRATION_SQL)` 执行全部 DDL（12 张表 + 3 个索引），`IF NOT EXISTS` 保证幂等
 3. `ADDITIVE_MIGRATIONS` 数组：逐条 `ALTER TABLE agents ADD COLUMN ...`，外层 `try/catch` 吞掉 "column already exists" 错误——sql.js 不支持 `IF NOT EXISTS` 的 `ALTER` 语法，只能用 try/catch
 4. 立即 `persist()` 落盘
 
 **PostgreSQL 路径**：
 
 1. 创建连接池
-2. `pool.query(...)` 执行全部 DDL（9 张表 + 3 个索引 + 增量列迁移），PostgreSQL 原生支持 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+2. `pool.query(...)` 执行全部 DDL（12 张表 + 3 个索引 + 增量列迁移），PostgreSQL 原生支持 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
 
 **不提供跨方言兼容**：SQLite 和 PostgreSQL 的 Schema 文件独立维护（`schema.ts` / `schema.pg.ts`），无运行时方言转换。
 

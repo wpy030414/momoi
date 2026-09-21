@@ -8,12 +8,12 @@ Agent 是独立配置的 AI 角色，每个 Agent 拥有独立的模型、系统
 
 | 文件 | 职责 |
 |---|---|
-| `src/shared/types.ts` | Agent 类型定义 |
-| `src/shared/constants.ts` | 默认 Agent 常量（名称、ID、模型、提示词） |
-| `src/server/schema.ts` | agents 表 Drizzle 定义 + group_conversation_agents 关联表 |
-| `src/server/config.ts` | Agent CRUD 函数 + `migrateDefaultAgent()` 迁移逻辑 |
-| `src/server/routes/admin.ts` | Agent 管理 API 端点 |
-| `src/client/components/admin/tabs/AgentManager.tsx` | Agent 管理面板前端组件 |
+| `packages/shared/src/types.ts` | Agent 类型定义 |
+| `packages/shared/src/constants.ts` | 默认 Agent 常量（名称、ID、模型、提示词） |
+| `apps/server/src/schema.ts` | agents 表 Drizzle 定义 + group_conversation_agents 关联表 |
+| `apps/server/src/lib/config.ts` | Agent CRUD 函数 + `bootstrapAgents()` 引导逻辑 |
+| `apps/server/src/routes/admin.ts` | Agent 管理 API 端点 |
+| `apps/web/src/components/admin/tabs/AgentManager.tsx` | Agent 管理面板前端组件 |
 
 ## 数据模型
 
@@ -41,11 +41,14 @@ CREATE TABLE agents (
   system_prompt TEXT NOT NULL DEFAULT '',
   avatar TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'default',
+  voice_enabled INTEGER NOT NULL DEFAULT 0,
+  voice_sample_url TEXT NOT NULL DEFAULT '',
+  voice_settings TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL
 );
 ```
 
-Drizzle 定义（`src/server/schema.ts`）：
+Drizzle 定义（`apps/server/src/schema.ts`）：
 
 ```typescript
 export const agents = sqliteTable('agents', {
@@ -89,7 +92,7 @@ export const groupConversationAgents = sqliteTable('group_conversation_agents', 
 
 ### 默认 Agent（role: 'default'）
 
-- 首次启动时由 `migrateDefaultAgent()` 自动创建
+- 首次启动时由 `bootstrapAgents()` 自动创建
 - 名称默认 `DEFAULT_AGENT_NAME`（"Momoi"），模型默认 `DEFAULT_AGENT_MODEL`（"gpt-4o"）
 - 可编辑、可删除
 - 单 Agent 对话（`type: 'direct'`）的默认选择
@@ -98,7 +101,7 @@ export const groupConversationAgents = sqliteTable('group_conversation_agents', 
 
 - 固定 ID：`NEUTRAL_AGENT_ID`（`"neutral-agent"`）
 - 名称：`NEUTRAL_AGENT_NAME`（`"中立 Agent"`）
-- 首次启动时由 `migrateDefaultAgent()` 自动创建，复用默认 Agent 的模型
+- 首次启动时由 `bootstrapAgents()` 自动创建，复用默认 Agent 的模型
 - 创建时 system_prompt 和 avatar 均为空字符串
 - 特殊约束：
   - **不可删除**：路由层直接检查 `NEUTRAL_AGENT_ID`，返回 403
@@ -106,30 +109,25 @@ export const groupConversationAgents = sqliteTable('group_conversation_agents', 
   - 仅可修改 `model` 和 `system_prompt`
 - 用途：无限演算模式中生成追问（`follow_up` 事件）、每轮回复完成后的追问建议（`suggestions` 事件，单聊与群聊通用，无限模式除外）及群聊每轮开始前的参与成员裁决（静默，无 SSE 事件）；中立 Agent 本身不在群成员名册内
 
-## 迁移逻辑
+## 引导逻辑
 
-`migrateDefaultAgent()` 在服务启动时（`index.ts`）调用，执行流程：
+`bootstrapAgents()` 在服务启动时（`index.ts`）调用，执行流程：
 
 ```
-migrateDefaultAgent()
+bootstrapAgents()
   → listAgents() 获取已有 Agent
-  → 已有数据？→ 跳过（幂等）
-  → 无数据：
-    1. 从旧 settings 表读取 model 和 system_prompt（兼容旧版本全局配置）
-       - model: getSetting('model', env.OPENAI_MODEL || DEFAULT_AGENT_MODEL)
-       - prompt: getSetting('system_prompt', DEFAULT_AGENT_SYSTEM_PROMPT)
-    2. createAgent(DEFAULT_AGENT_NAME, oldModel, oldPrompt)  → 创建默认 Agent
-    3. createAgent(NEUTRAL_AGENT_NAME, oldModel, '', '', 'neutral')  → 创建中立 Agent
+  → 中立 Agent 缺失？→ createAgent(NEUTRAL_AGENT_NAME, env.OPENAI_MODEL, '', '', 'neutral')
+  → 无任何非中立 Agent？→ createAgent('Momoi', env.OPENAI_MODEL, '')
 ```
 
 关键细节：
-- 旧版本将 model 和 system_prompt 作为全局配置存储在 settings 表中，迁移时读取这些旧值创建默认 Agent，确保升级后行为一致
-- 中立 Agent 的 system_prompt 和 avatar 为空，仅复用默认 Agent 的模型
-- 迁移仅执行一次（`existingAgents.length > 0` 时跳过），后续管理员通过 CRUD 管理
+- `bootstrapAgents()` 仅补建缺失的 Agent，已有数据跳过（幂等）
+- 中立 Agent 的 system_prompt 和 avatar 为空，复用默认 Agent 的模型
+- 引导仅执行一次（所需 Agent 均存在时跳过），后续管理员通过 CRUD 管理
 
 ## Agent CRUD
 
-所有函数位于 `src/server/config.ts`，均返回 `Promise`。
+所有函数位于 `apps/server/src/config.ts`，均返回 `Promise`。
 
 ### listAgents()
 
@@ -298,7 +296,7 @@ export async function deleteAgent(id: string): Promise<boolean>
 
 ## 行为约束
 
-1. 默认 Agent 由 `migrateDefaultAgent()` 在首次启动时自动创建，无需手动配置
+1. 默认 Agent 由 `bootstrapAgents()` 在首次启动时自动创建，无需手动配置
 2. 中立 Agent 不可删除、不可改名/换头像 —— 由路由层在 handler 内强制，而非 CRUD 函数层
 3. 中立 Agent 的 name/avatar 保护逻辑：路由层先 `delete body.name; delete body.avatar`，再调用 `updateAgent()`，因此 CRUD 函数本身不感知角色差异
 4. 每个 Agent 独立配置，互不干扰
@@ -309,7 +307,7 @@ export async function deleteAgent(id: string): Promise<boolean>
 
 ## 验收标准
 
-1. 首次启动自动创建默认 Agent（名称 "Momoi"）和中立 Agent（名称 "中立 Agent"），`migrateDefaultAgent()` 幂等
+1. 首次启动自动创建默认 Agent（名称 "Momoi"）和中立 Agent（名称 "中立 Agent"），`bootstrapAgents()` 幂等
 2. 管理员可创建/编辑/删除自定义 Agent
 3. 中立 Agent 不可删除（DELETE 返回 403）
 4. 中立 Agent 不可改名（PUT 中 name 被静默剥离，更新后名称不变）

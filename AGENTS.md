@@ -24,7 +24,7 @@
 - ❌ 移动应用
 - ❌ 企业 SSO
 - ❌ 实时协作
-- ❌ WebSocket 实时通信（已迁移到 SSE）
+- ❌ 浏览器端 WebSocket 实时通信（聊天流已迁移到 SSE；QQ 机器人的 WS 网关连接属于 IM 渠道集成，不在本 Non-Goal 范围）
 
 ## 架构概述
 

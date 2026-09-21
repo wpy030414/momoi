@@ -22,7 +22,7 @@
 - 两者混为一谈会导致基础能力被意外移除
 
 **实现**：
-- 工具代码位于 `src/server/tools/`，作为项目源码的一部分
+- 工具代码位于 `apps/server/src/tools/`，作为项目源码的一部分
 - 插件系统已移除（commit 3530176）
 - `tools.ts` 调用 `getToolDefinitions()` 从内置 registry 聚合工具
 
@@ -95,8 +95,6 @@
 
 **当前状态（D21）**：代码级防护（漂移检测、write_file 计数器、MAX_TOOL_ROUNDS）已在 Pi Agent Core 迁移中被移除，改为系统提示词硬性规则控制。Pi Agent Core 内置的循环管理提供更优雅的多轮工具调用。
 
-### D-T07：Pi 式并行批执行（已由 Pi Agent Core 替代）
-
 ### D-T06：为什么需要 bash 工具
 
 **问题**：宜搭等技能需要执行 CLI 命令（如 openyida），纯文件操作工具不足以支持。
@@ -123,22 +121,22 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/tools/types.ts` | 定义 `ToolModule`、`ToolContext`、`ToolResult`、`ToolArtifact` 接口 |
-| `src/server/tools/workspace.ts` | `SandboxFS` 类：沙盒化文件系统操作 |
-| `src/server/tools/registry.ts` | 工具注册表，聚合所有内置工具 |
-| `src/server/tools/file-tools.ts` | 文件工具：`read_file`、`write_file`、`list_files`、`delete_file` |
-| `src/server/tools/http-tool.ts` | 网络工具：`http_request`（含 SSRF 防护） |
-| `src/server/tools/document-tools.ts` | 文档工具：`read_document`、`write_document` |
-| `src/server/tools/skill-tools.ts` | 技能工具：`load_skill`、`list_skill_files` |
-| `src/server/tools/bash-tool.ts` | Bash 命令执行：`bash`（受限沙盒执行） |
-| `src/server/tools/ask-user-tool.ts` | 阻塞式用户提问：`ask_user`（Promise 挂起机制，120s 超时） |
-| `src/server/tools/memory-tool.ts` | 跨会话记忆工具：`save_memory`（完整契约见 [module-memory.md](./module-memory.md)） |
-| `src/server/tools/group-mention-tool.ts` | @mention 工具：`at_mention`（Agent 间点名调用） |
-| `src/server/tools/mcp-client.ts` | MCP 客户端：HTTP+SSE 连接外部 MCP 服务器，动态注入工具 |
-| `src/server/tools/index.ts` | 统一导出 |
-| `src/server/ai/tools.ts` | 调用 `getToolDefinitions()` 聚合工具定义 |
-| `src/server/ai/pi-adapter.ts` | Pi Agent 适配层：工具适配 + 循环入口 + 事件映射 |
-| `src/server/routes/workspace.ts` | 工作区文件下载路由（需认证） |
+| `apps/server/src/tools/types.ts` | 定义 `ToolModule`、`ToolContext`、`ToolResult`、`ToolArtifact` 接口 |
+| `apps/server/src/tools/workspace.ts` | `SandboxFS` 类：沙盒化文件系统操作 |
+| `apps/server/src/tools/registry.ts` | 工具注册表，聚合所有内置工具 |
+| `apps/server/src/tools/file-tools.ts` | 文件工具：`read_file`、`write_file`、`list_files`、`delete_file` |
+| `apps/server/src/tools/http-tool.ts` | 网络工具：`http_request`（含 SSRF 防护） |
+| `apps/server/src/tools/document-tools.ts` | 文档工具：`read_document`、`write_document` |
+| `apps/server/src/tools/skill-tools.ts` | 技能工具：`load_skill`、`list_skill_files` |
+| `apps/server/src/tools/bash-tool.ts` | Bash 命令执行：`bash`（受限沙盒执行） |
+| `apps/server/src/tools/ask-user-tool.ts` | 阻塞式用户提问：`ask_user`（Promise 挂起机制，120s 超时） |
+| `apps/server/src/tools/memory-tool.ts` | 跨会话记忆工具：`save_memory`（完整契约见 [module-memory.md](./module-memory.md)） |
+| `apps/server/src/tools/group-mention-tool.ts` | @mention 工具：`at_mention`（Agent 间点名调用） |
+| `apps/server/src/tools/mcp-client.ts` | MCP 客户端：HTTP+SSE 连接外部 MCP 服务器，动态注入工具 |
+| `apps/server/src/tools/index.ts` | 统一导出 |
+| `apps/server/src/ai/tools.ts` | 调用 `getToolDefinitions()` 聚合工具定义 |
+| `apps/server/src/ai/pi-adapter.ts` | Pi Agent 适配层：工具适配 + 循环入口 + 事件映射 |
+| `apps/server/src/routes/workspace.ts` | 工作区文件下载路由（需认证） |
 
 ## 数据模型
 
@@ -257,9 +255,7 @@ export class SandboxFS {
 - 写入文件
 - 返回 `ToolArtifact`（供 UI 下载）
 
-**循环防护**（软提醒）：
-- 首次调用：正常执行
-- 第二次及以后：返回温和提示（"已经是第 N 次调用，写完请回复用户"），但正常执行
+**循环防护**：原本的软提醒机制（首次正常执行，后续返回温和提示）已在 Pi Agent Core 迁移（D21）中移除，改为系统提示词中的「克制文件写入」约束。
 
 #### `list_files`
 
@@ -766,7 +762,7 @@ HTTP 工具在发起请求前：
 9. ✅ `load_skill` 可以按需加载技能的完整内容
 10. ✅ `list_skill_files` 可以列出技能目录内的文件
 11. ✅ `bash` 可以在沙盒内执行 shell 命令
-12. ✅ `dingtalk_token` 可以获取钉钉 access token
+12. ✅ `at_mention` 可以在群聊中 @ 点名其他 Agent
 13. ✅ `at_mention` 可以在群聊中 @ 点名其他 Agent
 14. ✅ `ask_user` 可以向用户展示问题并等待回答，回答后 Agent 继续执行
 15. ✅ `ask_user` 120 秒无回答自动超时，Agent 收到超时错误后继续
@@ -788,13 +784,12 @@ HTTP 工具在发起请求前：
 
 > 以下验收项中的代码级防护已在 Pi Agent Core 迁移中移除，改为系统提示词硬性规则。Pi Agent Core 内置循环管理确保每条路径都有终态事件。
 
-26. ✅ `write_file` 第一次调用正常执行
-27. ✅ `write_file` 第二次及以后返回温和提示但正常执行（软提醒）
-28. ✅ 漂移检测：提示词中约束反复调用同一工具
-29. ✅ 最大轮数限制：Pi Agent Core 内置管理
-30. ✅ 输出截断：Pi 流式处理自行管理
-31. ✅ 批量终止：Pi Agent Core 内置并行执行策略
-32. ✅ 统一收口：Pi Agent Core 保证每条路径都有终态事件
+26. ✅ write_file 由系统提示词中的「克制文件写入」约束控制（软提醒已移除）
+27. ✅ 漂移检测：提示词中约束反复调用同一工具
+28. ✅ 最大轮数限制：Pi Agent Core 内置管理
+29. ✅ 输出截断：Pi 流式处理自行管理
+30. ✅ 批量终止：Pi Agent Core 内置并行执行策略
+31. ✅ 统一收口：Pi Agent Core 保证每条路径都有终态事件
 
 ### 生命周期验收
 

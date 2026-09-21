@@ -8,17 +8,17 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/ai/group-orchestrator.ts` | 群聊编排：多 Agent 串行回复 + 上下文格式化 + @mention 处理 |
-| `src/server/ai/neutral-agent.ts` | 中立 Agent：无限模式追问 + 回复后追问建议 + 群聊发言调度 |
-| `src/server/ai/pi-adapter.ts` | Agent 循环适配层：系统提示词注入群组身份 + @mention 工具注册 |
-| `src/server/tools/group-mention-tool.ts` | @mention 工具：Agent 间点名调用 |
-| `src/server/routes/chat.ts` | 群聊入口 + 无限模式开关 + SSE 流管理 |
-| `src/server/routes/group.ts` | 群聊 Agent 管理 REST API（增删查） |
-| `src/server/routes/conversations.ts` | 对话列表含 `agent_count` + 群聊对话详情含 Agent 列表 |
-| `src/client/hooks/useGroupChat.ts` | 群聊状态管理（组合 `useChat`） |
-| `src/client/hooks/useChat.ts` | 聊天状态管理（含群聊 SSE 事件处理） |
-| `src/client/components/chat/MessageBubble.tsx` | 消息气泡（群聊中显示 Agent 头像和名字） |
-| `src/client/lib/api.ts` | 客户端 API 封装（`createGroupConversation`、`addGroupAgent`、`removeGroupAgent`） |
+| `apps/server/src/ai/group-orchestrator.ts` | 群聊编排：多 Agent 串行回复 + 上下文格式化 + @mention 处理 |
+| `apps/server/src/ai/neutral-agent.ts` | 中立 Agent：无限模式追问 + 回复后追问建议 + 群聊发言调度 |
+| `apps/server/src/ai/pi-adapter.ts` | Agent 循环适配层：系统提示词注入群组身份 + @mention 工具注册 |
+| `apps/server/src/tools/group-mention-tool.ts` | @mention 工具：Agent 间点名调用 |
+| `apps/server/src/routes/chat.ts` | 群聊入口 + 无限模式开关 + SSE 流管理 |
+| `apps/server/src/routes/group.ts` | 群聊 Agent 管理 REST API（增删查） |
+| `apps/server/src/routes/conversations.ts` | 对话列表含 `agent_count` + 群聊对话详情含 Agent 列表 |
+| `apps/web/src/hooks/useGroupChat.ts` | 群聊状态管理（组合 `useChat`） |
+| `apps/web/src/hooks/useChat.ts` | 聊天状态管理（含群聊 SSE 事件处理） |
+| `apps/web/src/components/chat/MessageBubble.tsx` | 消息气泡（群聊中显示 Agent 头像和名字） |
+| `apps/web/src/lib/api.ts` | 客户端 API 封装（`createGroupConversation`、`addGroupAgent`、`removeGroupAgent`） |
 
 ## 数据模型
 

@@ -8,20 +8,20 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/routes/chat.ts` | SSE 流式端点 `POST /api/chat`、附件拼装、对话创建、无限模式开关 |
-| `src/server/ai/pi-adapter.ts` | Pi Agent Core 适配层：系统提示词构建 + 工具适配 + 流式映射 + Agent 循环入口 |
-| `src/server/ai/provider.ts` | OpenAI 兼容 API 流式客户端（含多模态与 thinking 参数） |
-| `src/server/ai/group-orchestrator.ts` | 群聊编排：发言调度 + 多 Agent 串行回复 + @mention 处理 + 无限模式 |
-| `src/server/ai/neutral-agent.ts` | 中立 Agent：无限模式追问 + 回复后追问建议 + 群聊发言调度 |
-| `src/server/ai/tools.ts` | 工具注册表（委托到内置工具 registry） |
-| `src/server/tools/group-mention-tool.ts` | @mention 工具：Agent 间点名调用 |
-| `src/server/tools/ask-user-tool.ts` | ask_user 工具：阻塞式向用户提问并等待回答 |
-| `src/server/realtime.ts` | 进程内事件总线：同账号多设备实时同步 |
-| `src/server/routes/events.ts` | 实时事件通道 `GET /api/events`（SSE 长连接） |
-| `src/shared/thinking.ts` | thinking 分段的编解码 |
-| `src/shared/types.ts` | ServerMessage 联合类型、RealtimeEvent、AskUserQuestion 等 |
-| `src/client/hooks/useChat.ts` | 客户端聊天状态管理 + SSE 解析 + 重试 + 哈希路由 |
-| `src/client/hooks/useGroupChat.ts` | 群聊状态管理 |
+| `apps/server/src/routes/chat.ts` | SSE 流式端点 `POST /api/chat`、附件拼装、对话创建、无限模式开关 |
+| `apps/server/src/ai/pi-adapter.ts` | Pi Agent Core 适配层：系统提示词构建 + 工具适配 + 流式映射 + Agent 循环入口 |
+| `apps/server/src/ai/provider.ts` | OpenAI 兼容 API 流式客户端（含多模态与 thinking 参数） |
+| `apps/server/src/ai/group-orchestrator.ts` | 群聊编排：发言调度 + 多 Agent 串行回复 + @mention 处理 + 无限模式 |
+| `apps/server/src/ai/neutral-agent.ts` | 中立 Agent：无限模式追问 + 回复后追问建议 + 群聊发言调度 |
+| `apps/server/src/ai/tools.ts` | 工具注册表（委托到内置工具 registry） |
+| `apps/server/src/tools/group-mention-tool.ts` | @mention 工具：Agent 间点名调用 |
+| `apps/server/src/tools/ask-user-tool.ts` | ask_user 工具：阻塞式向用户提问并等待回答 |
+| `apps/server/src/realtime.ts` | 进程内事件总线：同账号多设备实时同步 |
+| `apps/server/src/routes/events.ts` | 实时事件通道 `GET /api/events`（SSE 长连接） |
+| `packages/shared/src/thinking.ts` | thinking 分段的编解码 |
+| `packages/shared/src/types.ts` | ServerMessage 联合类型、RealtimeEvent、AskUserQuestion 等 |
+| `apps/web/src/hooks/useChat.ts` | 客户端聊天状态管理 + SSE 解析 + 重试 + 哈希路由 |
+| `apps/web/src/hooks/useGroupChat.ts` | 群聊状态管理 |
 
 ## 接口契约
 
