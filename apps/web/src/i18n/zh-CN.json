@@ -2,6 +2,11 @@
   "app": {
     "name": "Momoi"
   },
+  "error": {
+    "title": "界面出现异常",
+    "description": "渲染过程中发生了未捕获的错误。刷新页面通常可以恢复。",
+    "reload": "刷新页面"
+  },
   "common": {
     "loading": "加载中...",
     "error": "错误",

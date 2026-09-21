@@ -2,6 +2,11 @@
   "app": {
     "name": "Momoi"
   },
+  "error": {
+    "title": "Something went wrong",
+    "description": "An unexpected error occurred while rendering the page. Reloading usually fixes it.",
+    "reload": "Reload"
+  },
   "common": {
     "loading": "Loading...",
     "error": "Error",
