@@ -49,6 +49,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const [confirmingRevert, setConfirmingRevert] = useState(false)
+  const [confirmingForceRetry, setConfirmingForceRetry] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
   return (
@@ -144,21 +145,23 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
         {/* Actions column — user messages only, positioned on the visual left */}
         {isUser && onRevert && (
           <div className="flex-shrink-0 flex items-center">
-            {confirmingRevert ? (
+            {(confirmingRevert || confirmingForceRetry) ? (
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => {
                     setConfirmingRevert(false)
-                    onRevert()
+                    setConfirmingForceRetry(false)
+                    if (confirmingRevert) onRevert()
+                    else onForceRetry?.()
                   }}
                   className="h-7 px-2 text-xs rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors inline-flex items-center gap-1"
-                  title={t('chat.revertConfirmAction')}
+                  title={confirmingRevert ? t('chat.revertConfirmAction') : t('chat.forceComplianceConfirmAction')}
                 >
                   <Check className="h-3 w-3" />
-                  {t('chat.revertConfirmAction')}
+                  {confirmingRevert ? t('chat.revertConfirmAction') : t('chat.forceComplianceConfirmAction')}
                 </button>
                 <button
-                  onClick={() => setConfirmingRevert(false)}
+                  onClick={() => { setConfirmingRevert(false); setConfirmingForceRetry(false) }}
                   className="h-7 px-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors inline-flex items-center gap-1"
                   title={t('common.cancel')}
                 >
@@ -189,7 +192,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
                     <DropdownMenuItem
                       destructive
                       onClick={() => {
-                        onForceRetry()
+                        setConfirmingForceRetry(true)
                       }}
                     >
                       <Undo2 className="h-3 w-3 mr-2" />

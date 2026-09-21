@@ -36,6 +36,7 @@
     "revert": "元に戻す",
     "revertConfirmAction": "はい、元に戻します",
     "forceComplianceRetry": "強制コンプライアンス再試行",
+    "forceComplianceConfirmAction": "はい、再試行します",
     "moreActions": "その他の操作",
     "greetingMorning": "おはようございます",
     "greetingAfternoon": "こんにちは",

@@ -36,6 +36,7 @@
     "revert": "Revert",
     "revertConfirmAction": "Yes, revert",
     "forceComplianceRetry": "Force Compliance Retry",
+    "forceComplianceConfirmAction": "Yes, retry",
     "moreActions": "More Actions",
     "greetingMorning": "Good morning",
     "greetingAfternoon": "Good afternoon",
