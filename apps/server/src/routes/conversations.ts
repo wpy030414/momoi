@@ -239,7 +239,7 @@ conversationsRoute.post('/merge', async (c) => {
   const sources: typeof conversations.$inferSelect[] = []
   // Batch qqGroupConversations lookup — single query instead of N
   const qqGroupRows = await db.select().from(qqGroupConversations)
-    .where(sql`${qqGroupConversations.conversation_id} IN (${sql.join(sourceIds.map(id => sql`${id}`))})`)
+    .where(sql`${qqGroupConversations.conversation_id} IN (${sql.join(sourceIds.map(id => sql`${id}`), sql`, `)})`)
     .all()
   const isQqSource = new Map<string, boolean>()
   for (const row of qqGroupRows) {

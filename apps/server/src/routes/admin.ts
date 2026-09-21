@@ -259,7 +259,7 @@ adminRoute.get('/users', async (c) => {
   const usernames = rows.map((r: typeof users.$inferSelect) => r.username)
   const allBindings = usernames.length > 0
     ? await db.select().from(userOauthBindings)
-        .where(sql`${userOauthBindings.user_id} IN (${sql.join(usernames.map((u) => sql`${u}`))})`)
+        .where(sql`${userOauthBindings.user_id} IN (${sql.join(usernames.map((u) => sql`${u}`), sql`, `)})`)
         .all()
     : []
   const bindingsByUser = new Map<string, string[]>()
@@ -329,7 +329,7 @@ adminRoute.delete('/users/:username', async (c) => {
   for (const b of allQqBindings) stopBotForUser(username, b.agent_id)
   if (appIds.length > 0) {
     await db.delete(qqGroupConversations)
-      .where(sql`${qqGroupConversations.app_id} IN (${sql.join(appIds.map((a) => sql`${a}`))})`)
+      .where(sql`${qqGroupConversations.app_id} IN (${sql.join(appIds.map((a) => sql`${a}`), sql`, `)})`)
       .run()
   }
   await db.delete(qqBindings).where(eq(qqBindings.user_id, username)).run()
