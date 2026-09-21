@@ -2,14 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGroupChat } from './hooks/useGroupChat'
 import { useTheme } from './hooks/useTheme'
+import { useAdminPanel } from './hooks/useAdminPanel'
+import { useDocsPanel } from './hooks/useDocsPanel'
+import { useMemoryPanel } from './hooks/useMemoryPanel'
 import { Sidebar } from './components/sidebar/Sidebar'
-import { AdminSidebar, ADMIN_TABS } from './components/admin/AdminSidebar'
-import { DocsSidebar } from './components/docs/DocsSidebar'
-import type { DocEntry } from './components/docs/DocsSidebar'
-import { DocsViewer, TocItem } from './components/docs/DocsViewer'
-import { MemorySidebar } from './components/memory/MemorySidebar'
-import { MemoryManager } from './components/memory/MemoryManager'
-import type { UserAgentMemory } from '@momoi/shared/types'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
@@ -17,80 +13,22 @@ import { LinkedAccountsDialog } from './components/settings/LinkedAccountsDialog
 import { ImBindDialog } from './components/chat/ImBindDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
-import { AgentManager } from './components/admin/tabs/AgentManager'
-import { GatewaySettings } from './components/admin/tabs/GatewaySettings'
-import { ExperienceSettings } from './components/admin/tabs/ExperienceSettings'
-import { McpManager } from './components/admin/tabs/McpManager'
-import { SkillManager } from './components/admin/tabs/SkillManager'
-import { ReviewPanel } from './components/admin/tabs/ReviewPanel'
-import { UserManager } from './components/admin/tabs/UserManager'
-
-// Type-only imports for ref handles (not used at runtime, only for TS)
-import type { AgentManagerHandle } from './components/admin/tabs/AgentManager'
-import type { GatewaySettingsHandle } from './components/admin/tabs/GatewaySettings'
-import type { McpManagerHandle } from './components/admin/tabs/McpManager'
-import type { SkillManagerHandle } from './components/admin/tabs/SkillManager'
-import type { UserManagerHandle } from './components/admin/tabs/UserManager'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
-import { PanelLeft, X, Check, Plus, RotateCcw, Upload, Server, Eye, EyeOff, List } from 'lucide-react'
+import { PanelLeft, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 
 export function App() {
   const { t, i18n } = useTranslation()
   const chat = useGroupChat()
   const { theme, setTheme } = useTheme()
-  const [adminViewOpen, setAdminViewOpen] = useState(false)
-  // Docs view state
-  const [docsViewOpen, setDocsViewOpen] = useState(false)
-  const [docsEntries, setDocsEntries] = useState<DocEntry[]>([])
-  const [activeDoc, setActiveDoc] = useState<string | null>(null)
-  // Docs TOC（由 DocsViewer 渲染后回传）
-  const [docToc, setDocToc] = useState<TocItem[]>([])
-  const [tocOpen, setTocOpen] = useState(false)
-  const tocWrapRef = useRef<HTMLDivElement>(null)
-  // Memory view state
-  const [memoryViewOpen, setMemoryViewOpen] = useState(false)
-  const [memoryEntries, setMemoryEntries] = useState<UserAgentMemory[]>([])
-  const [memoryAgentId, setMemoryAgentId] = useState<string | null>(null)
-  const [memoriesLoading, setMemoriesLoading] = useState(false)
 
-  // 目录气泡：点击外部 / Esc 关闭
-  useEffect(() => {
-    if (!tocOpen) return
-    const onPointerDown = (e: MouseEvent | TouchEvent) => {
-      if (!tocWrapRef.current?.contains(e.target as Node)) setTocOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTocOpen(false) }
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('touchstart', onPointerDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('touchstart', onPointerDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [tocOpen])
   const [verbose, setVerbose] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('momoi_verbose') === 'true'
     }
     return false
   })
-  // Active tab in the admin management sidebar
-  const [adminTab, setAdminTab] = useState<string>(ADMIN_TABS[0].value)
-  // Refs to tab action-triggers (exposed via useImperativeHandle)
-  const agentRef = useRef<AgentManagerHandle>(null)
-  const gatewayRef = useRef<GatewaySettingsHandle>(null)
-  const mcpRef = useRef<McpManagerHandle>(null)
-  const skillRef = useRef<SkillManagerHandle>(null)
-  const userRef = useRef<UserManagerHandle>(null)
-  const [changePinOpen, setChangePinOpen] = useState(false)
-  const [changeUsernameOpen, setChangeUsernameOpen] = useState(false)
-  const [linkedAccountsOpen, setLinkedAccountsOpen] = useState(false)
-  const [imBindOpen, setImBindOpen] = useState(false)
-  const [imBindConvId, setImBindConvId] = useState<string | null>(null)
-  const [imBindAgentId, setImBindAgentId] = useState<string>('')
   const [oauthRegisterInfo, setOauthRegisterInfo] = useState<{ providerId: string; providerUserId: string } | null>(null)
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
@@ -282,7 +220,7 @@ export function App() {
     setCurrentUser(null)
     setIsAdminUser(false)
     // Leave admin view (if open) and return home
-    setAdminViewOpen(false)
+    admin.close()
     if (window.location.hash === '#/settings') {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
@@ -420,32 +358,8 @@ export function App() {
     }).catch(() => setStandAlone(false)).finally(() => setAgentsLoading(false))
   }, [])
 
-  // Re-fetch appName + agents when admin view closes (user may have changed them)
-  useEffect(() => {
-    if (!adminViewOpen) {
-      api.getAppName().then((r) => {
-        setAppName(r.app_name)
-        if (r.app_favicon) {
-          const link = document.getElementById('favicon') as HTMLLinkElement | null
-          if (link) link.href = r.app_favicon
-        }
-        setBackgroundImage(r.app_background || '')
-        setSupportAttachments(!!r.support_attachments)
-        setSupportInfiniteMode(r.support_infinite_mode !== false)
-        setAllowImConversations(r.allow_im_conversations !== false)
-        setShowGithub(r.show_github !== false)
-        setRecommendedQuestions(r.recommended_questions || [])
-        setFollowupQuestions(r.followup_questions || [])
-        if (r.agents?.length > 0) {
-          setAgents(r.agents)
-          setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
-        } else {
-          setAgents([])
-          setSelectedAgentId(null)
-        }
-      }).catch(() => {})
-    }
-  }, [adminViewOpen])
+  // Re-fetch app config on admin close is handled by useAdminPanel's onConfigChanged
+  // (the effect fires inside the hook; the callback below refetches app config)
 
   // Update document title when appName changes
   useEffect(() => {
@@ -505,185 +419,45 @@ export function App() {
     syncMomoTheme(saved || i18n.language)
   }, [])
 
-  const handleAdminSettings = () => {
-    // Radix Dialog 关闭时需要等待焦点管理完成，再打开新页面
-    setTimeout(() => {
-      setAdminViewOpen(true)
-      history.pushState(null, '', `#/settings/${adminTab}`)
-    }, 300)
-  }
-
-  const handleAdminTabChange = (tab: string) => {
-    setAdminTab(tab)
-    history.pushState(null, '', `#/settings/${tab}`)
-  }
-
-  const closeAdminView = () => {
-    setAdminViewOpen(false)
-    // Clear hash if currently on settings
-    if (window.location.hash.startsWith('#/settings')) {
-      history.replaceState(null, '', window.location.pathname + window.location.search)
-    }
-  }
-
-  const handleDocs = () => {
-    // Fetch doc list on first open (cache it for the session)
-    if (docsEntries.length === 0) {
-      api.get<DocEntry[]>('/api/docs').then((r) => {
-        setDocsEntries(r)
-        const firstDoc = r[0]?.path ?? null
-        setActiveDoc(firstDoc)
-        history.pushState(null, '', firstDoc ? `#/docs/${encodeURIComponent(firstDoc)}` : '#/docs')
-      }).catch(() => {})
-    } else {
-      history.pushState(null, '', activeDoc ? `#/docs/${encodeURIComponent(activeDoc)}` : '#/docs')
-    }
-    setTimeout(() => {
-      setDocsViewOpen(true)
-    }, 100)
-  }
-
-  const handleSelectDoc = (path: string) => {
-    setActiveDoc(path)
-    history.pushState(null, '', `#/docs/${encodeURIComponent(path)}`)
-  }
-
-  const closeDocsView = () => {
-    setDocsViewOpen(false)
-    if (window.location.hash.startsWith('#/docs')) {
-      history.replaceState(null, '', window.location.pathname + window.location.search)
-    }
-  }
-
-  const refreshMemories = () => {
-    setMemoriesLoading(true)
-    api.listMemories()
-      .then((r) => setMemoryEntries(r.memories))
-      .catch(() => {})
-      .finally(() => setMemoriesLoading(false))
-  }
-
-  const handleMemory = () => {
-    // Always refetch — agents keep writing memories during chats, no session cache
-    api.listMemories().then((r) => {
-      setMemoryEntries(r.memories)
-      // Default selection: keep the previous agent if still valid, else the agent
-      // of the newest memory, else the first agent
-      const stillValid = (id: string | null): string | null =>
-        id && (agents.some((a) => a.id === id) || r.memories.some((m) => m.agent_id === id)) ? id : null
-      setMemoryAgentId((prev) =>
-        stillValid(prev) ?? stillValid(r.memories[0]?.agent_id ?? null) ?? agents[0]?.id ?? null
-      )
-    }).catch(() => {})
-    history.pushState(null, '', '#/memories')
-    // Radix popover focus management needs a beat before the view swap (same as handleDocs)
-    setTimeout(() => { setMemoryViewOpen(true) }, 100)
-  }
-
-  const handleSelectMemoryAgent = (agentId: string) => {
-    setMemoryAgentId(agentId)
-    history.replaceState(null, '', `#/memories/${encodeURIComponent(agentId)}`)
-  }
-
-  const closeMemoryView = () => {
-    setMemoryViewOpen(false)
-    if (window.location.hash.startsWith('#/memories')) {
-      history.replaceState(null, '', window.location.pathname + window.location.search)
-    }
-  }
-
-  // Effective selected agent — computed at render time: the stored selection wins
-  // when it maps to a live agent OR an orphan with leftover entries (agent deleted),
-  // otherwise falls back to the first agent.
-  const activeMemoryAgent =
-    memoryAgentId && (agents.some((a) => a.id === memoryAgentId) || memoryEntries.some((m) => m.agent_id === memoryAgentId))
-      ? memoryAgentId
-      : agents[0]?.id ?? null
-
-  // Route guard: #/settings/{tab} only opens for admins (mount + browser back/forward).
-  // Anyone else typing the path is bounced back home.
-  useEffect(() => {
-    const leaveAdminRoute = () => {
-      setAdminViewOpen(false)
-      if (window.location.hash.startsWith('#/settings')) {
-        history.replaceState(null, '', window.location.pathname + window.location.search)
-      }
-    }
-    const syncAdminRoute = () => {
-      const match = window.location.hash.match(/^#\/settings(?:\/(\w+))?$/)
-      if (match) {
-        if (isAdminUser) {
-          // Stand-alone mode hides the users tab — bounce that hash to the default.
-          // 'branding' predates the rename to 体验 — map it so old bookmarks still land.
-          const tab = match[1]
-          if (tab) {
-            const normalized = tab === 'branding' ? 'experience' : tab
-            setAdminTab(standAlone && normalized === 'users' ? ADMIN_TABS[0].value : normalized)
-          }
-          setAdminViewOpen(true)
-        } else {
-          leaveAdminRoute()
+  // --- Admin / Docs / Memory panels (state & logic extracted into custom hooks) ---
+  const admin = useAdminPanel({
+    isAdminUser,
+    standAlone: standAlone === true,
+    sidebarOpen,
+    setSidebarOpen,
+    onConfigChanged: useCallback(() => {
+      api.getAppName().then((r) => {
+        setAppName(r.app_name)
+        if (r.app_favicon) {
+          const link = document.getElementById('favicon') as HTMLLinkElement | null
+          if (link) link.href = r.app_favicon
         }
-      } else {
-        setAdminViewOpen(false)
-      }
-    }
-    syncAdminRoute()
-    window.addEventListener('hashchange', syncAdminRoute)
-    return () => window.removeEventListener('hashchange', syncAdminRoute)
-  }, [isAdminUser, standAlone])
+        setBackgroundImage(r.app_background || '')
+        setSupportAttachments(!!r.support_attachments)
+        setSupportInfiniteMode(r.support_infinite_mode !== false)
+        setAllowImConversations(r.allow_im_conversations !== false)
+        setShowGithub(r.show_github !== false)
+        setRecommendedQuestions(r.recommended_questions || [])
+        setFollowupQuestions(r.followup_questions || [])
+        if (r.agents?.length > 0) {
+          setAgents(r.agents)
+          setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
+        } else {
+          setAgents([])
+          setSelectedAgentId(null)
+        }
+      }).catch(() => {})
+    }, []),
+  })
+  const docs = useDocsPanel({ sidebarOpen, setSidebarOpen })
+  const memory = useMemoryPanel({ agents, sidebarOpen, setSidebarOpen })
 
-  // Route guard: #/docs/{path} — syncs docs view from hash
-  useEffect(() => {
-    const leaveDocsRoute = () => {
-      setDocsViewOpen(false)
-      if (window.location.hash.startsWith('#/docs')) {
-        history.replaceState(null, '', window.location.pathname + window.location.search)
-      }
-    }
-    const ensureDocsLoaded = () => {
-      if (docsEntries.length === 0) {
-        api.get<DocEntry[]>('/api/docs').then((r) => {
-          setDocsEntries(r)
-        }).catch(() => {})
-      }
-    }
-    const syncDocsRoute = () => {
-      const match = window.location.hash.match(/^#\/docs(?:\/(.+))?$/)
-      if (match) {
-        const docPath = match[1] ? decodeURIComponent(match[1]) : null
-        ensureDocsLoaded()
-        setDocsViewOpen(true)
-        setActiveDoc((prev) => docPath || (docsEntries[0]?.path ?? null))
-      } else {
-        setDocsViewOpen(false)
-      }
-    }
-    syncDocsRoute()
-    window.addEventListener('hashchange', syncDocsRoute)
-    return () => window.removeEventListener('hashchange', syncDocsRoute)
-  }, [docsEntries.length])
-
-  // Route guard: #/memories/{agentId} — syncs memory view from hash
-  // (agent ids are uuids with hyphens, hence [^/]+ instead of \w+)
-  useEffect(() => {
-    const syncMemoryRoute = () => {
-      const match = window.location.hash.match(/^#\/memories(?:\/([^/]+))?$/)
-      if (match) {
-        // Direct URL entry / refresh — fetch fresh data
-        api.listMemories().then((r) => setMemoryEntries(r.memories)).catch(() => {})
-        if (match[1]) setMemoryAgentId(decodeURIComponent(match[1]))
-        setMemoryViewOpen(true)
-      } else {
-        setMemoryViewOpen(false)
-      }
-    }
-    syncMemoryRoute()
-    window.addEventListener('hashchange', syncMemoryRoute)
-    return () => window.removeEventListener('hashchange', syncMemoryRoute)
-  }, [])
-
-  // Show OAuth2 registration screen for new OAuth users
+  const [changePinOpen, setChangePinOpen] = useState(false)
+  const [changeUsernameOpen, setChangeUsernameOpen] = useState(false)
+  const [linkedAccountsOpen, setLinkedAccountsOpen] = useState(false)
+  const [imBindOpen, setImBindOpen] = useState(false)
+  const [imBindConvId, setImBindConvId] = useState<string | null>(null)
+  const [imBindAgentId, setImBindAgentId] = useState<string>('')
   if (oauthRegisterInfo) {
     return (
       <OAuthRegisterScreen
@@ -727,29 +501,10 @@ export function App() {
           : `relative ${sidebarOpen ? 'w-72' : 'w-0 border-r-0'}`}
       `}>
         {/* Sidebar — admin mode: management nav; docs mode: doc tree; otherwise: conversations */}
-        {adminViewOpen ? (
-          <AdminSidebar
-            activeTab={adminTab}
-            onTabChange={handleAdminTabChange}
-            onBack={closeAdminView}
-            standAlone={standAlone === true}
-          />
-        ) : docsViewOpen ? (
-          <DocsSidebar
-            docs={docsEntries}
-            activeDoc={activeDoc}
-            onSelect={handleSelectDoc}
-            onBack={closeDocsView}
-          />
-        ) : memoryViewOpen ? (
-          <MemorySidebar
-            agents={agents}
-            memories={memoryEntries}
-            activeAgentId={activeMemoryAgent}
-            onSelect={handleSelectMemoryAgent}
-            onBack={closeMemoryView}
-          />
-        ) : (
+        {admin.viewOpen ? admin.sidebarNode
+          : docs.viewOpen ? docs.sidebarNode
+          : memory.viewOpen ? memory.sidebarNode
+          : (
           <Sidebar
             conversations={chat.conversations}
             activeId={chat.activeId}
@@ -775,9 +530,9 @@ export function App() {
             onLanguageChange={handleLanguageChange}
             theme={theme}
             onThemeChange={setTheme}
-            onAdminSettings={isAdminUser ? handleAdminSettings : undefined}
-            onDocs={handleDocs}
-            onMemory={handleMemory}
+            onAdminSettings={isAdminUser ? admin.open : undefined}
+            onDocs={docs.open}
+            onMemory={memory.open}
             standAlone={standAlone === true}
           />
         )}
@@ -792,134 +547,10 @@ export function App() {
       )}
 
       {/* Main area — admin mode: management content; docs mode: doc viewer; otherwise: chat */}
-        {adminViewOpen ? (
-          <div className="flex-1 flex flex-col min-w-0">
-            {/* Top bar — same height as AdminSidebar header, holds toggle + actions */}
-            <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 hover:bg-accent/50"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-              >
-                <PanelLeft className="h-4 w-4" />
-              </Button>
-              <div className="flex items-center gap-1.5">
-                {adminTab === 'agent' && (
-                  <Button variant="outline" size="sm" onClick={() => agentRef.current?.triggerCreate()}>
-                    <Plus className="mr-1.5 h-3.5 w-3.5" />
-                    {t('settings.agentAdd')}
-                  </Button>
-                )}
-                {adminTab === 'gateway' && (
-                  <Button variant="outline" size="sm" onClick={() => gatewayRef.current?.loadFromEnv()}>
-                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                    {t('settings.gatewayLoadFromEnv')}
-                  </Button>
-                )}
-                {adminTab === 'mcp' && (
-                  <Button variant="outline" size="sm" onClick={() => mcpRef.current?.triggerAdd()}>
-                    <Plus className="mr-1.5 h-3.5 w-3.5" />
-                    {t('settings.mcpAddServer')}
-                  </Button>
-                )}
-                {adminTab === 'skills' && (
-                  <Button variant="outline" size="sm" onClick={() => skillRef.current?.triggerUpload()}>
-                    <Upload className="mr-1.5 h-3.5 w-3.5" />
-                    {t('settings.uploadSkill')}
-                  </Button>
-                )}
-            </div>
-            </div>
-            <div className="flex-1 overflow-y-auto min-h-0">
-              {/* 与文档视图一致：内容限宽水平居中，桌面端两侧留白，移动端自动收缩 */}
-              <div className="max-w-3xl mx-auto px-6 pb-8">
-                {adminTab === 'agent' && <AgentManager ref={agentRef} />}
-                  {adminTab === 'gateway' && <GatewaySettings ref={gatewayRef} />}
-                  {adminTab === 'experience' && <ExperienceSettings />}
-                  {adminTab === 'mcp' && <McpManager ref={mcpRef} />}
-                  {adminTab === 'skills' && <SkillManager ref={skillRef} />}
-                  {adminTab === 'users' && !standAlone && <UserManager ref={userRef} />}
-                  {adminTab === 'review' && <ReviewPanel />}
-              </div>
-            </div>
-          </div>
-        ) : docsViewOpen ? (
-          <div className="flex-1 flex flex-col min-w-0">
-            {/* Top bar */}
-            <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 hover:bg-accent/50"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-              >
-                <PanelLeft className="h-4 w-4" />
-              </Button>
-              <div className="relative" ref={tocWrapRef}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 hover:bg-accent/50"
-                  onClick={() => setTocOpen(v => !v)}
-                  title="目录"
-                >
-                  <List className="h-4 w-4" />
-                </Button>
-                {tocOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-64 rounded-md border bg-popover p-1 shadow-md z-50">
-                    <div className="max-h-[60vh] overflow-y-auto">
-                      {docToc.length === 0 ? (
-                        <p className="px-2 py-3 text-sm text-muted-foreground text-center">暂无章节</p>
-                      ) : docToc.map((h) => (
-                        <button
-                          key={h.id}
-                          className={`w-full text-left rounded-sm py-1.5 pr-2 text-sm truncate hover:bg-accent/60 transition-colors ${
-                            h.level === 1 ? 'font-medium' : 'text-muted-foreground'
-                          }`}
-                          style={{ paddingLeft: `${(h.level - 1) * 14 + 8}px` }}
-                          onClick={() => {
-                            setTocOpen(false)
-                            document.getElementById(h.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                          }}
-                        >
-                          {h.text}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            <DocsViewer docPath={activeDoc} onTocChange={setDocToc} />
-          </div>
-        ) : memoryViewOpen ? (
-          <div className="flex-1 flex flex-col min-w-0">
-            {/* Top bar — only the sidebar toggle */}
-            <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 hover:bg-accent/50"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-              >
-                <PanelLeft className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="flex-1 overflow-y-auto min-h-0">
-              {/* 与文档视图一致：内容限宽水平居中，桌面端两侧留白，移动端自动收缩 */}
-              <div className="max-w-3xl mx-auto px-6 pb-8">
-                <MemoryManager
-                  agentId={activeMemoryAgent}
-                  agent={activeMemoryAgent ? agents.find((a) => a.id === activeMemoryAgent) ?? null : null}
-                  memories={memoryEntries}
-                  loading={memoriesLoading}
-                  onChanged={refreshMemories}
-                />
-              </div>
-            </div>
-          </div>
-        ) : (
+        {admin.viewOpen ? admin.mainNode
+          : docs.viewOpen ? docs.mainNode
+          : memory.viewOpen ? memory.mainNode
+          : (
           <div className="flex-1 flex flex-col min-w-0 relative">
             {/* Top bar — gradient background, bottom aligned with sidebar top-bar */}
             <div className="absolute inset-x-0 top-0 z-30 flex items-center justify-between px-3 shrink-0" style={{ height: '60px', background: 'linear-gradient(to bottom, hsl(var(--background)), transparent)' }}>
