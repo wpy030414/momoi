@@ -1,15 +1,22 @@
 // ============================================================
-// Bash Tool — 受限 shell 执行
+// Bash Tool — 受限 shell 执行（单机模式下不受限）
 // 设计原则：沙盒 cwd + 超时终止 + 输出截断 + 破坏性命令拦截
+// 单机模式（--stand-alone）：所有限制解除，完整 env、无命令黑名单、无超时/截断
 // 平台：win32 用 cmd.exe，其余用 /bin/sh
 // ============================================================
 
 import { spawn } from 'child_process'
+import { isAbsolute } from 'path'
 import type { ToolModule, ToolResult } from './types.js'
+import { STAND_ALONE } from '../lib/standalone.js'
 
 const DEFAULT_TIMEOUT_SEC = 30
 const MAX_TIMEOUT_SEC = 120
 const MAX_OUTPUT_CHARS = 30_000
+
+/** 单机模式下的超时与输出上限 */
+const STANDALONE_TIMEOUT_SEC = 300
+const STANDALONE_MAX_OUTPUT_CHARS = 500_000
 
 /**
  * 子进程环境变量剔除名单（精确匹配，大写）。
@@ -58,7 +65,9 @@ const BLOCKED_SNIPPETS = [
 export const bashTool: ToolModule = {
   definition: {
     name: 'bash',
-    description: 'Execute a shell command in a sandboxed workspace (受限 bash)。用于运行 openyida 等 CLI 工具、处理文件或执行脚本。命令在工作区沙盒目录下运行，带超时与输出截断；破坏性系统命令（格式化/清盘/关机/删除整盘等）会被拦截；含密钥的环境变量（API key / token / 密码等）不会传给子进程。',
+    description: STAND_ALONE
+      ? 'Execute a shell command with full system access (单机模式不受限)。完整的系统环境变量、无命令黑名单、高输出上限、长超时。当前工作目录为项目根目录，可自由访问整个文件系统。'
+      : 'Execute a shell command in a sandboxed workspace (受限 bash)。用于运行 CLI 工具、处理文件或执行脚本。命令在工作区沙盒目录下运行，带超时与输出截断；破坏性系统命令（格式化/清盘/关机/删除整盘等）会被拦截；含密钥的环境变量（API key / token / 密码等）不会传给子进程。',
     input_schema: {
       type: 'object',
       properties: {
@@ -75,36 +84,52 @@ export const bashTool: ToolModule = {
       return { summary: 'Error: empty command', error: true, terminate: true }
     }
 
-    // 破坏性命令拦截
-    const lower = command.toLowerCase()
-    const blocked = BLOCKED_SNIPPETS.find((s) => lower.includes(s))
-    if (blocked) {
-      return {
-        summary: `Blocked: 命令包含不允许的破坏性片段 "${blocked}"。受限 bash 只允许常规命令。`,
-        error: true,
-        terminate: true,
+    // 破坏性命令拦截 — 单机模式跳过
+    if (!STAND_ALONE) {
+      const lower = command.toLowerCase()
+      const blocked = BLOCKED_SNIPPETS.find((s) => lower.includes(s))
+      if (blocked) {
+        return {
+          summary: `Blocked: 命令包含不允许的破坏性片段 "${blocked}"。受限 bash 只允许常规命令。`,
+          error: true,
+          terminate: true,
+        }
       }
     }
 
-    const timeoutSec = Math.min(Number(input.timeout) || DEFAULT_TIMEOUT_SEC, MAX_TIMEOUT_SEC)
+    const timeoutSec = STAND_ALONE
+      ? Math.min(Number(input.timeout) || STANDALONE_TIMEOUT_SEC, STANDALONE_TIMEOUT_SEC)
+      : Math.min(Number(input.timeout) || DEFAULT_TIMEOUT_SEC, MAX_TIMEOUT_SEC)
 
     // 确保工作区目录存在：首次会话目录尚未创建时，spawn 的 cwd 不存在会
     // 报出误导性的 "spawn cmd.exe ENOENT"（实际是 cwd 找不到，不是缺 shell）。
     ctx.workspace.ensureDir()
 
-    // cwd 锁在工作区沙盒内
-    let cwd = ctx.workspace.getRoot()
-    if (input.cwd) {
-      const rel = String(input.cwd).replace(/^[/\\]+/, '')
-      try {
-        const resolved = ctx.workspace.resolve(rel)
-        const stat = await ctx.workspace.stat(rel).catch(() => null)
-        if (!stat?.isDirectory()) {
-          return { summary: `Error: cwd "${rel}" 不存在或不是目录`, error: true, terminate: true }
+    // cwd 处理：单机模式下允许绝对路径和任意目录，否则锁在沙盒内
+    let cwd: string
+    if (STAND_ALONE) {
+      if (input.cwd) {
+        const raw = String(input.cwd)
+        // 支持绝对路径；相对路径相对于工作区根解析
+        cwd = isAbsolute(raw) ? raw : ctx.workspace.resolve(raw)
+      } else {
+        // 单机模式默认从项目根目录运行
+        cwd = process.cwd()
+      }
+    } else {
+      cwd = ctx.workspace.getRoot()
+      if (input.cwd) {
+        const rel = String(input.cwd).replace(/^[/\\]+/, '')
+        try {
+          const resolved = ctx.workspace.resolve(rel)
+          const stat = await ctx.workspace.stat(rel).catch(() => null)
+          if (!stat?.isDirectory()) {
+            return { summary: `Error: cwd "${rel}" 不存在或不是目录`, error: true, terminate: true }
+          }
+          cwd = resolved
+        } catch (e) {
+          return { summary: `Error: cwd "${String(input.cwd)}" 非法: ${(e as Error).message}`, error: true, terminate: true }
         }
-        cwd = resolved
-      } catch (e) {
-        return { summary: `Error: cwd "${String(input.cwd)}" 非法: ${(e as Error).message}`, error: true, terminate: true }
       }
     }
 
@@ -112,6 +137,8 @@ export const bashTool: ToolModule = {
     const shell = isWin ? process.env.ComSpec || 'cmd.exe' : '/bin/sh'
     // Windows 先切到 UTF-8 代码页，避免中文输出乱码
     const full = isWin ? `chcp 65001 >NUL & ${command}` : command
+
+    const maxOutput = STAND_ALONE ? STANDALONE_MAX_OUTPUT_CHARS : MAX_OUTPUT_CHARS
 
     return new Promise<ToolResult>((resolve) => {
       let stdout = ''
@@ -121,7 +148,9 @@ export const bashTool: ToolModule = {
 
       const child = spawn(shell, isWin ? ['/d', '/s', '/c', full] : ['-c', full], {
         cwd,
-        env: { ...scrubEnv(), PYTHONIOENCODING: 'utf-8' },
+        env: STAND_ALONE
+          ? { ...process.env, PYTHONIOENCODING: 'utf-8' }
+          : { ...scrubEnv(), PYTHONIOENCODING: 'utf-8' },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         shell: false,
@@ -150,9 +179,9 @@ export const bashTool: ToolModule = {
         clearTimeout(timer)
 
         const combined = `${stdout}${stderr ? `\n[stderr]\n${stderr}` : ''}`
-        const truncated = combined.length > MAX_OUTPUT_CHARS
+        const truncated = combined.length > maxOutput
         const content = truncated
-          ? combined.slice(0, MAX_OUTPUT_CHARS) + `\n... (truncated, total ${combined.length} chars)`
+          ? combined.slice(0, maxOutput) + `\n... (truncated, total ${combined.length} chars)`
           : combined
 
         const header: string[] = []
