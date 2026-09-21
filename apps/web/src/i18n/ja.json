@@ -99,6 +99,10 @@
     "themeDark": "ダーク",
     "docs": "ドキュメント",
     "memory": "記憶",
+    "pushNotifications": "通知を購読",
+    "pushDeniedHint": "通知が拒否されました。ブラウザ設定から許可してください。",
+    "on": "オン",
+    "off": "オフ",
     "adminSettings": "管理"
   },
   "docs": {

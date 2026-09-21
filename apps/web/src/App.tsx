@@ -14,11 +14,12 @@ import { ImBindDialog } from './components/chat/ImBindDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
 import { Button } from './components/ui/button'
+import { useToast } from './components/ui/toast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
 import { PanelLeft, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 import { ensureLocale } from './i18n'
-import { subscribePush } from './lib/push-subscription'
+import { isPushSupported } from './lib/push-subscription'
 
 // First-use introduction — lazy chunk; users who dismissed it once never load it.
 const IntroductionDialog = lazy(() =>
@@ -26,6 +27,7 @@ const IntroductionDialog = lazy(() =>
 
 export function App() {
   const { t, i18n } = useTranslation()
+  const { toast } = useToast()
   const chat = useGroupChat()
   // v7 exhaustive-deps：闭包内经 chat.fn() 成员链「调用」要求把根对象（每渲染
   // 新建）列入 deps → useCallback 失效。解构为裸标识符即可保留逐成员 memo
@@ -477,6 +479,54 @@ export function App() {
   const [imBindConvId, setImBindConvId] = useState<string | null>(null)
   const [imBindAgentId, setImBindAgentId] = useState<string>('')
   const [introOpen, setIntroOpen] = useState(false)
+  // Push notification toggle — persisted in localStorage, only shown when push is supported
+  const [pushEnabled, setPushEnabled] = useState(() => localStorage.getItem('momoi_push_enabled') === 'true')
+  const pushSupported = isPushSupported()
+  const handlePushToggle = useCallback(async () => {
+    if (pushEnabled) {
+      // Turning off: unsubscribe and forget
+      const { unsubscribePush } = await import('./lib/push-subscription')
+      await unsubscribePush()
+      setPushEnabled(false)
+      localStorage.removeItem('momoi_push_enabled')
+    } else {
+      // Turning on: request permission — modern Chrome always shows the
+      // HTML-based permission dialog on user gesture. Only resolves to
+      // "denied" silently when user has blocked the site in browser settings.
+      const { subscribePush } = await import('./lib/push-subscription')
+      const result = await Notification.requestPermission()
+      if (result === 'granted' && currentUser) {
+        await subscribePush(currentUser)
+        setPushEnabled(true)
+        localStorage.setItem('momoi_push_enabled', 'true')
+      } else if (result === 'denied') {
+        toast({ title: t('menu.pushDeniedHint'), variant: 'info' })
+      }
+    }
+  }, [pushEnabled, currentUser, t])
+
+  // Sync toggle when permission is revoked externally（用户去浏览器设置里关掉通知 → 自动关开关）
+  // Deliberately does NOT re-enable when permission is granted externally —
+  // that path is handled by the explicit toggle click.
+  useEffect(() => {
+    if (!pushSupported) return
+    navigator.permissions?.query({ name: 'notifications' as PermissionName }).then(perm => {
+      const sync = () => {
+        // Only react to externally revoked permission — never override explicit user off
+        if (Notification.permission !== 'granted' && localStorage.getItem('momoi_push_enabled') === 'true') {
+          setPushEnabled(false)
+          localStorage.removeItem('momoi_push_enabled')
+        }
+      }
+      perm.onchange = async () => {
+        // Small delay so Notification.permission reflects the new state
+        await new Promise(r => setTimeout(r, 100))
+        sync()
+      }
+      // Also check on first load: if we stored enabled but permission is now denied
+      sync()
+    }).catch(() => {})
+  }, [pushSupported])
   // Auto-show the first-use introduction once per browser (all login entries
   // — PIN verify / PIN setup / OAuth / stand-alone — funnel through
   // setCurrentUser; a page refresh restores currentUser in the useState
@@ -484,9 +534,11 @@ export function App() {
   useEffect(() => {
     if (!currentUser) return
     if (localStorage.getItem('momoi_intro_seen') !== 'true') setIntroOpen(true)
-    // Subscribe to Web Push notifications (no-op if unsupported)
-    subscribePush(currentUser)
-  }, [currentUser])
+    // Auto-subscribe if permission was already granted and toggle is on
+    if (pushEnabled && Notification.permission === 'granted') {
+      import('./lib/push-subscription').then(m => m.subscribePush(currentUser))
+    }
+  }, [currentUser, pushEnabled])
 
   // ⚠ Rules of Hooks：以下回调/记忆化 Hook 必须位于本组件所有「条件早退」
   // （oauthRegisterInfo / !currentUser）之前。它们曾被放在早退之后，导致登录/
@@ -585,6 +637,9 @@ export function App() {
             onMemory={memory.open}
             onShowIntro={handleShowIntro}
             standAlone={standAlone === true}
+            pushSupported={pushSupported}
+            pushEnabled={pushEnabled}
+            onPushToggle={handlePushToggle}
           />
         )}
       </div>

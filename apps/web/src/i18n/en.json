@@ -99,6 +99,10 @@
     "themeDark": "Dark",
     "docs": "Docs",
     "memory": "Memories",
+    "pushNotifications": "Notifications",
+    "pushDeniedHint": "Notification permission was denied. Enable it in browser settings.",
+    "on": "On",
+    "off": "Off",
     "adminSettings": "Admin"
   },
   "docs": {

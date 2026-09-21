@@ -99,6 +99,10 @@
     "themeDark": "深色",
     "docs": "文档",
     "memory": "记忆",
+    "pushNotifications": "订阅通知",
+    "pushDeniedHint": "通知权限已被拒绝，请在浏览器设置中手动开启",
+    "on": "开",
+    "off": "关",
     "adminSettings": "后台管理"
   },
   "docs": {

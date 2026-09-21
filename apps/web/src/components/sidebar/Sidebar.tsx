@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
 import { MarqueeText } from '../ui/MarqueeText'
-import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen, Brain } from 'lucide-react'
+import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen, Brain, Bell, BellOff } from 'lucide-react'
 import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation } from '@momoi/shared/types'
@@ -39,6 +39,10 @@ interface SidebarProps {
   onShowIntro?: () => void
   /** Stand-alone mode: show a badge next to the app name. */
   standAlone?: boolean
+  /** Push notification toggle — shown only when browser supports Web Push. */
+  pushSupported?: boolean
+  pushEnabled?: boolean
+  onPushToggle?: () => void
 }
 
 interface MenuState {
@@ -48,7 +52,8 @@ interface MenuState {
 
 // ConversationTitle is now MarqueeText from ../ui/MarqueeText
 
-export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle }: SidebarProps) {
+  const LANGUAGE_OPTIONS = ['zh-CN', 'en', 'ja'] as const
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -415,94 +420,75 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
             left: '100px',
           }}
         >
-          {/* Language */}
-          <div className="px-2 py-1.5">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-              <Languages className="h-3 w-3" />
-              {t('menu.language')}
-            </div>
-            <div className="flex gap-1">
-              <button
-                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors whitespace-nowrap ${
-                  language === 'zh-CN' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-                }`}
-                onClick={() => onLanguageChange?.('zh-CN')}
-              >
-                {t('menu.languageZhCN')}
-              </button>
-              <button
-                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors whitespace-nowrap ${
-                  language === 'en' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-                }`}
-                onClick={() => onLanguageChange?.('en')}
-              >
-                {t('menu.languageEn')}
-              </button>
-              <button
-                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors whitespace-nowrap ${
-                  language === 'ja' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-                }`}
-                onClick={() => onLanguageChange?.('ja')}
-              >
-                {t('menu.languageJa')}
-              </button>
-            </div>
-          </div>
+          {/* Language — cycle through options */}
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+            onClick={() => {
+              const idx = (LANGUAGE_OPTIONS as readonly string[]).indexOf(language ?? 'zh-CN')
+              onLanguageChange?.((LANGUAGE_OPTIONS as readonly string[])[(idx + 1) % LANGUAGE_OPTIONS.length])
+            }}
+          >
+            <Languages className="h-3.5 w-3.5" />
+            <span className="flex-1 text-left">{t('menu.language')}</span>
+            <span className="text-xs text-muted-foreground">
+              {{ 'zh-CN': t('menu.languageZhCN'), en: t('menu.languageEn'), ja: t('menu.languageJa') }[(language as string) ?? 'zh-CN']}
+            </span>
+          </button>
 
-          {/* Theme */}
-          <div className="px-2 py-1.5">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-              <SunMoon className="h-3 w-3" />
-              {t('menu.theme')}
-            </div>
-            <div className="flex gap-1">
-              <button
-                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors ${
-                  theme === 'light' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-                }`}
-                onClick={() => onThemeChange?.('light')}
-              >
-                {t('menu.themeLight')}
-              </button>
-              <button
-                className={`flex-1 rounded-sm px-2 py-1 text-xs transition-colors ${
-                  theme === 'dark' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-                }`}
-                onClick={() => onThemeChange?.('dark')}
-              >
-                {t('menu.themeDark')}
-              </button>
-            </div>
-          </div>
+          {/* Theme — cycle light/dark */}
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+            onClick={() => onThemeChange?.(theme === 'dark' ? 'light' : 'dark')}
+          >
+            <SunMoon className="h-3.5 w-3.5" />
+            <span className="flex-1 text-left">{t('menu.theme')}</span>
+            <span className="text-xs text-muted-foreground">
+              {theme === 'dark' ? t('menu.themeDark') : t('menu.themeLight')}
+            </span>
+          </button>
+
+          {/* Push notifications — only shown when browser supports Web Push */}
+          {pushSupported && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+              onClick={onPushToggle}
+            >
+              {pushEnabled ? <Bell className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
+              <span className="flex-1 text-left">{t('menu.pushNotifications')}</span>
+              <span className={`text-xs ${pushEnabled ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+                {pushEnabled ? t('menu.on') : t('menu.off')}
+              </span>
+            </button>
+          )}
 
           {/* Docs */}
           {onDocs && (
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors mt-1"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
               onClick={() => { closeAllPopovers(); onDocs() }}
             >
               <BookOpen className="h-3.5 w-3.5" />
-              {t('menu.docs')}
+              <span className="flex-1 text-left">{t('menu.docs')}</span>
             </button>
           )}
           {/* Memory management */}
           {onMemory && (
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors mt-1"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
               onClick={() => { closeAllPopovers(); onMemory() }}
             >
               <Brain className="h-3.5 w-3.5" />
-              {t('menu.memory')}
+              <span className="flex-1 text-left">{t('menu.memory')}</span>
             </button>
           )}
           {/* Admin settings */}
           {onAdminSettings && (
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors mt-1"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
               onClick={() => { closeAllPopovers(); onAdminSettings() }}
             >
               <Wrench className="h-3.5 w-3.5" />
-              {t('menu.adminSettings')}
+              <span className="flex-1 text-left">{t('menu.adminSettings')}</span>
             </button>
           )}
         </div>,

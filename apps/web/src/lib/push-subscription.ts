@@ -17,7 +17,7 @@ function urlB64ToUint8Array(base64String: string): Uint8Array {
 }
 
 /** 检查浏览器是否支持 Web Push */
-function isPushSupported(): boolean {
+export function isPushSupported(): boolean {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
 }
 
@@ -51,7 +51,7 @@ async function reportSubscription(deviceId: string, subscription: PushSubscripti
   })
 }
 
-/** 主入口：订阅 Web Push */
+/** 主入口：在当前权限状态下订阅 Web Push（权限需已 granted，否则跳过） */
 export async function subscribePush(userId: string): Promise<void> {
   // 1. 能力检测
   if (!isPushSupported()) {
@@ -59,18 +59,10 @@ export async function subscribePush(userId: string): Promise<void> {
     return
   }
 
-  // 2. 权限检测
-  if (Notification.permission === 'denied') {
-    console.log('[push] Notification permission denied')
-    return
-  }
-
+  // 2. 权限必须已 granted（requestPermission 必须来自用户手势，由调用方提前处理）
   if (Notification.permission !== 'granted') {
-    const result = await Notification.requestPermission()
-    if (result !== 'granted') {
-      console.log('[push] Notification permission not granted:', result)
-      return
-    }
+    console.log('[push] Notification permission not granted')
+    return
   }
 
   // 3. 获取 VAPID 公钥
