@@ -1,8 +1,19 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
-import Markdown from 'react-markdown'
 import type { Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+
+// Lazy-load react-markdown (~39 KB gzip) — most users see at least one assistant
+// message, so we preload on first render rather than waiting for a user interaction.
+// The first message renders as plain text; once the module loads, all messages
+// switch to full Markdown rendering.
+const LazyMarkdown = lazy(() => import('react-markdown'))
+let _remarkGfm: any = null
+function getRemarkGfm() {
+  if (!_remarkGfm) {
+    _remarkGfm = import('remark-gfm').then(m => m.default ?? m)
+  }
+  return _remarkGfm
+}
 
 interface MessageContentProps {
   content: string
@@ -29,6 +40,17 @@ function processMentions(content: string): string {
 
 export function MessageContent({ content, streaming, isUser }: MessageContentProps) {
   const [renderedContent, setRenderedContent] = useState(content)
+  // Track whether react-markdown + remark-gfm have finished loading
+  const [gfmReady, setGfmReady] = useState(false)
+  const [remarkGfm, setRemarkGfm] = useState<any>(null)
+
+  // Preload remark-gfm on first mount
+  useEffect(() => {
+    getRemarkGfm().then((m: any) => {
+      setRemarkGfm(m)
+      setGfmReady(true)
+    })
+  }, [])
 
   useEffect(() => {
     if (!streaming) {
@@ -98,6 +120,21 @@ export function MessageContent({ content, streaming, isUser }: MessageContentPro
 
   const parts = safeContent.split(/(```mermaid[\s\S]*?```)/g)
 
+  // Fallback rendering while react-markdown is still loading
+  if (!gfmReady) {
+    return (
+      <div className={`prose prose-sm max-w-none [&_p]:my-1.5 [&>:first-child]:mt-0 [&>:last-child]:mb-0 ${isUser ? '[color:inherit] [--tw-prose-body:currentColor] [--tw-prose-headings:currentColor] [--tw-prose-bold:currentColor] [--tw-prose-links:currentColor] [--tw-prose-code:currentColor] [--tw-prose-counters:currentColor] [--tw-prose-bullets:currentColor] [--tw-prose-quotes:currentColor]' : 'dark:prose-invert'}`}>
+        {parts.map((part, idx) => {
+          if (part.startsWith('```mermaid')) {
+            return <pre key={idx} className="text-xs bg-muted p-2 rounded overflow-x-auto">{part}</pre>
+          }
+          if (!part) return null
+          return <p key={idx} className="whitespace-pre-wrap">{part}</p>
+        })}
+      </div>
+    )
+  }
+
   return (
     <div className={`prose prose-sm max-w-none [&_p]:my-1.5 [&>:first-child]:mt-0 [&>:last-child]:mb-0 ${isUser ? '[color:inherit] [--tw-prose-body:currentColor] [--tw-prose-headings:currentColor] [--tw-prose-bold:currentColor] [--tw-prose-links:currentColor] [--tw-prose-code:currentColor] [--tw-prose-counters:currentColor] [--tw-prose-bullets:currentColor] [--tw-prose-quotes:currentColor]' : 'dark:prose-invert'}`}>
       {parts.map((part, idx) => {
@@ -110,7 +147,13 @@ export function MessageContent({ content, streaming, isUser }: MessageContentPro
         }
         if (!part) return null
         const processed = processMentions(part)
-        return <Markdown key={idx} remarkPlugins={[remarkGfm]} components={markdownComponents} urlTransform={(url) => url}>{processed}</Markdown>
+        return (
+          <Suspense key={idx} fallback={<p className="whitespace-pre-wrap">{processed}</p>}>
+            <LazyMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []} components={markdownComponents} urlTransform={(url: string) => url}>
+              {processed}
+            </LazyMarkdown>
+          </Suspense>
+        )
       })}
     </div>
   )

@@ -1,15 +1,21 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { MemorySidebar } from '@/components/memory/MemorySidebar'
-import { MemoryManager } from '@/components/memory/MemoryManager'
-import type { UserAgentMemory } from '@momoi/shared/types'
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react'
 import { Button } from '@/components/ui/button'
 import { PanelLeft } from 'lucide-react'
 import { api } from '@/lib/api'
+import type { UserAgentMemory } from '@momoi/shared/types'
+
+// Lazy-load memory panel components — most users never visit the memory page.
+const MemorySidebar = lazy(() => import('@/components/memory/MemorySidebar').then(m => ({ default: m.MemorySidebar })))
+const MemoryManager = lazy(() => import('@/components/memory/MemoryManager').then(m => ({ default: m.MemoryManager })))
 
 interface UseMemoryPanelOptions {
   agents: Array<{ id: string; name: string; avatar: string; voice_enabled?: boolean }>
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
+}
+
+function MemoryFallback() {
+  return <div className="flex-1 flex items-center justify-center"><div className="animate-pulse text-muted-foreground text-sm">…</div></div>
 }
 
 export function useMemoryPanel({ agents, sidebarOpen, setSidebarOpen }: UseMemoryPanelOptions) {
@@ -76,39 +82,43 @@ export function useMemoryPanel({ agents, sidebarOpen, setSidebarOpen }: UseMemor
   )
 
   const sidebarNode = (
-    <MemorySidebar
-      agents={agents}
-      memories={memoryEntries}
-      activeAgentId={activeMemoryAgent}
-      onSelect={handleSelectAgent}
-      onBack={close}
-    />
+    <Suspense fallback={<MemoryFallback />}>
+      <MemorySidebar
+        agents={agents}
+        memories={memoryEntries}
+        activeAgentId={activeMemoryAgent}
+        onSelect={handleSelectAgent}
+        onBack={close}
+      />
+    </Suspense>
   )
 
   const mainNode = (
-    <div className="flex-1 flex flex-col min-w-0">
-      <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 hover:bg-accent/50"
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-        >
-          <PanelLeft className="h-4 w-4" />
-        </Button>
-      </div>
-      <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="max-w-3xl mx-auto px-6 pb-8">
-          <MemoryManager
-            agentId={activeMemoryAgent}
-            agent={activeMemoryAgent ? agents.find((a) => a.id === activeMemoryAgent) ?? null : null}
-            memories={memoryEntries}
-            loading={memoriesLoading}
-            onChanged={refreshMemories}
-          />
+    <Suspense fallback={<MemoryFallback />}>
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 hover:bg-accent/50"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+          >
+            <PanelLeft className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <div className="max-w-3xl mx-auto px-6 pb-8">
+            <MemoryManager
+              agentId={activeMemoryAgent}
+              agent={activeMemoryAgent ? agents.find((a) => a.id === activeMemoryAgent) ?? null : null}
+              memories={memoryEntries}
+              loading={memoriesLoading}
+              onChanged={refreshMemories}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </Suspense>
   )
 
   return { sidebarNode, mainNode, viewOpen: memoryViewOpen, open, close }

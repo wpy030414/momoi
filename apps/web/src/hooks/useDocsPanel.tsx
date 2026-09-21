@@ -1,16 +1,22 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
-import { DocsSidebar } from '@/components/docs/DocsSidebar'
-import type { DocEntry } from '@/components/docs/DocsSidebar'
-import { DocsViewer } from '@/components/docs/DocsViewer'
-import type { TocItem } from '@/components/docs/DocsViewer'
 import { Button } from '@/components/ui/button'
 import { PanelLeft, List } from 'lucide-react'
 import { api } from '@/lib/api'
+import type { DocEntry } from '@/components/docs/DocsSidebar'
+import type { TocItem } from '@/components/docs/DocsViewer'
+
+// Lazy-load docs panel components — most users never visit docs.
+const DocsSidebar = lazy(() => import('@/components/docs/DocsSidebar').then(m => ({ default: m.DocsSidebar })))
+const DocsViewer = lazy(() => import('@/components/docs/DocsViewer').then(m => ({ default: m.DocsViewer })))
 
 interface UseDocsPanelOptions {
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
+}
+
+function DocsFallback() {
+  return <div className="flex-1 flex items-center justify-center"><div className="animate-pulse text-muted-foreground text-sm">…</div></div>
 }
 
 export function useDocsPanel({ sidebarOpen, setSidebarOpen }: UseDocsPanelOptions) {
@@ -99,62 +105,66 @@ export function useDocsPanel({ sidebarOpen, setSidebarOpen }: UseDocsPanelOption
   }, [])
 
   const sidebarNode = (
-    <DocsSidebar
-      docs={docsEntries}
-      activeDoc={activeDoc}
-      onSelect={handleSelectDoc}
-      onBack={close}
-    />
+    <Suspense fallback={<DocsFallback />}>
+      <DocsSidebar
+        docs={docsEntries}
+        activeDoc={activeDoc}
+        onSelect={handleSelectDoc}
+        onBack={close}
+      />
+    </Suspense>
   )
 
   const mainNode = (
-    <div className="flex-1 flex flex-col min-w-0">
-      <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 hover:bg-accent/50"
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-        >
-          <PanelLeft className="h-4 w-4" />
-        </Button>
-        <div className="relative" ref={tocWrapRef}>
+    <Suspense fallback={<DocsFallback />}>
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
           <Button
             variant="ghost"
             size="icon"
             className="h-8 w-8 hover:bg-accent/50"
-            onClick={() => setTocOpen(v => !v)}
-            title="目录"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
           >
-            <List className="h-4 w-4" />
+            <PanelLeft className="h-4 w-4" />
           </Button>
-          {tocOpen && (
-            <div className="absolute right-0 top-full mt-2 w-64 rounded-md border bg-popover p-1 shadow-md z-50">
-              <div className="max-h-[60vh] overflow-y-auto">
-                {docToc.length === 0 ? (
-                  <p className="px-2 py-3 text-sm text-muted-foreground text-center">{t('common.noChapters')}</p>
-                ) : docToc.map((h) => (
-                  <button
-                    key={h.id}
-                    className={`w-full text-left rounded-sm py-1.5 pr-2 text-sm truncate hover:bg-accent/60 transition-colors ${
-                      h.level === 1 ? 'font-medium' : 'text-muted-foreground'
-                    }`}
-                    style={{ paddingLeft: `${(h.level - 1) * 14 + 8}px` }}
-                    onClick={() => {
-                      setTocOpen(false)
-                      document.getElementById(h.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                    }}
-                  >
-                    {h.text}
-                  </button>
-                ))}
+          <div className="relative" ref={tocWrapRef}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 hover:bg-accent/50"
+              onClick={() => setTocOpen(v => !v)}
+              title="目录"
+            >
+              <List className="h-4 w-4" />
+            </Button>
+            {tocOpen && (
+              <div className="absolute right-0 top-full mt-2 w-64 rounded-md border bg-popover p-1 shadow-md z-50">
+                <div className="max-h-[60vh] overflow-y-auto">
+                  {docToc.length === 0 ? (
+                    <p className="px-2 py-3 text-sm text-muted-foreground text-center">{t('common.noChapters')}</p>
+                  ) : docToc.map((h) => (
+                    <button
+                      key={h.id}
+                      className={`w-full text-left rounded-sm py-1.5 pr-2 text-sm truncate hover:bg-accent/60 transition-colors ${
+                        h.level === 1 ? 'font-medium' : 'text-muted-foreground'
+                      }`}
+                      style={{ paddingLeft: `${(h.level - 1) * 14 + 8}px` }}
+                      onClick={() => {
+                        setTocOpen(false)
+                        document.getElementById(h.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      }}
+                    >
+                      {h.text}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
+        <DocsViewer docPath={activeDoc} onTocChange={setDocToc} />
       </div>
-      <DocsViewer docPath={activeDoc} onTocChange={setDocToc} />
-    </div>
+    </Suspense>
   )
 
   return { sidebarNode, mainNode, viewOpen: docsViewOpen, open, close }

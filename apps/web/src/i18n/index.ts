@@ -18,7 +18,9 @@ i18n.use(initReactI18next).init({
 })
 
 // Preload trigger: called from the language switcher before changeLanguage
+// Also handles the initial-load case where a saved locale differs from zh-CN.
 export async function ensureLocale(lng: string): Promise<void> {
+  if (lng === 'zh-CN') return // already bundled eagerly
   if (!i18n.hasResourceBundle(lng, 'translation')) {
     const mod = await import(`./${lng}.json`)
     i18n.addResourceBundle(lng, 'translation', (mod as any).default ?? mod)

@@ -15,7 +15,7 @@ const apiPort = process.env.PORT || '11408'
 // plugin instances silently skip whichever runs second).
 const EXT_RE = /\.(js|mjs|json|css|html)$/i
 function compressionPlugin(options?: { threshold?: number }): Plugin {
-  const threshold = options?.threshold ?? 1024
+  const threshold = options?.threshold ?? 1500
   return {
     name: 'vite:compression',
     apply: 'build',
@@ -31,11 +31,10 @@ function compressionPlugin(options?: { threshold?: number }): Plugin {
           if (!EXT_RE.test(entry.name)) continue
           const buf = readFileSync(full)
           if (buf.length < threshold) continue
-          writeFileSync(full + '.gz', gzipSync(buf, { level: zlibConstants.Z_BEST_COMPRESSION }))
+          writeFileSync(full + '.gz', gzipSync(buf, { level: zlibConstants.Z_DEFAULT_COMPRESSION }))
           writeFileSync(full + '.br', brotliCompressSync(buf, {
             params: {
-              [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_MAX_QUALITY,
-              [zlibConstants.BROTLI_PARAM_MODE]: zlibConstants.BROTLI_MODE_TEXT,
+              [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_DEFAULT_QUALITY,
             },
           }))
         }
@@ -63,6 +62,18 @@ export default defineConfig({
           // React 核心：体积不大但缓存价值高，业务代码变动时不受影响
           if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
             return 'vendor-react'
+          }
+          // Radix UI 组件集：稳定、频繁引用、跨版本变更少
+          if (id.includes('node_modules/@radix-ui/')) {
+            return 'vendor-radix'
+          }
+          // 图标库：导入分散在 27 个文件中，统一分块避免分散到各业务 chunk
+          if (id.includes('node_modules/lucide-react/')) {
+            return 'vendor-icons'
+          }
+          // 国际化：仅语言切换时下载，不影响首屏
+          if (id.includes('node_modules/i18next/') || id.includes('node_modules/react-i18next/')) {
+            return 'vendor-i18n'
           }
           // 其余 node_modules 交给 Rolldown 默认拆分策略
         },
