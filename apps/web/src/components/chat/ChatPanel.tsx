@@ -111,12 +111,20 @@ export function ChatPanel({
     return new Map(agents.map(a => [a.id, a.voice_enabled ?? false]))
   }, [agents])
 
-  // Time-of-day greeting
+  // Time-of-day greeting — 7 bands
   const timeGreeting = useMemo(() => {
-    const hour = new Date().getHours()
-    if (hour < 12) return t('chat.greetingMorning')
-    if (hour < 18) return t('chat.greetingAfternoon')
-    return t('chat.greetingEvening')
+    const now = new Date()
+    const hour = now.getHours()
+    const minute = now.getMinutes()
+    const timeInMinutes = hour * 60 + minute
+
+    if (timeInMinutes >= 360 && timeInMinutes < 510) return t('chat.greetingMorning')       // 06:00-08:29
+    if (timeInMinutes >= 510 && timeInMinutes < 660) return t('chat.greetingLateMorning')    // 08:30-10:59
+    if (timeInMinutes >= 660 && timeInMinutes < 840) return t('chat.greetingNoon')           // 11:00-13:59
+    if (timeInMinutes >= 840 && timeInMinutes < 1020) return t('chat.greetingAfternoon')     // 14:00-16:59
+    if (timeInMinutes >= 1020 && timeInMinutes < 1320) return t('chat.greetingEvening')      // 17:00-21:59
+    if (timeInMinutes >= 1320 || timeInMinutes < 210) return t('chat.greetingLateNight')     // 22:00-03:29
+    return t('chat.greetingDawn')                                                            // 03:30-05:59
   }, [t])
 
   // Track scroll position — fires before the next layout effect,

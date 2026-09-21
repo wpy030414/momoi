@@ -107,3 +107,14 @@ export function broadcastConversationChanged(userId: string, conversationId: str
 export function broadcastGroupMembers(userId: string, conversationId: string) {
   publish(userId, undefined, { type: 'group_members', conversation_id: conversationId })
 }
+
+/** 查询用户当前活跃设备数 */
+export function getActiveDeviceCount(userId: string): number {
+  const set = subscribers.get(userId)
+  if (!set) return 0
+  let count = 0
+  for (const sub of set) {
+    if (!sub.aborted) count++
+  }
+  return count
+}

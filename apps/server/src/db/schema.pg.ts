@@ -120,3 +120,13 @@ export const qqGroupConversations = pgTable('qq_group_conversations', {
 }, (table) => ({
   pk: primaryKey({ columns: [table.app_id, table.group_openid] }),
 }))
+
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  id: serial('id').primaryKey(),
+  user_id: text('user_id').notNull(),
+  device_id: text('device_id').notNull(),
+  endpoint: text('endpoint').notNull(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  created_at: integer('created_at').notNull(),
+})

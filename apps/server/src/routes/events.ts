@@ -10,7 +10,8 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
-import { subscribeRealtime } from '../lib/realtime.js'
+import { subscribeRealtime, getActiveDeviceCount } from '../lib/realtime.js'
+import { scheduleOfflineNotifications, cancelOfflineNotifications } from '../lib/push-scheduler.js'
 
 export const eventsRoute = new Hono()
 
@@ -48,6 +49,11 @@ eventsRoute.get('/', async (c) => {
       return stream.writeSSE({ data: dataString })
     })
 
+    // If this is the first active device, user just came back online
+    if (getActiveDeviceCount(userId) === 1) {
+      cancelOfflineNotifications(userId)
+    }
+
     const cleanup = () => {
       if (closed) return
       closed = true
@@ -55,6 +61,10 @@ eventsRoute.get('/', async (c) => {
       unsubscribe()
       hangResolve?.()
       hangResolve = null
+      // Check if this was the last device — if so, user is now offline
+      if (getActiveDeviceCount(userId) === 0) {
+        scheduleOfflineNotifications(userId)
+      }
     }
 
     // Keepalive：SSE 长连接需周期性心跳，防止代理 / 浏览器关闭空闲连接

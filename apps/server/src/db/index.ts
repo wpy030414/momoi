@@ -42,4 +42,5 @@ export const {
   qqBindings,
   qqGroupConversations,
   userAgentMemories,
+  pushSubscriptions,
 } = result.schema

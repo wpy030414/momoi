@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { PanelLeft, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 import { ensureLocale } from './i18n'
+import { subscribePush } from './lib/push-subscription'
 
 // First-use introduction — lazy chunk; users who dismissed it once never load it.
 const IntroductionDialog = lazy(() =>
@@ -483,6 +484,8 @@ export function App() {
   useEffect(() => {
     if (!currentUser) return
     if (localStorage.getItem('momoi_intro_seen') !== 'true') setIntroOpen(true)
+    // Subscribe to Web Push notifications (no-op if unsupported)
+    subscribePush(currentUser)
   }, [currentUser])
 
   // ⚠ Rules of Hooks：以下回调/记忆化 Hook 必须位于本组件所有「条件早退」

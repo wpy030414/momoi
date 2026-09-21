@@ -38,6 +38,7 @@ import { qqRoute } from './routes/qq.js'
 import { eventsRoute } from './routes/events.js'
 import { docsRoute } from './routes/docs.js'
 import { memoriesRoute } from './routes/memories.js'
+import { pushNotificationRoute } from './routes/push-notification.js'
 import { serveClient } from './lib/static.js'
 import { startWechatPoller } from './im/wechat/poller.js'
 import { initQqBots } from './im/qq/manager.js'
@@ -77,6 +78,7 @@ app.route('/api/docs', docsRoute)
 // User-facing memory management — independent prefix (not inside the /api/user
 // stand-alone fork), so it works in both normal and stand-alone modes.
 app.route('/api/memories', memoriesRoute)
+app.route('/api/push-notification', pushNotificationRoute)
 
 // Static files — production only (dev mode uses Vite proxy)
 if (process.env.NODE_ENV === 'production') {

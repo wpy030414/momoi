@@ -148,6 +148,17 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_user_agent_memories ON user_agent_memories(user_id, agent_id);
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id SERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(user_id, device_id)
+    );
   `)
 
   const db = drizzlePg(pool, { schema }) as any

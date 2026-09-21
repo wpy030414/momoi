@@ -362,3 +362,28 @@ export async function deleteUserAgentMemories(userId: string, agentId: string): 
   }
   return rows.length
 }
+
+// ---- VAPID Keys for Web Push ----
+
+let _vapidKeys: { publicKey: string; privateKey: string } | null = null
+
+export async function getVapidKeys(): Promise<{ publicKey: string; privateKey: string }> {
+  if (_vapidKeys) return _vapidKeys
+
+  const privateKey = await getSetting('vapid_private_key', '')
+  const publicKey = await getSetting('vapid_public_key', '')
+
+  if (privateKey && publicKey) {
+    _vapidKeys = { publicKey, privateKey }
+    return _vapidKeys
+  }
+
+  // Generate on first use
+  const webPush = await import('web-push')
+  const keys = webPush.generateVAPIDKeys()
+  await setSetting('vapid_private_key', keys.privateKey)
+  await setSetting('vapid_public_key', keys.publicKey)
+  _vapidKeys = keys
+  console.log('[vapid] Generated new VAPID key pair')
+  return _vapidKeys
+}
