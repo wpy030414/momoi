@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { subscribeRealtime, getActiveDeviceCount } from '../lib/realtime.js'
 import { scheduleOfflineNotifications, cancelOfflineNotifications } from '../lib/push-scheduler.js'
+import { triggerVisitGreeting } from '../lib/visit-greeting.js'
 
 export const eventsRoute = new Hono()
 
@@ -52,6 +53,10 @@ eventsRoute.get('/', async (c) => {
     // If this is the first active device, user just came back online
     if (getActiveDeviceCount(userId) === 1) {
       cancelOfflineNotifications(userId)
+      // Fire-and-forget visit greeting; don't block SSE setup on AI generation
+      triggerVisitGreeting(userId).catch((err) => {
+        console.error(`[visit-greeting] Failed for user ${userId}:`, (err as Error).message)
+      })
     }
 
     const cleanup = () => {
