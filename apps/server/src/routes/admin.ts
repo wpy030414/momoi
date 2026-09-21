@@ -258,7 +258,9 @@ adminRoute.get('/users', async (c) => {
   // Fetch OAuth2 bindings for all listed users
   const usernames = rows.map((r: typeof users.$inferSelect) => r.username)
   const allBindings = usernames.length > 0
-    ? await db.select().from(userOauthBindings).all()
+    ? await db.select().from(userOauthBindings)
+        .where(sql`${userOauthBindings.user_id} IN (${sql.join(usernames.map((u) => sql`${u}`))})`)
+        .all()
     : []
   const bindingsByUser = new Map<string, string[]>()
   for (const b of allBindings) {
@@ -319,16 +321,16 @@ adminRoute.delete('/users/:username', async (c) => {
   // Delete WeChat binding (sql.js has foreign_keys OFF by default,
   // so cascade cannot be relied on — clean up explicitly).
   await db.delete(wechatBindings).where(eq(wechatBindings.user_id, username)).run()
-  // Delete QQ binding + stop all gateway connections for this user.
-  // With per-agent bindings, there may be multiple connections to tear down.
+  // Delete QQ binding(s) + stop gateway connections for this user.
+  // Batch delete qqGroupConversations instead of per-binding loop.
   const allQqBindings = await db.select().from(qqBindings)
     .where(eq(qqBindings.user_id, username)).all()
-  for (const b of allQqBindings) {
-    stopBotForUser(username, b.agent_id)
-    if (b.app_id) {
-      await db.delete(qqGroupConversations)
-        .where(eq(qqGroupConversations.app_id, b.app_id)).run()
-    }
+  const appIds = [...new Set(allQqBindings.map((b) => b.app_id).filter(Boolean))]
+  for (const b of allQqBindings) stopBotForUser(username, b.agent_id)
+  if (appIds.length > 0) {
+    await db.delete(qqGroupConversations)
+      .where(sql`${qqGroupConversations.app_id} IN (${sql.join(appIds.map((a) => sql`${a}`))})`)
+      .run()
   }
   await db.delete(qqBindings).where(eq(qqBindings.user_id, username)).run()
   // Delete user-agent memories

@@ -77,7 +77,7 @@ conversationsRoute.get('/', async (c) => {
   return c.json({ conversations: list })
 })
 
-// Get one conversation with messages
+// Get one conversation with messages (paginated to avoid O(n) payloads)
 conversationsRoute.get('/:id', async (c) => {
   const userId = getUserId(c)
   if (!userId) return c.json({ error: 'Unauthorized' }, 401)
@@ -86,7 +86,19 @@ conversationsRoute.get('/:id', async (c) => {
   const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
 
-  const msgs = await db.select().from(messages).where(eq(messages.conversation_id, id)).orderBy(messages.created_at).all()
+  // Paginated messages: default 200, max 1000. Cursor `before` for older pages.
+  const limit = Math.min(Number(c.req.query('limit')) || 200, 1000)
+  const beforeId = c.req.query('before')
+  const conds = [eq(messages.conversation_id, id)]
+  if (beforeId) conds.push(sql`${messages.id} < ${Number(beforeId)}`)
+  const msgs = await db.select().from(messages)
+    .where(and(...conds))
+    .orderBy(desc(messages.id))
+    .limit(limit)
+    .all()
+  // Reverse to chronological order
+  msgs.reverse()
+  const hasMore = msgs.length === limit
 
   // For group conversations, also return the agent list
   let groupAgents: Array<{ id: string; name: string; avatar: string }> | undefined
@@ -123,6 +135,7 @@ conversationsRoute.get('/:id', async (c) => {
     })),
     agents: groupAgents,
     is_qq_group: isQqGroup,
+    has_more: hasMore,
   })
 })
 
@@ -143,15 +156,17 @@ conversationsRoute.post('/', async (c) => {
     created_at: now, updated_at: now,
   }).run()
 
-  // Insert group agent associations
+  // Insert group agent associations (batch insert, not N individual queries)
   if (body.type === 'group' && body.agent_ids && body.agent_ids.length > 0) {
-    for (let i = 0; i < body.agent_ids.length; i++) {
-      if (body.agent_ids[i] === NEUTRAL_AGENT_ID) continue // skip neutral agent
-      await db.insert(groupConversationAgents).values({
+    const rows = body.agent_ids
+      .filter((aid) => aid !== NEUTRAL_AGENT_ID)
+      .map((aid, idx) => ({
         conversation_id: id,
-        agent_id: body.agent_ids[i],
-        sort_order: i,
-      }).run()
+        agent_id: aid,
+        sort_order: idx,
+      }))
+    if (rows.length > 0) {
+      await db.insert(groupConversationAgents).values(rows).run()
     }
   }
 
@@ -222,7 +237,14 @@ conversationsRoute.post('/merge', async (c) => {
 
   // 1. Verify all source conversations exist, belong to user, are group type, not deleted
   const sources: typeof conversations.$inferSelect[] = []
+  // Batch qqGroupConversations lookup — single query instead of N
+  const qqGroupRows = await db.select().from(qqGroupConversations)
+    .where(sql`${qqGroupConversations.conversation_id} IN (${sql.join(sourceIds.map(id => sql`${id}`))})`)
+    .all()
   const isQqSource = new Map<string, boolean>()
+  for (const row of qqGroupRows) {
+    isQqSource.set(row.conversation_id, true)
+  }
   for (const sid of sourceIds) {
     const s = await db.select().from(conversations)
       .where(and(eq(conversations.id, sid), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
@@ -230,9 +252,7 @@ conversationsRoute.post('/merge', async (c) => {
     if (!s) return c.json({ error: `会话 ${sid} 不存在` }, 404)
     if ((s as any).type !== 'group') return c.json({ error: `会话 ${sid} 不是群聊` }, 400)
     sources.push(s)
-    const qqRow = await db.select().from(qqGroupConversations)
-      .where(eq(qqGroupConversations.conversation_id, sid)).get()
-    isQqSource.set(sid, !!qqRow)
+    if (!isQqSource.has(sid)) isQqSource.set(sid, false)
   }
 
   // 同质性检查：不能混合 QQ 群聊和普通群聊
@@ -242,74 +262,81 @@ conversationsRoute.post('/merge', async (c) => {
     return c.json({ error: '不能混合 QQ 群聊和普通群聊' }, 400)
   }
 
+  // Perform merge: all steps are in a single block. Drizzle's sql.js adapter
+  // doesn't support db.transaction(), but we batch all INSERTs and use the
+  // per-source loop structure so at-worst a crash leaves one source un-merged
+  // (which is soft-deleted last). The batch INSERT and agent insert steps are
+  // the main performance wins vs the old per-row loop.
   // 2. Create new conversation C
   const newId = randomUUID()
-  const now = Math.floor(Date.now() / 1000)
-  const defaultAgentId = sources[0].agent_id
-  await db.insert(conversations).values({
-    id: newId,
-    user_id: userId,
-    title: '合并群聊',
-    agent_id: defaultAgentId,
-    type: 'group',
-    created_at: now,
-    updated_at: now,
-  }).run()
+    const now = Math.floor(Date.now() / 1000)
+    const defaultAgentId = sources[0].agent_id
+    await tx.insert(conversations).values({
+      id: newId,
+      user_id: userId,
+      title: '合并群聊',
+      agent_id: defaultAgentId,
+      type: 'group',
+      created_at: now,
+      updated_at: now,
+    }).run()
 
-  // 3. For each source: copy messages, merge agents, repoint mappings, soft-delete
-  const seenAgentIds = new Set<string>()
-  for (const source of sources) {
-    // 3a. Copy messages (preserve created_at for chronological ordering)
-    const sourceMsgs = await db.select().from(messages)
-      .where(eq(messages.conversation_id, source.id))
-      .orderBy(messages.created_at)
-      .all()
-    for (const msg of sourceMsgs) {
-      await db.insert(messages).values({
-        conversation_id: newId,
-        role: msg.role,
-        content: msg.content,
-        thinking: msg.thinking,
-        tool_calls: msg.tool_calls,
-        trace: msg.trace,
-        tool_call_id: msg.tool_call_id,
-        suggestions: msg.suggestions,
-        attachments: msg.attachments,
-        agent_id: msg.agent_id,
-        created_at: msg.created_at,
-      }).run()
+    // 3. For each source: batch copy messages, merge agents, repoint mappings, soft-delete
+    const seenAgentIds = new Set<string>()
+    for (const source of sources) {
+      // 3a. Copy messages — batch INSERT instead of per-row INSERT
+      const sourceMsgs = await tx.select().from(messages)
+        .where(eq(messages.conversation_id, source.id))
+        .orderBy(messages.created_at)
+        .all()
+      if (sourceMsgs.length > 0) {
+        await tx.insert(messages).values(
+          sourceMsgs.map((msg: typeof messages.$inferSelect) => ({
+            conversation_id: newId,
+            role: msg.role,
+            content: msg.content,
+            thinking: msg.thinking,
+            tool_calls: msg.tool_calls,
+            trace: msg.trace,
+            tool_call_id: msg.tool_call_id,
+            suggestions: msg.suggestions,
+            attachments: msg.attachments,
+            agent_id: msg.agent_id,
+            created_at: msg.created_at,
+          }))
+        ).run()
+      }
+
+      // 3b. Merge groupConversationAgents (dedup)
+      const sourceAgents = await tx.select().from(groupConversationAgents)
+        .where(eq(groupConversationAgents.conversation_id, source.id))
+        .all()
+      const newAgents = sourceAgents.filter((sa) => !seenAgentIds.has(sa.agent_id))
+      for (const sa of newAgents) seenAgentIds.add(sa.agent_id)
+      if (newAgents.length > 0) {
+        await tx.insert(groupConversationAgents).values(
+          newAgents.map((sa) => ({
+            conversation_id: newId,
+            agent_id: sa.agent_id,
+            sort_order: 0,
+          }))
+        ).run()
+      }
+
+      // 3c. Redirect qq_group_conversations mappings
+      await tx.update(qqGroupConversations)
+        .set({ conversation_id: newId })
+        .where(eq(qqGroupConversations.conversation_id, source.id))
+        .run()
+
+      // 3d. Soft-delete source
+      await tx.update(conversations)
+        .set({ deleted_at: now, updated_at: now })
+        .where(and(eq(conversations.id, source.id), eq(conversations.user_id, userId)))
+        .run()
     }
 
-    // 3b. Merge groupConversationAgents (dedup)
-    const sourceAgents = await db.select().from(groupConversationAgents)
-      .where(eq(groupConversationAgents.conversation_id, source.id))
-      .all()
-    for (const sa of sourceAgents) {
-      if (seenAgentIds.has(sa.agent_id)) continue
-      seenAgentIds.add(sa.agent_id)
-      try {
-        await db.insert(groupConversationAgents).values({
-          conversation_id: newId,
-          agent_id: sa.agent_id,
-          sort_order: 0,
-        }).run()
-      } catch { /* already exists */ }
-    }
-
-    // 3c. Redirect qq_group_conversations mappings
-    await db.update(qqGroupConversations)
-      .set({ conversation_id: newId })
-      .where(eq(qqGroupConversations.conversation_id, source.id))
-      .run()
-
-    // 3d. Soft-delete source
-    await db.update(conversations)
-      .set({ deleted_at: now, updated_at: now })
-      .where(and(eq(conversations.id, source.id), eq(conversations.user_id, userId)))
-      .run()
-  }
-
-  // 4. Read back new conversation
+    // 4. Read back new conversation
   const mergedConv = await db.select().from(conversations).where(eq(conversations.id, newId)).get()
   broadcastConversationSync(userId)
   broadcastConversationChanged(userId, newId)

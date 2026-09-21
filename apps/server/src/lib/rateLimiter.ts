@@ -8,6 +8,7 @@
 interface IpEntry {
   failures: number
   blockedUntil: number | null // epoch ms, null = 未封禁但已有失败记录
+  lastAttempt: number // epoch ms, 最近一次尝试时间
 }
 
 const MAX_FAILURES = 5
@@ -15,13 +16,16 @@ const BLOCK_DURATION_MS = 5 * 60 * 1000 // 5 分钟
 
 const ipMap = new Map<string, IpEntry>()
 
-// 定时清理过期条目（每分钟跑一次，防止内存泄漏）
+// 定时清理过期条目（每分钟跑一次，防止内存泄漏）。
+// 清理条件：(1) 已封禁且封禁期已过；(2) 未封禁但 10 分钟内无活动（扫描器残留）。
 const CLEANUP_INTERVAL_MS = 60_000
+const IDLE_TTL_MS = 10 * 60_000
 setInterval(() => {
   const now = Date.now()
   for (const [ip, entry] of ipMap) {
-    // 已封禁且封禁期已过的条目可以清理
     if (entry.blockedUntil !== null && entry.blockedUntil <= now) {
+      ipMap.delete(ip)
+    } else if (entry.blockedUntil === null && now - entry.lastAttempt > IDLE_TTL_MS) {
       ipMap.delete(ip)
     }
   }
@@ -76,7 +80,7 @@ export function checkIpBlocked(ip: string): string | null {
 export function recordPinFailure(ip: string): void {
   const entry = ipMap.get(ip)
   if (!entry) {
-    ipMap.set(ip, { failures: 1, blockedUntil: null })
+    ipMap.set(ip, { failures: 1, blockedUntil: null, lastAttempt: Date.now() })
     return
   }
 
@@ -86,6 +90,7 @@ export function recordPinFailure(ip: string): void {
   }
 
   entry.failures += 1
+  entry.lastAttempt = Date.now()
 
   if (entry.failures >= MAX_FAILURES) {
     entry.blockedUntil = Date.now() + BLOCK_DURATION_MS

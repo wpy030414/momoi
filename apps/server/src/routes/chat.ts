@@ -200,13 +200,13 @@ chatRoute.post('/', async (c) => {
 
         // Insert group agent associations
         if (isGroup && groupAgentIds.length > 0) {
-          for (let i = 0; i < groupAgentIds.length; i++) {
-            await db.insert(groupConversationAgents).values({
-              conversation_id: convId,
-              agent_id: groupAgentIds[i],
-              sort_order: i,
-            }).run()
-          }
+          // Batch insert instead of N individual queries
+          const rows = groupAgentIds.map((aid, idx) => ({
+            conversation_id: convId,
+            agent_id: aid,
+            sort_order: idx,
+          }))
+          await db.insert(groupConversationAgents).values(rows).run()
         }
       } else {
         // Verify conversation belongs to user
