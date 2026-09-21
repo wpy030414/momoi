@@ -27,7 +27,7 @@
 - **标志解析**：`apps/server/src/standalone.ts` 导出 `STAND_ALONE`（`process.argv.includes('--stand-alone')`）。该模块零 import——ESM 中依赖体先于引用体执行，因此无论谁先导入（db.ts 的顶层 await 初始化、auth.ts 等）都能读到正确值
 - **中间件直通**：`userAuthMiddleware` 与 `adminAuthMiddleware` 开头短路，`c.set('userId', 'admin')` 后直接 `next()`；`isAdmin()` 恒真（后台面板永远可用）
 - **端点裁剪**：`/api/user` 挂载 `routes/user-standalone.ts`（仅 `GET /me` → `{username:'admin', is_admin:true}`，无中间件）；`/api/oauth` 整个不挂载。因此 verify/set-pin/change-pin/rename/logout/refresh/oauth-bindings/status 全部不存在，且**不可能签发任何 JWT 或 Cookie**（所有签发点都在这两个路由文件内）
-- **数据库**：使用独立的 `data/momoi.stand-alone.db`；启动时 seed 固定 `admin` 用户行（幂等）
+- **数据库**：与正常模式共用 `data/momoi.db`（不再使用独立数据库文件）；若同时配置了 `DATABASE_URL` 等远程数据库环境变量，stand-alone 模式也会使用远程数据库（不再忽略）；启动时 seed 固定 `admin` 用户行（幂等）
 - **微信/QQ 不受影响**：IM 桥接不是 Momoi 鉴权体系的一部分，绑定照常（归属 `admin`）
 - **前端发现**：`GET /api/app-name` 响应含 `stand_alone: boolean`；客户端据此自动登录 `admin`、隐藏改密/改名/OAuth 关联/登出入口、隐藏后台「用户」tab，并禁用 token 续期与 `auth:expired` 驱逐
 

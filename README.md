@@ -49,7 +49,6 @@ pnpm start:standalone   # 生产模式
 ```
 
 - 固定 `admin` 用户，无登录页，不可改密/改名/登出
-- 独立数据库 `data/momoi.stand-alone.db`
 - 后台始终可用，「用户」tab 不显示
 
 > ⚠️ 单机模式不做任何鉴权，仅适合本机或可信内网使用，请勿暴露到公网。

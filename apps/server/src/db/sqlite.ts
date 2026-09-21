@@ -3,7 +3,6 @@ import fs from 'fs'
 import fsPromises from 'fs/promises'
 import { MIGRATION_SQL } from './ddl.js'
 import { repoRoot } from '../lib/paths.js'
-import { STAND_ALONE } from '../lib/standalone.js'
 
 export async function initSqlite() {
   const initSqlJs = (await import('sql.js')).default
@@ -12,9 +11,7 @@ export async function initSqlite() {
 
   const dataDir = path.resolve(repoRoot(), 'data')
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
-  // Stand-alone mode uses its own isolated database file, fully separate from
-  // the multi-tenant momoi.db.
-  const dbPath = path.join(dataDir, STAND_ALONE ? 'momoi.stand-alone.db' : 'momoi.db')
+  const dbPath = path.join(dataDir, 'momoi.db')
 
   const SQL = await initSqlJs()
 
@@ -53,11 +50,22 @@ export async function initSqlite() {
     }
   }
 
-  // Auto-save every 30s
+  // Auto-save every 30s (async — safe for periodic saves)
   setInterval(persist, 30_000)
 
-  // Save on graceful shutdown
-  const shutdown = () => { persist(); process.exit(0) }
+  // Shutdown: synchronous write to guarantee data survives pm2 restart / SIGTERM.
+  // The async persist() truncates the file on open (O_TRUNC) then writes — if
+  // the process exits before the write completes (pm2 sends SIGKILL after grace
+  // period), the database file is left empty and all data is irreversibly lost.
+  // Using writeFileSync here eliminates that race condition entirely.
+  const shutdown = () => {
+    try {
+      fs.writeFileSync(dbPath, Buffer.from(sqlDb.export()))
+    } catch (err) {
+      console.error('[db] Failed to persist database on shutdown:', (err as Error).message)
+    }
+    process.exit(0)
+  }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 

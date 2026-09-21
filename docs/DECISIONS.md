@@ -933,7 +933,7 @@
 - 双 schema 文件而非运行时方言判断：编译期隔离更安全（选错方言不会静默出 bug）且代码更清晰
 - `node-postgres` 而非 `pg-promise`：Drizzle ORM 官方推荐，pool + 原生 SQL 足够
 - SQLite ADDITIVE_MIGRATIONS 每条 try/catch：sql.js 不支持 `IF NOT EXISTS` 的 ALTER TABLE，逐条 try 避免了"迁移失败则库不可用"的一级事故
-- 30 秒自动持久化 + SIGINT/SIGTERM 退出持久化（SQLite 模式）：防止异常断电丢数据，但仍有 30 秒数据丢失窗口（D2 已知限制依旧）
+- 30 秒自动持久化 + SIGINT/SIGTERM 退出时同步 `writeFileSync` 落盘（SQLite 模式）：异步 `persist()` 在 open 时截断文件（O_TRUNC），若进程在写入完成前被 pm2 SIGKILL 则数据库文件变空、数据不可逆丢失，同步写入彻底消除该竞态
 
 **备选与权衡**：
 - ❌ 单 SQLite（不引入 PG）：被视为性能/部署场景的限制而非 bug——生产部署需求是真实存在的，PG 支持干净地解决了这个问题

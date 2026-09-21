@@ -605,7 +605,7 @@ IP 速率限制：
 数据库模式：
   本地模式（默认）：
     SQLite via sql.js（文件：data/momoi.db，30s 间隔自动持久化）
-    SIGINT/SIGTERM 触发最终持久化 + 优雅退出
+    SIGINT/SIGTERM 触发同步持久化（writeFileSync）+ 优雅退出
 
   远程模式：
     DATABASE_URL + DATABASE_USER + DATABASE_SECRET 三个环境变量同时存在时

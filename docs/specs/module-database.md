@@ -22,7 +22,7 @@
 
 ### 本地 SQLite 模式
 
-- **路径**：`data/momoi.db`（相对于项目根目录）；单机模式（`--stand-alone`）使用独立的 `data/momoi.stand-alone.db`，且忽略 `DATABASE_URL` 强制走本地 SQLite
+- **路径**：`data/momoi.db`（相对于项目根目录）
 - **创建时机**：`db.ts` 导入时自动创建 `data/` 目录，若 `.db` 文件不存在则新建内存数据库并持久化
 - **引擎**：`sql.js`（WebAssembly SQLite，无原生依赖）
 
@@ -43,7 +43,7 @@ if (fs.existsSync(dbPath)) {
 }
 ```
 
-- **持久化**：每 30 秒自动 `fs.writeFileSync(dbPath, Buffer.from(sqlDb.export()))`；`SIGINT`/`SIGTERM` 时立即落盘
+- **持久化**：每 30 秒自动 `fs.writeFileSync(dbPath, Buffer.from(sqlDb.export()))`（异步，适合定时保存）；`SIGINT`/`SIGTERM` 时使用**同步** `writeFileSync` 落盘——异步 `persist()` 在 open 时截断文件（O_TRUNC），若进程在写入完成前被 pm2 SIGKILL 则数据库文件变空、数据不可逆丢失，同步写入彻底消除该竞态
 - **外键**：sql.js 默认不强制外键——删表由路由层手动级联处理
 
 ### 远程 PostgreSQL 模式
