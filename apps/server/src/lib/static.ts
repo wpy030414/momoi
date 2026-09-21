@@ -35,19 +35,48 @@ export const serveClient = async (c: Context, next: Next) => {
     // Vite 产物带内容哈希：assets/* 可长缓存；其余（index.html 等）不得缓存，
     // 否则内置浏览器（钉钉/微信）会长期吃旧 HTML，新版本发布后无法生效。
     const isHashed = rel.startsWith('assets/')
-    return c.body(fs.readFileSync(file), 200, {
+    const headers: Record<string, string> = {
       'Content-Type': getMimeType(file) ?? 'application/octet-stream',
       'Cache-Control': isHashed ? 'public, max-age=31536000, immutable' : 'no-cache',
-    })
+      'Vary': 'Accept-Encoding',
+    }
+
+    // Prefer brotli over gzip (better compression ratio); fall back to raw
+    const acceptEncoding = c.req.header('Accept-Encoding') ?? ''
+    let body: Buffer
+    if (acceptEncoding.includes('br') && fs.existsSync(file + '.br')) {
+      body = fs.readFileSync(file + '.br')
+      headers['Content-Encoding'] = 'br'
+    } else if (acceptEncoding.includes('gzip') && fs.existsSync(file + '.gz')) {
+      body = fs.readFileSync(file + '.gz')
+      headers['Content-Encoding'] = 'gzip'
+    } else {
+      body = fs.readFileSync(file)
+    }
+
+    return c.body(body, 200, headers)
   }
 
   // SPA fallback — index.html 永不缓存，保证发版即时生效
   const index = path.join(clientDist, 'index.html')
   if (fs.existsSync(index)) {
-    return c.body(fs.readFileSync(index), 200, {
+    const acceptEncoding = c.req.header('Accept-Encoding') ?? ''
+    let body: Buffer
+    const headers: Record<string, string> = {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-cache',
-    })
+      'Vary': 'Accept-Encoding',
+    }
+    if (acceptEncoding.includes('br') && fs.existsSync(index + '.br')) {
+      body = fs.readFileSync(index + '.br')
+      headers['Content-Encoding'] = 'br'
+    } else if (acceptEncoding.includes('gzip') && fs.existsSync(index + '.gz')) {
+      body = fs.readFileSync(index + '.gz')
+      headers['Content-Encoding'] = 'gzip'
+    } else {
+      body = fs.readFileSync(index)
+    }
+    return c.body(body, 200, headers)
   }
 
   return next()

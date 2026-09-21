@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGroupChat } from './hooks/useGroupChat'
 import { useTheme } from './hooks/useTheme'
@@ -17,14 +17,13 @@ import { LinkedAccountsDialog } from './components/settings/LinkedAccountsDialog
 import { ImBindDialog } from './components/chat/ImBindDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
-// Admin tab components — lazy loaded (only admins see them)
-const AgentManager = lazy(() => import('./components/admin/tabs/AgentManager').then(m => ({ default: m.AgentManager })))
-const GatewaySettings = lazy(() => import('./components/admin/tabs/GatewaySettings').then(m => ({ default: m.GatewaySettings })))
-const ExperienceSettings = lazy(() => import('./components/admin/tabs/ExperienceSettings').then(m => ({ default: m.ExperienceSettings })))
-const McpManager = lazy(() => import('./components/admin/tabs/McpManager').then(m => ({ default: m.McpManager })))
-const SkillManager = lazy(() => import('./components/admin/tabs/SkillManager').then(m => ({ default: m.SkillManager })))
-const ReviewPanel = lazy(() => import('./components/admin/tabs/ReviewPanel').then(m => ({ default: m.ReviewPanel })))
-const UserManager = lazy(() => import('./components/admin/tabs/UserManager').then(m => ({ default: m.UserManager })))
+import { AgentManager } from './components/admin/tabs/AgentManager'
+import { GatewaySettings } from './components/admin/tabs/GatewaySettings'
+import { ExperienceSettings } from './components/admin/tabs/ExperienceSettings'
+import { McpManager } from './components/admin/tabs/McpManager'
+import { SkillManager } from './components/admin/tabs/SkillManager'
+import { ReviewPanel } from './components/admin/tabs/ReviewPanel'
+import { UserManager } from './components/admin/tabs/UserManager'
 
 // Type-only imports for ref handles (not used at runtime, only for TS)
 import type { AgentManagerHandle } from './components/admin/tabs/AgentManager'
@@ -835,15 +834,13 @@ export function App() {
             <div className="flex-1 overflow-y-auto min-h-0">
               {/* 与文档视图一致：内容限宽水平居中，桌面端两侧留白，移动端自动收缩 */}
               <div className="max-w-3xl mx-auto px-6 pb-8">
-                <Suspense fallback={<div className="flex items-center justify-center h-32 text-muted-foreground text-sm">{t('common.loading')}</div>}>
-                  {adminTab === 'agent' && <AgentManager ref={agentRef} />}
+                {adminTab === 'agent' && <AgentManager ref={agentRef} />}
                   {adminTab === 'gateway' && <GatewaySettings ref={gatewayRef} />}
                   {adminTab === 'experience' && <ExperienceSettings />}
                   {adminTab === 'mcp' && <McpManager ref={mcpRef} />}
                   {adminTab === 'skills' && <SkillManager ref={skillRef} />}
                   {adminTab === 'users' && !standAlone && <UserManager ref={userRef} />}
                   {adminTab === 'review' && <ReviewPanel />}
-                </Suspense>
               </div>
             </div>
           </div>

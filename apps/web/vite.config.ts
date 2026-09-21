@@ -1,14 +1,54 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import dotenv from 'dotenv'
+import { readdirSync, statSync, readFileSync, writeFileSync } from 'fs'
+import { gzipSync, brotliCompressSync, constants as zlibConstants } from 'zlib'
 
 // Read .env from the repo root (up two levels from apps/web/)
 dotenv.config({ path: path.resolve(import.meta.dirname, '../../.env') })
 const apiPort = process.env.PORT || '11408'
 
+// Inline gzip + brotli pre-compression.  Hand-rolled instead of
+// vite-plugin-compression so both formats are produced in a single dir walk
+// (the library's module-level mtimeCache is shared across instances, so two
+// plugin instances silently skip whichever runs second).
+const EXT_RE = /\.(js|mjs|json|css|html)$/i
+function compressionPlugin(options?: { threshold?: number }): Plugin {
+  const threshold = options?.threshold ?? 1024
+  return {
+    name: 'vite:compression',
+    apply: 'build',
+    enforce: 'post',
+    closeBundle() {
+      const outDir = path.resolve(import.meta.dirname, '../server/dist/client')
+      if (!statSync(outDir, { throwIfNoEntry: false })?.isDirectory()) return
+      walk(outDir)
+      function walk(dir: string) {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name)
+          if (entry.isDirectory()) { walk(full); continue }
+          if (!EXT_RE.test(entry.name)) continue
+          const buf = readFileSync(full)
+          if (buf.length < threshold) continue
+          writeFileSync(full + '.gz', gzipSync(buf, { level: zlibConstants.Z_BEST_COMPRESSION }))
+          writeFileSync(full + '.br', brotliCompressSync(buf, {
+            params: {
+              [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_MAX_QUALITY,
+              [zlibConstants.BROTLI_PARAM_MODE]: zlibConstants.BROTLI_MODE_TEXT,
+            },
+          }))
+        }
+      }
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    compressionPlugin({ threshold: 1024 }),
+  ],
   build: {
     outDir: '../server/dist/client',
     emptyOutDir: true,
