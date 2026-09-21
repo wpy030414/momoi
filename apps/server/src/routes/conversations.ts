@@ -70,9 +70,11 @@ conversationsRoute.get('/', async (c) => {
     created_at: conversations.created_at,
     updated_at: conversations.updated_at,
     deleted_at: conversations.deleted_at,
+    last_read_at: conversations.last_read_at,
     agent_count: sql<number>`COALESCE((SELECT COUNT(*) FROM group_conversation_agents WHERE group_conversation_agents.conversation_id = ${conversations.id}), 0)`,
     wechat_bound: sql<number>`EXISTS (SELECT 1 FROM wechat_bindings WHERE wechat_bindings.user_id = ${conversations.user_id} AND wechat_bindings.conversation_id = ${conversations.id})`,
     qq_bound: sql<number>`EXISTS (SELECT 1 FROM qq_bindings WHERE qq_bindings.user_id = ${conversations.user_id} AND qq_bindings.conversation_id = ${conversations.id}) OR EXISTS (SELECT 1 FROM qq_group_conversations WHERE qq_group_conversations.conversation_id = ${conversations.id})`,
+    unread_count: sql<number>`(SELECT COUNT(*) FROM messages WHERE messages.conversation_id = ${conversations.id} AND messages.role = 'assistant' AND (${conversations.last_read_at} IS NULL OR messages.created_at > ${conversations.last_read_at}))`,
   }).from(conversations).where(and(eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).orderBy(desc(conversations.updated_at)).all()
   return c.json({ conversations: list })
 })
@@ -85,6 +87,13 @@ conversationsRoute.get('/:id', async (c) => {
   const id = c.req.param('id')
   const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
+
+  // Mark as read: the user is now viewing this conversation
+  const now = Math.floor(Date.now() / 1000)
+  await db.update(conversations)
+    .set({ last_read_at: now })
+    .where(and(eq(conversations.id, id), eq(conversations.user_id, userId)))
+    .run()
 
   // Paginated messages: default 200, max 1000. Cursor `before` for older pages.
   const limit = Math.min(Number(c.req.query('limit')) || 200, 1000)

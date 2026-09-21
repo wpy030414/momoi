@@ -17,7 +17,7 @@ import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { SandboxFS } from '../tools/workspace.js'
 import { synthesizeAndSave, markVoiceComplete, createTtsProvider } from '../ai/tts.js'
-import { broadcastStream, broadcastConversationSync } from '../lib/realtime.js'
+import { broadcastStream, broadcastConversationSync, broadcastUnreadUpdate } from '../lib/realtime.js'
 import { trackUserActivity } from './user.js'
 
 export const chatRoute = new Hono()
@@ -471,6 +471,23 @@ chatRoute.post('/', async (c) => {
         if (voiceEnabled && voiceSpeakerId && lastAssistantMsgId > 0 && content) {
           synthesizeReplyVoice(voiceAgent!.id, lastAssistantMsgId, content)
         }
+        // Unread broadcast: notify all devices this conversation has new messages
+        void (async () => {
+          try {
+            const unreadResult = await db.select({ unread: count() })
+              .from(messages)
+              .where(and(
+                eq(messages.conversation_id, convId),
+                eq(messages.role, 'assistant'),
+                sql`${messages.created_at} > COALESCE((SELECT ${conversations.last_read_at} FROM conversations WHERE ${conversations.id} = ${convId}), 0)`,
+              ))
+              .get()
+            const unreadCount = Number(unreadResult?.unread ?? 0)
+            broadcastUnreadUpdate(userId, convId, unreadCount)
+          } catch (err) {
+            console.error('[unread] Failed to broadcast unread update:', (err as Error).message)
+          }
+        })()
       }
 
       // Helper: generate follow-up and save as user message
