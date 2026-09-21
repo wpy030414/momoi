@@ -241,7 +241,10 @@ export const api = {
 
   // Conversations
   listConversations: () => request<{ conversations: import('@momoi/shared/types').Conversation[] }>('/api/conversations'),
-  getConversation: (id: string) => request<{ conversation: import('@momoi/shared/types').Conversation; messages: import('@momoi/shared/types').Message[]; agents?: Array<{ id: string; name: string; avatar: string }>; is_qq_group?: boolean }>(`/api/conversations/${id}`),
+  // markRead=true 仅限用户主动打开会话（loadConversation）——服务端据此推进
+  // last_read_at 并广播 unread_update(0)。后台对账（conv_changed / 流收尾）、
+  // 导出、群成员管理等一律走默认 false，不得产生「已读」副作用清掉红点。
+  getConversation: (id: string, markRead = false) => request<{ conversation: import('@momoi/shared/types').Conversation; messages: import('@momoi/shared/types').Message[]; agents?: Array<{ id: string; name: string; avatar: string }>; is_qq_group?: boolean }>(`/api/conversations/${id}${markRead ? '?mark_read=1' : ''}`),
   createConversation: (title?: string) => request<{ conversation: import('@momoi/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title }) }),
   createGroupConversation: (agentIds: string[]) => request<{ conversation: import('@momoi/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: '群组对话', type: 'group', agent_ids: agentIds }) }),
   deleteConversation: (id: string) => request<{ success: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' }),

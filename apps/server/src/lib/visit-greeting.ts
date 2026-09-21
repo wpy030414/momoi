@@ -16,6 +16,7 @@ import { streamChatCompletion } from '../ai/provider.js'
 import { getConfig } from '../lib/config.js'
 import { getConversedAgents, getRandomDelay } from '../lib/push-scheduler.js'
 import { broadcastStream, broadcastConversationSync, broadcastUnreadUpdate } from '../lib/realtime.js'
+import { countUnread } from './unread.js'
 import type { ChatMessage } from '../ai/provider.js'
 
 // ---- Helpers ----
@@ -159,7 +160,7 @@ export async function triggerVisitGreeting(userId: string): Promise<void> {
       },
     })
     broadcastConversationSync(userId)
-    broadcastUnreadUpdate(userId, selected.convId, 1)
+    broadcastUnreadUpdate(userId, selected.convId, await countUnread(selected.convId))
   } catch (err) {
     console.error(`[visit-greeting] Error for user ${userId}:`, (err as Error).message)
   }

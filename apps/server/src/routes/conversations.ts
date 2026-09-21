@@ -4,7 +4,7 @@ import { eq, and, desc, gte, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
-import { broadcastConversationSync, broadcastConversationChanged } from '../lib/realtime.js'
+import { broadcastConversationSync, broadcastConversationChanged, broadcastUnreadUpdate } from '../lib/realtime.js'
 import { stopBotForUser } from '../im/qq/manager.js'
 import { trackUserActivity } from './user.js'
 
@@ -61,6 +61,11 @@ conversationsRoute.get('/', async (c) => {
   const userId = getUserId(c)
   if (!userId) return c.json({ error: 'Unauthorized' }, 401)
 
+  // NOTE: 子查询里的列必须写「表.列」全限定文本。drizzle 的 sql`` 模板在
+  // SELECT 字段上下文把 ${table.column} 渲染成裸列名（WHERE 上下文才会带
+  // 表限定），裸 "id" 会在子查询作用域被解析成内层表自己的列——
+  // messages.conversation_id = messages.id 永假，unread_count 恒 0，
+  // 曾导致侧边栏红点被 refreshConversations 的「服务端权威」整体覆盖熄灭。
   const list = await db.select({
     id: conversations.id,
     user_id: conversations.user_id,
@@ -71,10 +76,10 @@ conversationsRoute.get('/', async (c) => {
     updated_at: conversations.updated_at,
     deleted_at: conversations.deleted_at,
     last_read_at: conversations.last_read_at,
-    agent_count: sql<number>`COALESCE((SELECT COUNT(*) FROM group_conversation_agents WHERE group_conversation_agents.conversation_id = ${conversations.id}), 0)`,
-    wechat_bound: sql<number>`EXISTS (SELECT 1 FROM wechat_bindings WHERE wechat_bindings.user_id = ${conversations.user_id} AND wechat_bindings.conversation_id = ${conversations.id})`,
-    qq_bound: sql<number>`EXISTS (SELECT 1 FROM qq_bindings WHERE qq_bindings.user_id = ${conversations.user_id} AND qq_bindings.conversation_id = ${conversations.id}) OR EXISTS (SELECT 1 FROM qq_group_conversations WHERE qq_group_conversations.conversation_id = ${conversations.id})`,
-    unread_count: sql<number>`(SELECT COUNT(*) FROM messages WHERE messages.conversation_id = ${conversations.id} AND messages.role = 'assistant' AND (${conversations.last_read_at} IS NULL OR messages.created_at > ${conversations.last_read_at}))`,
+    agent_count: sql<number>`COALESCE((SELECT COUNT(*) FROM group_conversation_agents WHERE group_conversation_agents.conversation_id = conversations.id), 0)`,
+    wechat_bound: sql<number>`EXISTS (SELECT 1 FROM wechat_bindings WHERE wechat_bindings.user_id = conversations.user_id AND wechat_bindings.conversation_id = conversations.id)`,
+    qq_bound: sql<number>`EXISTS (SELECT 1 FROM qq_bindings WHERE qq_bindings.user_id = conversations.user_id AND qq_bindings.conversation_id = conversations.id) OR EXISTS (SELECT 1 FROM qq_group_conversations WHERE qq_group_conversations.conversation_id = conversations.id)`,
+    unread_count: sql<number>`(SELECT COUNT(*) FROM messages WHERE messages.conversation_id = conversations.id AND messages.role = 'assistant' AND (conversations.last_read_at IS NULL OR messages.created_at > conversations.last_read_at))`,
   }).from(conversations).where(and(eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).orderBy(desc(conversations.updated_at)).all()
   return c.json({ conversations: list })
 })
@@ -88,12 +93,23 @@ conversationsRoute.get('/:id', async (c) => {
   const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
   if (!conv) return c.json({ error: 'Not found' }, 404)
 
-  // Mark as read: the user is now viewing this conversation
-  const now = Math.floor(Date.now() / 1000)
-  await db.update(conversations)
-    .set({ last_read_at: now })
-    .where(and(eq(conversations.id, id), eq(conversations.user_id, userId)))
-    .run()
+  // Mark as read ONLY on explicit request (?mark_read=1) — i.e. the user is
+  // actively opening this conversation. Background reconciliation fetches
+  // (conv_changed refetch / post-stream reconcile / export / group-agent
+  // dialogs) hit this same endpoint and MUST NOT clear unread as a side
+  // effect — that made sidebar badges flicker away right after appearing.
+  // Broadcasting unread_update(0) keeps the same account's other devices
+  // in sync (they clear the badge too, instead of waiting for the next
+  // conv_sync to learn about it).
+  if (c.req.query('mark_read') === '1') {
+    const now = Math.floor(Date.now() / 1000)
+    await db.update(conversations)
+      .set({ last_read_at: now })
+      .where(and(eq(conversations.id, id), eq(conversations.user_id, userId)))
+      .run()
+    conv.last_read_at = now
+    broadcastUnreadUpdate(userId, id, 0)
+  }
 
   // Paginated messages: default 200, max 1000. Cursor `before` for older pages.
   const limit = Math.min(Number(c.req.query('limit')) || 200, 1000)

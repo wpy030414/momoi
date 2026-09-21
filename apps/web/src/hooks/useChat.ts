@@ -333,7 +333,10 @@ export function useChat() {
       history.pushState(null, '', newHash)
     }
     try {
-      const res = await api.getConversation(id)
+      // 用户主动打开会话 → 唯一合法的「已读」入口：服务端推进 last_read_at
+      // 并广播 unread_update(0)。其余 getConversation 调用（对账 / 导出等）
+      // 均不标记，避免后台拉取误清侧边栏红点。
+      const res = await api.getConversation(id, true)
       if (loadGenRef.current !== gen) return null
       const type = ((res.conversation as Conversation).type as 'direct' | 'group') || 'direct'
       convTypesRef.current.set(id, type)

@@ -6,7 +6,8 @@ import { db, conversations, messages, wechatBindings } from '../../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { runPiAgentLoop } from '../../ai/pi-adapter.js'
 import { sendMessage, WECHAT_BASE_URL, type WechatCredentials } from './ilink.js'
-import { broadcastStream, broadcastConversationChanged, broadcastConversationSync } from '../../lib/realtime.js'
+import { broadcastStream, broadcastConversationChanged, broadcastConversationSync, broadcastUnreadUpdate } from '../../lib/realtime.js'
+import { countUnread } from '../../lib/unread.js'
 import { withUserImLock } from '../locks.js'
 
 export interface WechatChatOptions {
@@ -150,6 +151,8 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
       agent_id: agentId || null,
       created_at: replyNow,
     }).run()
+    // 未读广播：web 端侧边栏红点实时点亮（与 web 聊天路径对齐）
+    broadcastUnreadUpdate(userId, convId, await countUnread(convId))
   }
 
   // ---- Realtime: 会话内容落库完毕，通知其他设备对齐（兜底重拉）----

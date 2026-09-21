@@ -7,7 +7,8 @@ import { db, conversations, messages, qqBindings, qqGroupConversations, groupCon
 import { eq, and, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { runPiAgentLoop } from '../../ai/pi-adapter.js'
-import { broadcastStream, broadcastConversationChanged, broadcastConversationSync } from '../../lib/realtime.js'
+import { broadcastStream, broadcastConversationChanged, broadcastConversationSync, broadcastUnreadUpdate } from '../../lib/realtime.js'
+import { countUnread } from '../../lib/unread.js'
 import { withUserImLock } from '../locks.js'
 import { sendC2CText, sendGroupText, type QqCredentials } from './api.js'
 import { listAgents } from '../../lib/config.js'
@@ -209,6 +210,8 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
       agent_id: agentId || null,
       created_at: replyNow,
     }).run()
+    // 未读广播：web 端侧边栏红点实时点亮（与 web 聊天路径对齐）
+    broadcastUnreadUpdate(userId, convId, await countUnread(convId))
   }
 
   // ---- Realtime: 会话内容落库完毕，通知其他设备对齐（兜底重拉）----
@@ -477,6 +480,8 @@ async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void
       agent_id: agentId || null,
       created_at: replyNow,
     }).run()
+    // 未读广播：web 端侧边栏红点实时点亮（与 web 聊天路径对齐）
+    broadcastUnreadUpdate(userId, convId, await countUnread(convId))
   }
 
   broadcastConversationChanged(userId, convId)
