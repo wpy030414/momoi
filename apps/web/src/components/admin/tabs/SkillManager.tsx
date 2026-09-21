@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
+import { Loading } from '../../ui/spinner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
 import { Upload, Trash2 } from 'lucide-react'
 import { api } from '../../../lib/api'
@@ -63,7 +64,7 @@ export const SkillManager = forwardRef<SkillManagerHandle>(function SkillManager
       <input ref={fileInputRef} type="file" accept=".zip" className="hidden" hidden onChange={handleUpload} />
       {uploadError && <p className="text-sm text-destructive">{uploadError}</p>}
       {fetching ? (
-        <p className="text-muted-foreground">{t('common.loading')}</p>
+        <Loading className="py-8" />
       ) : skills.length === 0 ? (
         <p className="text-muted-foreground">{t('settings.noSkills')}</p>
       ) : (

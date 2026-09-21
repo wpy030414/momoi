@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Input } from '../../ui/input'
 import { Button } from '../../ui/button'
 import { Switch } from '../../ui/switch'
+import { Loading } from '../../ui/spinner'
 import { Eye, EyeOff } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
@@ -49,9 +50,7 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle>(function Gatewa
     setSaving(false)
   }
 
-  if (!config) return <div className="py-8 text-center text-muted-foreground">{t('common.loading')}</div>
-
-  if (!config) return <div className="py-8 text-center text-muted-foreground">{t('common.loading')}</div>
+  if (!config) return <Loading className="py-16" />
 
   return (
     <div className="space-y-4 pt-4">

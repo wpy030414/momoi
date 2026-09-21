@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../ui/button'
+import { Loading } from '../ui/spinner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog'
 import { Plus, Trash2, Pencil, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '../../lib/api'
@@ -148,7 +149,7 @@ export function MemoryManager({ agentId, agent, memories, loading, onChanged }: 
 
       {/* Entry list */}
       {loading ? (
-        <p className="text-muted-foreground">{t('common.loading')}</p>
+        <Loading className="py-8" />
       ) : entries.length === 0 ? (
         <p className="text-muted-foreground">{t('memory.noEntries')}</p>
       ) : (

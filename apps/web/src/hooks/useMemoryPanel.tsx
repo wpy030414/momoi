@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react'
+import { Loading } from '@/components/ui/spinner'
 import { Button } from '@/components/ui/button'
 import { PanelLeft } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -12,10 +13,6 @@ interface UseMemoryPanelOptions {
   agents: Array<{ id: string; name: string; avatar: string; voice_enabled?: boolean }>
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
-}
-
-function MemoryFallback() {
-  return <div className="flex-1 flex items-center justify-center"><div className="animate-pulse text-muted-foreground text-sm">…</div></div>
 }
 
 export function useMemoryPanel({ agents, sidebarOpen, setSidebarOpen }: UseMemoryPanelOptions) {
@@ -82,7 +79,7 @@ export function useMemoryPanel({ agents, sidebarOpen, setSidebarOpen }: UseMemor
   )
 
   const sidebarNode = (
-    <Suspense fallback={<MemoryFallback />}>
+    <Suspense fallback={<Loading className="flex-1 h-full" size="lg" />}>
       <MemorySidebar
         agents={agents}
         memories={memoryEntries}
@@ -94,7 +91,7 @@ export function useMemoryPanel({ agents, sidebarOpen, setSidebarOpen }: UseMemor
   )
 
   const mainNode = (
-    <Suspense fallback={<MemoryFallback />}>
+    <Suspense fallback={<Loading className="flex-1 h-full" size="lg" />}>
       <div className="flex-1 flex flex-col min-w-0">
         <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
           <Button

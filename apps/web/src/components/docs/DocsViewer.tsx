@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Loader2 } from 'lucide-react'
+import { Loading } from '../ui/spinner'
 import { api } from '../../lib/api'
 
 interface DocContent {
@@ -98,11 +98,7 @@ export function DocsViewer({ docPath, onTocChange }: DocsViewerProps) {
   }
 
   if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-background">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    )
+    return <Loading className="flex-1 bg-background" />
   }
 
   if (!content) {

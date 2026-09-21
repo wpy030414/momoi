@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
+import { Loading } from '@/components/ui/spinner'
 
 // The whole admin UI (sidebar + main pane + tabs) loads as ONE chunk through
 // the panel barrel — see components/admin/panel.tsx. Most users never visit
@@ -15,10 +16,6 @@ interface UseAdminPanelOptions {
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
   onConfigChanged: () => void
-}
-
-function AdminFallback() {
-  return <div className="flex-1 flex items-center justify-center"><div className="animate-pulse text-muted-foreground text-sm">…</div></div>
 }
 
 export function useAdminPanel({
@@ -90,7 +87,7 @@ export function useAdminPanel({
   }, [])
 
   const sidebarNode = (
-    <Suspense fallback={<AdminFallback />}>
+    <Suspense fallback={<Loading className="flex-1 h-full" size="lg" />}>
       <AdminSidebar
         activeTab={adminTab}
         onTabChange={handleTabChange}
@@ -101,7 +98,7 @@ export function useAdminPanel({
   )
 
   const mainNode = (
-    <Suspense fallback={<AdminFallback />}>
+    <Suspense fallback={<Loading className="flex-1 h-full" size="lg" />}>
       <AdminPanelMain
         activeTab={adminTab}
         standAlone={standAlone}

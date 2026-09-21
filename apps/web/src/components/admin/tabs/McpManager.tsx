@@ -1,6 +1,7 @@
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
+import { Loading } from '../../ui/spinner'
 import { Input } from '../../ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
 import { Plus, Trash2, Pencil } from 'lucide-react'
@@ -91,7 +92,7 @@ export const McpManager = forwardRef<McpManagerHandle>(function McpManager(_prop
   return (
     <div className="space-y-4 pt-4">
       {loading ? (
-        <p className="text-muted-foreground">{t('common.loading')}</p>
+        <Loading className="py-8" />
       ) : servers.length === 0 ? (
         <p className="text-muted-foreground">{t('settings.mcpNoServers')}</p>
       ) : (

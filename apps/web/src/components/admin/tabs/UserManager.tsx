@@ -1,6 +1,7 @@
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
+import { Loading } from '../../ui/spinner'
 import { Input } from '../../ui/input'
 import { Switch } from '../../ui/switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
@@ -199,7 +200,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
         <div className="mt-1">
 
       {loading ? (
-        <p className="text-muted-foreground">{t('common.loading')}</p>
+        <Loading className="py-8" />
       ) : users.length === 0 ? (
         <p className="text-muted-foreground">{t('settings.noUsers')}</p>
       ) : (

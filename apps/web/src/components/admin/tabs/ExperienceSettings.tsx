@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Input } from '../../ui/input'
 import { Button } from '../../ui/button'
 import { Switch } from '../../ui/switch'
+import { Loading } from '../../ui/spinner'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 
@@ -107,7 +108,7 @@ export function ExperienceSettings() {
     </div>
   )
 
-  if (!config) return <div className="py-8 text-center text-muted-foreground">{t('common.loading')}</div>
+  if (!config) return <Loading className="py-16" />
 
   return (
     <div className="space-y-4 pt-4">

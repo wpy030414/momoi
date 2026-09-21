@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
+import { Loading } from '../../ui/spinner'
 import { api } from '../../../lib/api'
 
 export function ReviewPanel() {
@@ -97,7 +98,7 @@ export function ReviewPanel() {
                       <tr>
                         <td colSpan={4} className="px-3 py-4 bg-muted/20">
                           {loadingMessages ? (
-                            <div className="text-center text-muted-foreground py-4">{t('common.loading')}</div>
+                            <Loading className="py-4" size="sm" />
                           ) : expandedMessages.length === 0 ? (
                             <p className="text-center text-muted-foreground py-4">{t('settings.reviewNoMessages')}</p>
                           ) : (

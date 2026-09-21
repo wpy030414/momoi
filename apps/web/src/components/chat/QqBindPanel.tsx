@@ -4,8 +4,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Switch } from '../ui/switch'
+import { Loading, Spinner } from '../ui/spinner'
 import { api } from '../../lib/api'
-import { Loader2, CheckCircle2, AlertCircle, ArrowLeft, ExternalLink } from 'lucide-react'
+import { CheckCircle2, AlertCircle, ArrowLeft, ExternalLink } from 'lucide-react'
 
 interface QqBindPanelProps {
   convId: string
@@ -113,12 +114,7 @@ export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanel
   const renderContent = () => {
     switch (state.phase) {
       case 'loading':
-        return (
-          <div className="flex flex-col items-center justify-center py-8 gap-3">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
-          </div>
-        )
+        return <Loading className="py-8" size="lg" />
 
       case 'form':
         return (
@@ -171,7 +167,7 @@ export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanel
       case 'submitting':
         return (
           <div className="flex flex-col items-center justify-center py-8 gap-3">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <Spinner className="h-8 w-8 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">{t('qqBind.submitting')}</p>
           </div>
         )

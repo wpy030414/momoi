@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
+import { Loading } from '../ui/spinner'
 import { api } from '../../lib/api'
-import { Smartphone, Loader2, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react'
+import { Smartphone, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react'
 
 interface WechatBindPanelProps {
   convId: string
@@ -121,12 +122,7 @@ export function WechatBindPanel({ convId, onBack, onComplete }: WechatBindPanelP
   const renderContent = () => {
     switch (state.phase) {
       case 'loading':
-        return (
-          <div className="flex flex-col items-center justify-center py-8 gap-3">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
-          </div>
-        )
+        return <Loading className="py-8" size="lg" />
 
       case 'already_bound':
         return (

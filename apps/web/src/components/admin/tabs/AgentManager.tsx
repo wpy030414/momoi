@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '../../../lib/api'
 import type { Agent } from '@momoi/shared/types'
 import { Input } from '../../ui/input'
+import { Loading } from '../../ui/spinner'
 import { Button } from '../../ui/button'
 import { Switch } from '../../ui/switch'
 import { Slider } from '../../ui/slider'
@@ -548,7 +549,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
   return (
     <div className="space-y-2 pt-4">
       {fetching ? (
-        <p className="text-muted-foreground text-center py-4">{t('common.loading')}</p>
+        <Loading className="py-8" />
       ) : (
         <>
           {/* Create form — inline at top */}

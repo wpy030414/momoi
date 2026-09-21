@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Loading } from '@/components/ui/spinner'
 import { Button } from '@/components/ui/button'
 import { PanelLeft, List } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -13,10 +14,6 @@ const DocsViewer = lazy(() => import('@/components/docs/DocsViewer').then(m => (
 interface UseDocsPanelOptions {
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
-}
-
-function DocsFallback() {
-  return <div className="flex-1 flex items-center justify-center"><div className="animate-pulse text-muted-foreground text-sm">…</div></div>
 }
 
 export function useDocsPanel({ sidebarOpen, setSidebarOpen }: UseDocsPanelOptions) {
@@ -105,7 +102,7 @@ export function useDocsPanel({ sidebarOpen, setSidebarOpen }: UseDocsPanelOption
   }, [])
 
   const sidebarNode = (
-    <Suspense fallback={<DocsFallback />}>
+    <Suspense fallback={<Loading className="flex-1 h-full" size="lg" />}>
       <DocsSidebar
         docs={docsEntries}
         activeDoc={activeDoc}
@@ -116,7 +113,7 @@ export function useDocsPanel({ sidebarOpen, setSidebarOpen }: UseDocsPanelOption
   )
 
   const mainNode = (
-    <Suspense fallback={<DocsFallback />}>
+    <Suspense fallback={<Loading className="flex-1 h-full" size="lg" />}>
       <div className="flex-1 flex flex-col min-w-0">
         <div className="flex items-center justify-between px-3 border-b shrink-0" style={{ height: '60px' }}>
           <Button

@@ -1,6 +1,6 @@
 import { useState, useRef, useLayoutEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Loader2 } from 'lucide-react'
+import { Loading } from '../ui/spinner'
 import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { QuestionBar } from './QuestionBar'
@@ -206,10 +206,7 @@ export function ChatPanel({
                 {isGroup ? (
                   <h2 className="text-xl font-semibold">{t('chat.groupGreeting')}</h2>
                 ) : agentsLoading ? (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    <span className="text-lg">{t('common.loading')}</span>
-                  </div>
+                  <Loading className="py-6" />
                 ) : hasAgents ? (
                   <h2 className="text-xl font-semibold flex items-center gap-1 flex-wrap">
                     <span>{timeGreeting}{t('chat.greetingSuffix')}</span>
