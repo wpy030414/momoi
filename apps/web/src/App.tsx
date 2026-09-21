@@ -473,6 +473,30 @@ export function App() {
     if (!currentUser) return
     if (localStorage.getItem('momoi_intro_seen') !== 'true') setIntroOpen(true)
   }, [currentUser])
+
+  // ⚠ Rules of Hooks：以下回调/记忆化 Hook 必须位于本组件所有「条件早退」
+  // （oauthRegisterInfo / !currentUser）之前。它们曾被放在早退之后，导致登录/
+  // 退出时同一挂载内两次渲染的 Hook 数量不一致，React 抛
+  // "Rendered more/fewer hooks than during the previous render"，
+  // 整树卸载 → 白屏，需手动刷新恢复。
+  // Stable callbacks for Sidebar (prevent inline arrow re-creation on every render)
+  const handleNewGroup = useCallback(() => setGroupDialogOpen(true), [])
+  const handleChangePin = useCallback(() => setChangePinOpen(true), [])
+  const handleChangeUsername = useCallback(() => setChangeUsernameOpen(true), [])
+  const handleLinkAccount = useCallback(() => setLinkedAccountsOpen(true), [])
+  // Closing the introduction by ANY means (X / Esc / overlay / "Get started")
+  // marks it as seen — it can always be reopened from the sidebar app name.
+  const handleIntroOpenChange = useCallback((open: boolean) => {
+    setIntroOpen(open)
+    if (!open) localStorage.setItem('momoi_intro_seen', 'true')
+  }, [])
+  const handleShowIntro = useCallback(() => setIntroOpen(true), [])
+
+  const activeAgentId = useMemo(
+    () => chat.conversations.find((c) => c.id === chat.activeId)?.agent_id || null,
+    [chat.conversations, chat.activeId]
+  )
+
   if (oauthRegisterInfo) {
     return (
       <OAuthRegisterScreen
@@ -494,24 +518,6 @@ export function App() {
     if (standAlone === null || standAlone) return null
     return <LoginScreen onLogin={handleLogin} />
   }
-
-  // Stable callbacks for Sidebar (prevent inline arrow re-creation on every render)
-  const handleNewGroup = useCallback(() => setGroupDialogOpen(true), [])
-  const handleChangePin = useCallback(() => setChangePinOpen(true), [])
-  const handleChangeUsername = useCallback(() => setChangeUsernameOpen(true), [])
-  const handleLinkAccount = useCallback(() => setLinkedAccountsOpen(true), [])
-  // Closing the introduction by ANY means (X / Esc / overlay / "Get started")
-  // marks it as seen — it can always be reopened from the sidebar app name.
-  const handleIntroOpenChange = useCallback((open: boolean) => {
-    setIntroOpen(open)
-    if (!open) localStorage.setItem('momoi_intro_seen', 'true')
-  }, [])
-  const handleShowIntro = useCallback(() => setIntroOpen(true), [])
-
-  const activeAgentId = useMemo(
-    () => chat.conversations.find((c) => c.id === chat.activeId)?.agent_id || null,
-    [chat.conversations, chat.activeId]
-  )
 
   // 合并群聊：源会话是否为 QQ 群聊（用于过滤候选列表）
   const mergeSourceIsQq = (chat.conversations.find((c: any) => c.id === mergeSourceId) as any)?.qq_bound === 1
