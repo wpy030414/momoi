@@ -35,6 +35,8 @@ interface SidebarProps {
   onAdminSettings?: () => void
   onDocs?: () => void
   onMemory?: () => void
+  /** Clicking the app name reopens the first-use introduction. */
+  onShowIntro?: () => void
   /** Stand-alone mode: show a badge next to the app name. */
   standAlone?: boolean
 }
@@ -46,7 +48,7 @@ interface MenuState {
 
 // ConversationTitle is now MarqueeText from ../ui/MarqueeText
 
-export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, standAlone }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone }: SidebarProps) {
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -149,7 +151,20 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
     <div className="flex flex-col h-full w-72 bg-card">
       {/* App name + GitHub */}
       <div className="flex items-center justify-between px-4 border-b" style={{ height: '60px' }}>
-        <h1 className="text-lg font-semibold flex items-center gap-1.5">{appName}{standAlone && <span className="inline-flex items-center justify-center h-[18px] w-[18px] rounded-[4px] bg-black text-white dark:bg-white dark:text-black text-[11px] font-bold leading-none">S</span>}</h1>
+        <h1 className="text-lg font-semibold flex items-center gap-1.5">
+          {onShowIntro ? (
+            <button
+              type="button"
+              onClick={onShowIntro}
+              title={t('intro.openFromSidebar')}
+              aria-label={t('intro.openFromSidebar')}
+              className="text-left rounded-sm -ml-1 px-1 py-0.5 transition-colors cursor-pointer hover:text-primary hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {appName}
+            </button>
+          ) : appName}
+          {standAlone && <span className="inline-flex items-center justify-center h-[18px] w-[18px] rounded-[4px] bg-black text-white dark:bg-white dark:text-black text-[11px] font-bold leading-none">S</span>}
+        </h1>
         {showGithub && (
           <a
             href="https://github.com/wpy030414/momoi"

@@ -549,5 +549,47 @@
     "loading": "Loading…",
     "pause": "Pause",
     "resume": "Resume"
+  },
+  "intro": {
+    "a11yTitle": "Getting started",
+    "a11yDescription": "A tour of {{app}} in {{total}} pages",
+    "openFromSidebar": "View the getting-started guide",
+    "goToPage": "Go to page {{n}}",
+    "prev": "Back",
+    "next": "Next",
+    "start": "Get started",
+    "pages": {
+      "welcome": {
+        "title": "Welcome to {{app}}",
+        "body": "{{app}} is a self-hostable AI assistant: chat privately or in groups, with long-term memory that stays with you — and your data stays on your own server. This short tour walks you through the essentials."
+      },
+      "chat": {
+        "title": "Personal & group conversations",
+        "body": "Chat quietly with a single AI, or pull several AIs into one group conversation and watch them answer together. Send a document and the AI understands it right away; turn on Infinite Mode and the AI keeps reasoning on its own."
+      },
+      "memory": {
+        "title": "AI memory",
+        "body": "AIs keep what matters about you in long-term memory and recall it naturally in later conversations. From the memory panel in the sidebar, you can view, edit, or delete each AI's memories at any time."
+      },
+      "im": {
+        "title": "Continue on IM",
+        "body": "Bind WeChat or QQ and take any conversation with you — continue it in your IM anytime, anywhere, right from your phone."
+      },
+      "finale": {
+        "title": "You're all set",
+        "body": "Click the app name at the top of the sidebar to revisit this guide anytime. Now, start your first conversation."
+      }
+    },
+    "mock": {
+      "inputPlaceholder": "Type a message…",
+      "agentA": "Sakura",
+      "agentB": "Tomoyo",
+      "typing": "typing…",
+      "docName": "travel-plan.pdf",
+      "memoryItem1": "Likes a latte in the morning",
+      "memoryItem2": "Has a cat named Kuro",
+      "memoryItem3": "Is studying volcanology",
+      "imMessage": "Let's keep chatting today!"
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGroupChat } from './hooks/useGroupChat'
 import { useTheme } from './hooks/useTheme'
@@ -18,6 +18,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { PanelLeft, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 import { ensureLocale } from './i18n'
+
+// First-use introduction — lazy chunk; users who dismissed it once never load it.
+const IntroductionDialog = lazy(() =>
+  import('./components/intro/IntroductionDialog').then(m => ({ default: m.IntroductionDialog })))
 
 export function App() {
   const { t, i18n } = useTranslation()
@@ -460,6 +464,15 @@ export function App() {
   const [imBindOpen, setImBindOpen] = useState(false)
   const [imBindConvId, setImBindConvId] = useState<string | null>(null)
   const [imBindAgentId, setImBindAgentId] = useState<string>('')
+  const [introOpen, setIntroOpen] = useState(false)
+  // Auto-show the first-use introduction once per browser (all login entries
+  // — PIN verify / PIN setup / OAuth / stand-alone — funnel through
+  // setCurrentUser; a page refresh restores currentUser in the useState
+  // initializer, so this single effect covers every path).
+  useEffect(() => {
+    if (!currentUser) return
+    if (localStorage.getItem('momoi_intro_seen') !== 'true') setIntroOpen(true)
+  }, [currentUser])
   if (oauthRegisterInfo) {
     return (
       <OAuthRegisterScreen
@@ -487,6 +500,13 @@ export function App() {
   const handleChangePin = useCallback(() => setChangePinOpen(true), [])
   const handleChangeUsername = useCallback(() => setChangeUsernameOpen(true), [])
   const handleLinkAccount = useCallback(() => setLinkedAccountsOpen(true), [])
+  // Closing the introduction by ANY means (X / Esc / overlay / "Get started")
+  // marks it as seen — it can always be reopened from the sidebar app name.
+  const handleIntroOpenChange = useCallback((open: boolean) => {
+    setIntroOpen(open)
+    if (!open) localStorage.setItem('momoi_intro_seen', 'true')
+  }, [])
+  const handleShowIntro = useCallback(() => setIntroOpen(true), [])
 
   const activeAgentId = useMemo(
     () => chat.conversations.find((c) => c.id === chat.activeId)?.agent_id || null,
@@ -543,6 +563,7 @@ export function App() {
             onAdminSettings={isAdminUser ? admin.open : undefined}
             onDocs={docs.open}
             onMemory={memory.open}
+            onShowIntro={handleShowIntro}
             standAlone={standAlone === true}
           />
         )}
@@ -662,6 +683,16 @@ export function App() {
         convId={imBindConvId || ''}
         agentId={imBindAgentId}
       />
+
+      {/* First-use introduction — lazy chunk; null fallback avoids a spinner
+          flashing inside the dialog overlay (the chunk is tiny, no heavy deps) */}
+      <Suspense fallback={null}>
+        <IntroductionDialog
+          open={introOpen}
+          onOpenChange={handleIntroOpenChange}
+          appName={appName}
+        />
+      </Suspense>
 
       {/* Group Chat Agent Selection Dialog */}
       {groupDialogOpen && (
