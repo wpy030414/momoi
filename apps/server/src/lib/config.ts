@@ -379,7 +379,8 @@ export async function getVapidKeys(): Promise<{ publicKey: string; privateKey: s
   }
 
   // Generate on first use
-  const webPush = await import('web-push')
+  const webPushModule = await import('web-push')
+  const webPush = (webPushModule as any).default ?? webPushModule
   const keys = webPush.generateVAPIDKeys()
   await setSetting('vapid_private_key', keys.privateKey)
   await setSetting('vapid_public_key', keys.publicKey)
