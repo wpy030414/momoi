@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 import dotenv from 'dotenv'
 import { readdirSync, statSync, readFileSync, writeFileSync } from 'fs'
+import { execSync } from 'child_process'
 import { gzipSync, brotliCompressSync, constants as zlibConstants } from 'zlib'
 
 // Read .env from the repo root (up two levels from apps/web/)
@@ -43,7 +44,20 @@ function compressionPlugin(options?: { threshold?: number }): Plugin {
   }
 }
 
+// Resolve latest commit hash at build/dev start time — used by the intro
+// easter egg (5 rapid clicks on the Sparkles icon).
+function resolveGitHash(): string {
+  try {
+    return execSync('git rev-parse HEAD', { encoding: 'utf-8', cwd: path.resolve(import.meta.dirname, '../..') }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
+
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_GIT_HASH': JSON.stringify(resolveGitHash()),
+  },
   plugins: [
     react(),
     compressionPlugin({ threshold: 1024 }),
