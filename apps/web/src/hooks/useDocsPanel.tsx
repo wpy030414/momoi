@@ -71,7 +71,7 @@ export function useDocsPanel({ sidebarOpen, setSidebarOpen }: UseDocsPanelOption
     syncDocsRoute()
     window.addEventListener('hashchange', syncDocsRoute)
     return () => window.removeEventListener('hashchange', syncDocsRoute)
-  }, [docsEntries.length])
+  }, [docsEntries])
 
   const open = useCallback(() => {
     if (docsEntries.length === 0) {

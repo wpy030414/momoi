@@ -24,18 +24,20 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle>(function Gatewa
   }, [])
 
   const handleLoadFromEnv = useCallback(async () => {
-    if (!config) return
+    // 空值守卫折进函数式更新（prev ? {...} : prev）：闭包不再引用 config，
+    // deps 可以为空——config 每次表单输入都换新引用，入 deps 会让本回调
+    // （及其 useImperativeHandle）跟着每次击键重建。
     try {
       const envGateway = await api.getEnvGateway()
-      setConfig((prev: any) => ({
+      setConfig((prev: any) => prev ? {
         ...prev,
         api_endpoint: envGateway.api_endpoint,
         api_key: envGateway.api_key,
-      }))
+      } : prev)
     } catch (err) {
       console.error(err)
     }
-  }, [config !== null])
+  }, [])
 
   useImperativeHandle(ref, () => ({ loadFromEnv: handleLoadFromEnv }), [handleLoadFromEnv])
 

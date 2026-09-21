@@ -1,4 +1,4 @@
-import { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
+import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
 import { Loading } from '../../ui/spinner'
@@ -15,6 +15,8 @@ export interface UserManagerHandle {}
 function newProvider(): OAuth2Provider {
   return { id: crypto.randomUUID(), name: '', client_id: '', client_secret: '', authorize_url: '', token_url: '', userinfo_url: '', scopes: '' }
 }
+
+const PAGE_SIZE = 10
 
 export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_props, ref) {
   const { t } = useTranslation()
@@ -33,7 +35,6 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   const [oauthDeleteId, setOauthDeleteId] = useState<string | null>(null)
   const [oauthSaving, setOauthSaving] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
-  const pageSize = 10
 
   useEffect(() => {
     api.getDirectRegistration().then((r) => setDirectRegistrationOpen(r.direct_registration_open)).catch(() => {})
@@ -45,15 +46,17 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
     api.getConfig().then((c) => { setOauthProviders(c.oauth_providers || []) }).catch(console.error)
   }
 
-  const fetchUsers = () => {
+  // useCallback 包裹后既是 effect 的合法依赖（规则要求），也被增删改操作
+  // 复用为「操作完成后刷新列表」的句柄；仅随 page 变化重建。
+  const fetchUsers = useCallback(() => {
     setLoading(true)
-    api.listAdminUsers(page, pageSize)
+    api.listAdminUsers(page, PAGE_SIZE)
       .then((r) => { setUsers(r.users); setTotal(r.total) })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }
+  }, [page])
 
-  useEffect(() => { fetchUsers() }, [page])
+  useEffect(() => { fetchUsers() }, [fetchUsers])
 
   const saveOauthProviders = async (updated: OAuth2Provider[]) => {
     setOauthProviders(updated)
@@ -145,7 +148,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   useImperativeHandle(ref, () => ({}))
 
   const formatTime = (ts: number | null) => ts ? new Date(ts * 1000).toLocaleString() : '-'
-  const totalPages = Math.ceil(total / pageSize)
+  const totalPages = Math.ceil(total / PAGE_SIZE)
 
   return (
     <div className="space-y-4 pt-4">
@@ -248,7 +251,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
           {totalPages > 1 && (
             <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
-                {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)} / {total}
+                {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, total)} / {total}
               </p>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(page - 1)}>

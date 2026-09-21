@@ -100,9 +100,12 @@ export function WechatBindPanel({ convId, onBack, onComplete }: WechatBindPanelP
     return () => clearPoll()
   }, [startBind, clearPoll])
 
+  // 二维码过期检查：仅在「显示二维码且有到期时间」阶段跑秒级定时器。
+  // 复杂表达式从 deps 提出来派生成裸标识符（规则要求 deps 可静态分析）。
+  const showingQrExpiresAt = state.phase === 'showing_qr' ? (state as any).expires_at as number : null
   useEffect(() => {
-    if (state.phase !== 'showing_qr') return
-    const expiry = state.expires_at
+    if (state.phase !== 'showing_qr' || showingQrExpiresAt == null) return
+    const expiry = showingQrExpiresAt
     const check = setInterval(() => {
       if (Date.now() >= expiry) {
         clearPoll()
@@ -110,7 +113,7 @@ export function WechatBindPanel({ convId, onBack, onComplete }: WechatBindPanelP
       }
     }, 1000)
     return () => clearInterval(check)
-  }, [state.phase === 'showing_qr' ? (state as any).expires_at : null, clearPoll])
+  }, [state.phase, showingQrExpiresAt, clearPoll])
 
   useEffect(() => {
     if (state.phase === 'confirmed') {

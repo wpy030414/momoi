@@ -130,7 +130,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
 
   const hasContent = text.trim().length > 0 || attachments.length > 0
 
-  const handleSend = () => {
+  const handleSend = useCallback(() => {
     const trimmed = text.trim()
     if ((!trimmed && attachments.length === 0) || cannotSend) return
     onSend(trimmed, attachments.length > 0 ? attachments : undefined)
@@ -140,7 +140,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
-  }
+  }, [text, attachments, cannotSend, onSend])
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Mention menu keyboard nav
@@ -173,7 +173,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
       e.preventDefault()
       handleSend()
     }
-  }, [mentionOpen, filteredAgents, mentionIndex, selectMention, cannotSend, hasContent])
+  }, [mentionOpen, filteredAgents, mentionIndex, selectMention, handleSend])
 
   const handleInput = () => {
     if (textareaRef.current) {

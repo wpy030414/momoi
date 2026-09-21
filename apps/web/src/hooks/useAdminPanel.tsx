@@ -35,7 +35,7 @@ export function useAdminPanel({
       onConfigChanged()
     }
     prevOpenRef.current = adminViewOpen
-  }, [adminViewOpen])
+  }, [adminViewOpen, onConfigChanged])
 
   // Route guard: #/settings/{tab}
   useEffect(() => {

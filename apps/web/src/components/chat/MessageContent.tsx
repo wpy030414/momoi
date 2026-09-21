@@ -130,7 +130,7 @@ function MermaidBlock({ chart }: { chart: string }) {
     })
 
     return () => { cancelled = true }
-  }, [chart])
+  }, [chart, t])
 
   if (error) {
     return (

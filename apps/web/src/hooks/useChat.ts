@@ -343,7 +343,7 @@ export function useChat() {
     }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
-  }, [loadConversation])
+  }, [loadConversation, setViewKey])
 
   /** 全量重拉指定会话的消息（回退 / conv_changed 对账用）。
    *  分区存在即对账（含后台会话，切回即正确）；未打开过的会话不惰性建分区。 */
@@ -357,6 +357,14 @@ export function useChat() {
       applySnapshot(id, res.messages.map(mapServerMessage), 'reconcile')
     }
   }, [applySnapshot])
+
+  /** 每次渲染后刷新 ref：让 useCallback 包裹的入口始终调到最新闭包（t 随语言变化等）。
+   *  声明在 sendMessage 之前：其闭包经 ref 调用 handleSSEEvent——handleSSEEvent
+   *  是每渲染重建的普通函数，直接引用入 deps 会使 sendMessage 每渲染重建。 */
+  const handleSSEEventRef = useRef(handleSSEEvent)
+  useEffect(() => {
+    handleSSEEventRef.current = handleSSEEvent
+  })
 
   const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean, _forceCompliance?: boolean) => {
     if (!text.trim()) return
@@ -495,7 +503,7 @@ export function useChat() {
                   }
                 }
 
-                handleSSEEvent(msg, streamKey)
+                handleSSEEventRef.current(msg, streamKey)
               } catch {
                 // skip malformed lines
               }
@@ -893,12 +901,6 @@ export function useChat() {
         break
     }
   }
-
-  /** 每次渲染后刷新 ref：让 useCallback 包裹的远程入口始终调到最新闭包（t 随语言变化等） */
-  const handleSSEEventRef = useRef(handleSSEEvent)
-  useEffect(() => {
-    handleSSEEventRef.current = handleSSEEvent
-  })
 
   const sendAnswer = useCallback(async (questionId: string, answer: string, selectedOptions?: string[]) => {
     // 按 question_id 反查所属会话——提问卡片只出现在所属会话视图上，

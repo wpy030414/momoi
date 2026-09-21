@@ -94,7 +94,7 @@ export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanel
     } catch (err) {
       setState({ phase: 'form', appId, error: err instanceof Error ? err.message : t('common.error') })
     }
-  }, [convId, agentId, loadInfo, t])
+  }, [convId, agentId, appId, loadInfo, t])
 
   const handleUnbind = useCallback(async () => {
     setUnbinding(true)
@@ -109,7 +109,7 @@ export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanel
     } finally {
       setUnbinding(false)
     }
-  }, [agentId, t])
+  }, [agentId, appId, t])
 
   const renderContent = () => {
     switch (state.phase) {

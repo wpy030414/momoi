@@ -26,6 +26,10 @@ const IntroductionDialog = lazy(() =>
 export function App() {
   const { t, i18n } = useTranslation()
   const chat = useGroupChat()
+  // v7 exhaustive-deps：闭包内经 chat.fn() 成员链「调用」要求把根对象（每渲染
+  // 新建）列入 deps → useCallback 失效。解构为裸标识符即可保留逐成员 memo
+  // （useChat/useGroupChat 的函数成员均逐个 useCallback，引用稳定）。
+  const { selectConversation } = chat
   const { theme, setTheme } = useTheme()
 
   const [verbose, setVerbose] = useState<boolean>(() => {
@@ -126,13 +130,13 @@ export function App() {
     if (chat.draftType === 'group') {
       const agentIds = chat.groupAgents.map((a: { id: string }) => a.id)
       const { conversation } = await api.createGroupConversation(agentIds)
-      await chat.selectConversation(conversation.id)
+      await selectConversation(conversation.id)
       return conversation.id
     }
     const { conversation } = await api.createConversation()
-    await chat.selectConversation(conversation.id)
+    await selectConversation(conversation.id)
     return conversation.id
-  }, [chat.activeId, chat.draftType, chat.groupAgents, chat.selectConversation])
+  }, [chat.activeId, chat.draftType, chat.groupAgents, selectConversation])
 
   // When admin disables support_infinite_mode, force-disable any active infinite loop
   useEffect(() => {
@@ -142,7 +146,7 @@ export function App() {
         api.setInfiniteMode(chat.activeId, false).catch(console.error)
       }
     }
-  }, [supportInfiniteMode])
+  }, [supportInfiniteMode, infiniteMode, chat.activeId])
 
   // Open group agent management dialog
   const handleManageGroupAgents = async (convId: string) => {
@@ -259,6 +263,9 @@ export function App() {
         }
       })
       .catch(() => setIsAdminUser(false))
+    // handleLogin 每渲染重建（闭包捕获 chat），列入 deps 会让本 effect 每渲染
+    // 重跑 → getMe() 请求风暴；本 effect 只应在身份/模式变化时触发。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, standAlone])
 
   // Stand-alone mode: log straight in as the fixed 'admin' user. Also
@@ -337,6 +344,10 @@ export function App() {
     }
     window.addEventListener('auth:expired', onAuthExpired as EventListener)
     return () => window.removeEventListener('auth:expired', onAuthExpired as EventListener)
+    // 监听器只在挂载时注册一次（解绑/重绑反而漏事件）。handleLogout 虽每渲染
+    // 重建，但它只引用稳定成员（resetChat/close 均 useCallback、状态经 ref），
+    // 挂载期闭包永不过期，刻意不入 deps。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -423,7 +434,7 @@ export function App() {
       ensureLocale(saved).then(() => i18n.changeLanguage(saved))
     }
     syncMomoTheme(saved || i18n.language)
-  }, [])
+  }, [i18n])
 
   // --- Admin / Docs / Memory panels (state & logic extracted into custom hooks) ---
   const admin = useAdminPanel({
