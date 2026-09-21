@@ -81,22 +81,37 @@ export async function updateTtsConfig(partial: Partial<{ endpoint: string; provi
   return getTtsConfig()
 }
 
-export async function getConfig(): Promise<AppConfig> {
+// ---- Config cache: single batch query + short TTL replaces 11 sequential queries ----
+
+let configCache: { data: AppConfig; ts: number } | null = null
+const CONFIG_TTL_MS = 5_000
+
+function buildConfig(map: Map<string, string>): AppConfig {
   return {
-    app_name: await getSetting('app_name', DEFAULT_APP_NAME),
-    app_favicon: await getSetting('app_favicon', ''),
-    app_background: await getSetting('app_background', ''),
-    api_endpoint: await getSetting('api_endpoint', env.OPENAI_BASE_URL),
-    api_key: await getSetting('api_key', env.OPENAI_API_KEY),
-    support_attachments: (await getSetting('support_attachments', 'true')) === 'true',
-    support_infinite_mode: (await getSetting('support_infinite_mode', 'true')) === 'true',
-    allow_im_conversations: (await getSetting('allow_im_conversations', 'true')) === 'true',
-    show_github: (await getSetting('show_github', 'true')) === 'true',
-    use_external_image_hosting: (await getSetting('use_external_image_hosting', 'false')) === 'true',
-    recommended_questions: JSON.parse(await getSetting('recommended_questions', '[]')),
-    followup_questions: JSON.parse(await getSetting('followup_questions', '[]')),
-    oauth_providers: JSON.parse(await getSetting('oauth_providers', '[]')),
+    app_name: map.get('app_name') || DEFAULT_APP_NAME,
+    app_favicon: map.get('app_favicon') || '',
+    app_background: map.get('app_background') || '',
+    api_endpoint: map.get('api_endpoint') || env.OPENAI_BASE_URL,
+    api_key: map.get('api_key') || env.OPENAI_API_KEY,
+    support_attachments: map.get('support_attachments') !== 'false',
+    support_infinite_mode: map.get('support_infinite_mode') !== 'false',
+    allow_im_conversations: map.get('allow_im_conversations') !== 'false',
+    show_github: map.get('show_github') !== 'false',
+    use_external_image_hosting: map.get('use_external_image_hosting') === 'true',
+    recommended_questions: JSON.parse(map.get('recommended_questions') || '[]'),
+    followup_questions: JSON.parse(map.get('followup_questions') || '[]'),
+    oauth_providers: JSON.parse(map.get('oauth_providers') || '[]'),
   }
+}
+
+export function invalidateConfigCache() { configCache = null }
+
+export async function getConfig(): Promise<AppConfig> {
+  if (configCache && Date.now() - configCache.ts < CONFIG_TTL_MS) return configCache.data
+  const rows = await db.select({ key: settings.key, value: settings.value }).from(settings).all()
+  const map = new Map(rows.map((r: typeof settings.$inferSelect) => [r.key, r.value]))
+  configCache = { data: buildConfig(map), ts: Date.now() }
+  return configCache.data
 }
 
 export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConfig> {
@@ -115,6 +130,7 @@ export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConf
       await setSetting(key, stored as string)
     }
   }
+  invalidateConfigCache()
   return getConfig()
 }
 

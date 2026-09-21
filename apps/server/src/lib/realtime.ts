@@ -15,7 +15,8 @@ interface RealtimeSubscriber {
   deviceId: string
   aborted: boolean
   writeChain: Promise<void>
-  onEvent: (dataString: string) => void
+  onEvent: (dataString: string) => Promise<void> | void
+  pendingCount: number
 }
 
 const subscribers = new Map<string, Set<RealtimeSubscriber>>()
@@ -48,6 +49,7 @@ export function subscribeRealtime(
     aborted: false,
     writeChain: Promise.resolve(),
     onEvent,
+    pendingCount: 0,
   }
   set.add(sub)
   return () => {
@@ -67,8 +69,16 @@ function publish(userId: string, skipDeviceId: string | undefined, data: unknown
       continue
     }
     if (skipDeviceId && sub.deviceId && sub.deviceId === skipDeviceId) continue
+    // Backpressure: if a subscriber has >50 pending events, mark it stale
+    // so it reconnects cleanly rather than accumulating unbounded writes.
+    sub.pendingCount++
+    if (sub.pendingCount > 50) {
+      sub.aborted = true
+      set.delete(sub)
+      continue
+    }
     sub.writeChain = sub.writeChain
-      .then(() => sub.onEvent(dataString))
+      .then(() => { sub.pendingCount--; return sub.onEvent(dataString) })
       .catch(() => { sub.aborted = true })
   }
   if (set.size === 0) subscribers.delete(userId)

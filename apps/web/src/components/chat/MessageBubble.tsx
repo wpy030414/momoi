@@ -45,7 +45,7 @@ interface MessageBubbleProps {
   verbose?: boolean
 }
 
-export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, onForceRetry, agentAvatar, agentName, voiceEnabled, activeAgentId, verbose }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, onForceRetry, agentAvatar, agentName, voiceEnabled, activeAgentId, verbose }: MessageBubbleProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const [confirmingRevert, setConfirmingRevert] = useState(false)
@@ -207,7 +207,7 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
       </div>
     </div>
   )
-}
+})
 
 /** Group consecutive tool_call entries into stacks; render trace with verbose-controlled thinking. */
 function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?: boolean): React.ReactNode {
@@ -265,33 +265,6 @@ function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?:
     )
   }
   return elements
-}
-
-function renderToolCall(entry: TraceEntry, idx: number): React.ReactNode {
-  if (entry.type !== 'tool_call') return null
-  return (
-    <div key={`tool-${entry.id || idx}`} className="mb-1">
-      <div className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0">
-        <span className="font-medium truncate">{entry.name}</span>
-        {entry.status === 'running' && (
-          <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block flex-shrink-0" />
-        )}
-        {entry.result && <span className="text-muted-foreground ml-1 truncate">{entry.result}</span>}
-      </div>
-      {entry.artifacts && entry.artifacts.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mt-1">
-          {entry.artifacts.map((art, i) => (
-            <AttachmentCard key={i} attachment={{
-              url: art.downloadUrl,
-              name: art.displayName,
-              size: 0,
-              type: art.mimeType,
-            }} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 function ToolCallStack({ entries, streaming }: { entries: TraceEntry[]; streaming?: boolean }) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGroupChat } from './hooks/useGroupChat'
 import { useTheme } from './hooks/useTheme'
@@ -17,6 +17,7 @@ import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
 import { PanelLeft, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
+import { ensureLocale } from './i18n'
 
 export function App() {
   const { t, i18n } = useTranslation()
@@ -395,7 +396,8 @@ export function App() {
     }
   }, [])
 
-  const handleLanguageChange = (lang: string) => {
+  const handleLanguageChange = async (lang: string) => {
+    await ensureLocale(lang)
     i18n.changeLanguage(lang)
     localStorage.setItem('language', lang)
     syncMomoTheme(lang)
@@ -414,7 +416,7 @@ export function App() {
   useEffect(() => {
     const saved = localStorage.getItem('language')
     if (saved && saved !== i18n.language) {
-      i18n.changeLanguage(saved)
+      ensureLocale(saved).then(() => i18n.changeLanguage(saved))
     }
     syncMomoTheme(saved || i18n.language)
   }, [])
@@ -480,8 +482,16 @@ export function App() {
     return <LoginScreen onLogin={handleLogin} />
   }
 
-  // 当前会话的 Agent（单聊气泡标签/头像优先用它，而非下拉选择）
-  const activeAgentId = chat.conversations.find((c) => c.id === chat.activeId)?.agent_id || null
+  // Stable callbacks for Sidebar (prevent inline arrow re-creation on every render)
+  const handleNewGroup = useCallback(() => setGroupDialogOpen(true), [])
+  const handleChangePin = useCallback(() => setChangePinOpen(true), [])
+  const handleChangeUsername = useCallback(() => setChangeUsernameOpen(true), [])
+  const handleLinkAccount = useCallback(() => setLinkedAccountsOpen(true), [])
+
+  const activeAgentId = useMemo(
+    () => chat.conversations.find((c) => c.id === chat.activeId)?.agent_id || null,
+    [chat.conversations, chat.activeId]
+  )
 
   // 合并群聊：源会话是否为 QQ 群聊（用于过滤候选列表）
   const mergeSourceIsQq = (chat.conversations.find((c: any) => c.id === mergeSourceId) as any)?.qq_bound === 1
@@ -510,7 +520,7 @@ export function App() {
             activeId={chat.activeId}
             onSelect={chat.selectConversation}
             onNew={chat.createConversation}
-            onNewGroup={() => setGroupDialogOpen(true)}
+            onNewGroup={handleNewGroup}
             onRename={chat.renameConversation}
             onDelete={handleDeleteConversation}
             onMerge={handleMergeConversation}
@@ -522,9 +532,9 @@ export function App() {
             showGithub={showGithub}
             // Stand-alone mode: the fixed 'admin' identity cannot be renamed,
             // re-PIN'd, OAuth-linked, or logged out — hide those entries.
-            onChangePin={standAlone ? undefined : () => setChangePinOpen(true)}
-            onChangeUsername={standAlone ? undefined : () => setChangeUsernameOpen(true)}
-            onLinkAccount={standAlone ? undefined : () => setLinkedAccountsOpen(true)}
+            onChangePin={standAlone ? undefined : handleChangePin}
+            onChangeUsername={standAlone ? undefined : handleChangeUsername}
+            onLinkAccount={standAlone ? undefined : handleLinkAccount}
             onLogout={standAlone ? undefined : handleLogout}
             language={i18n.language}
             onLanguageChange={handleLanguageChange}

@@ -4,12 +4,6 @@ import { api, getUser, clearSession, notifyAuthExpired, getDeviceIdForRequest, s
 import type { Conversation, Attachment, TraceEntry } from '@momoi/shared/types'
 import { THINKING_SEGMENT_OPEN } from '@momoi/shared/constants'
 
-/** runtime tracer — 定位串会话竞态，修完即删 */
-function tracer(tag: string, ...args: any[]) {
-  if (typeof window !== 'undefined') (window as any).__chatTrace = (window as any).__chatTrace || []
-  if (typeof window !== 'undefined') (window as any).__chatTrace.push(`${Date.now() % 100000} ${tag} ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a).slice(0, 120)).join(' ')}`)
-}
-
 interface ChatMessage {
   id?: number
   role: 'user' | 'assistant'
@@ -380,7 +374,6 @@ export function useChat() {
     }
     // 同会话串行（防重复发送）；跨会话不再互斥——这正是多会话并发的基础
     if (loadingRef.current[streamKey]) return
-    tracer('send:start', streamKey, activeIdRef.current, draftKeyRef.current, activeKeyRef.current)
 
     const userMsg: ChatMessage = { role: 'user', content: text, attachments }
     const assistantMsg: ChatMessage = { role: 'assistant', content: '', streaming: true, trace: [] }

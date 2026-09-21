@@ -69,6 +69,8 @@ interface ChatPanelProps {
   verbose?: boolean
 }
 
+const NOOP = () => {}
+
 export function ChatPanel({
   messages, loading, onSend, onCancel, onRevert, onForceRetry, onForceRetryGroup, backgroundImage, supportAttachments, supportInfiniteMode,
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
@@ -146,14 +148,14 @@ export function ChatPanel({
     }
   }, [messages])
 
-  const handleRevert = async (index: number) => {
+  const handleRevert = useCallback(async (index: number) => {
     const text = await onRevert(index)
     if (text) {
       setRevertedText(text)
     }
-  }
+  }, [onRevert])
 
-  const handleForceRetry = async (index: number) => {
+  const handleForceRetry = useCallback(async (index: number) => {
     // 与 handleSend 同款双通道分派：群聊走群聊版（groupMode 重发），
     // 单聊走单聊版 —— 误走群聊版会因不预建流式气泡而丢失全部 token 事件。
     if (isGroup && onForceRetryGroup) {
@@ -161,19 +163,24 @@ export function ChatPanel({
     } else {
       await onForceRetry?.(index)
     }
-  }
+  }, [isGroup, onForceRetryGroup, onForceRetry])
 
-  const handleExternalValueConsumed = () => {
+  const handleExternalValueConsumed = useCallback(() => {
     setRevertedText('')
-  }
+  }, [])
 
-  const handleSend = (text: string, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => {
+  const handleSend = useCallback((text: string, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => {
     if (isGroup && onSendGroup) {
       onSendGroup(text, thinkingMode, attachments, infiniteMode)
     } else {
       onSend(text, thinkingMode, attachments, selectedAgentId, false, undefined, infiniteMode)
     }
-  }
+  }, [isGroup, onSendGroup, onSend, thinkingMode, selectedAgentId, infiniteMode])
+
+  const handleSuggestion = useCallback((text: string) => {
+    if (isGroup && onSendGroup) onSendGroup(text, thinkingMode, undefined, infiniteMode)
+    else onSend(text, thinkingMode, undefined, selectedAgentId, false, undefined, infiniteMode)
+  }, [isGroup, onSendGroup, onSend, thinkingMode, selectedAgentId, infiniteMode])
 
   return (
     <div className="flex-1 flex flex-col min-h-0 relative">
@@ -231,7 +238,7 @@ export function ChatPanel({
                 thinkingMode={thinkingMode}
                 onThinkingModeChange={setThinkingMode}
                 infiniteMode={infiniteMode}
-                onInfiniteModeChange={onInfiniteModeChange || (() => {})}
+                onInfiniteModeChange={onInfiniteModeChange ?? NOOP}
                 supportAttachments={supportAttachments}
                 supportInfiniteMode={supportInfiniteMode}
                 noAgents={noAgents}
@@ -262,10 +269,7 @@ export function ChatPanel({
         ) : (
           <MessageList
             messages={messages}
-            onSuggestion={(text) => {
-              if (isGroup && onSendGroup) onSendGroup(text, thinkingMode, undefined, infiniteMode)
-              else onSend(text, thinkingMode, undefined, selectedAgentId, false, undefined, infiniteMode)
-            }}
+            onSuggestion={handleSuggestion}
             onRevert={handleRevert}
             onForceRetry={handleForceRetry}
             agentAvatar={isGroup ? null : directAgentAvatar}
@@ -315,7 +319,7 @@ export function ChatPanel({
             thinkingMode={thinkingMode}
             onThinkingModeChange={setThinkingMode}
             infiniteMode={infiniteMode}
-            onInfiniteModeChange={onInfiniteModeChange || (() => {})}
+            onInfiniteModeChange={onInfiniteModeChange ?? NOOP}
             supportAttachments={supportAttachments}
             supportInfiniteMode={supportInfiniteMode}
             noAgents={noAgents}

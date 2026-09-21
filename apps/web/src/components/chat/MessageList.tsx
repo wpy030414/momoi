@@ -1,3 +1,4 @@
+import React, { useMemo } from 'react'
 import { MessageBubble } from './MessageBubble'
 import type { Attachment } from '@momoi/shared/types'
 
@@ -46,7 +47,7 @@ function parseQqSender(content: string): { senderName: string; cleanContent: str
   return { senderName: m[1], cleanContent: m[2] }
 }
 
-export function MessageList({ messages, onSuggestion, onRevert, onForceRetry, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose, isQqGroup }: MessageListProps) {
+export const MessageList = React.memo(function MessageList({ messages, onSuggestion, onRevert, onForceRetry, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose, isQqGroup }: MessageListProps) {
   // Only the last assistant message shows its suggestion chips — older ones
   // were for a past turn and are meaningless as "what to ask next".
   const lastAssistantIdx = [...messages]
@@ -55,58 +56,70 @@ export function MessageList({ messages, onSuggestion, onRevert, onForceRetry, ag
   const lastAssistantIdxFromEnd =
     lastAssistantIdx === -1 ? -1 : messages.length - 1 - lastAssistantIdx
 
+  // Pre-compute display info for each message so we pass stable objects to
+  // React.memo-wrapped MessageBubble instead of inline spreads.
+  const displayMessages = useMemo(() =>
+    messages.map((msg, idx) => {
+      let displayContent = msg.content
+      let senderName: string | undefined
+      if (isQqGroup && msg.role === 'user') {
+        const parsed = parseQqSender(msg.content)
+        if (parsed) {
+          senderName = parsed.senderName
+          displayContent = parsed.cleanContent
+        }
+      }
+
+      // Resolve agent avatar for group messages
+      let msgAgentAvatar = agentAvatar
+      let msgAgentName: string | undefined = senderName
+      let msgVoiceEnabled = agentVoiceEnabled ?? false
+      let msgAgentId: string | undefined
+      if (agents && msg.agent_id) {
+        const agent = agents.find((a) => a.id === msg.agent_id)
+        if (agent) {
+          msgAgentAvatar = agent.avatar || undefined
+          msgAgentName = agent.name
+          msgVoiceEnabled = (agent as any).voice_enabled ?? agentVoiceMap?.get(agent.id) ?? false
+          msgAgentId = agent.id
+        }
+      } else if (!msg.agent_id && agentVoiceMap) {
+        msgVoiceEnabled = agentVoiceEnabled ?? false
+      }
+      if (!msgAgentId && msg.agent_id) {
+        msgAgentId = msg.agent_id
+      }
+
+      return {
+        msg,
+        idx,
+        displayContent,
+        senderName,
+        msgAgentAvatar,
+        msgAgentName: msgAgentName || msg.agent_name || (msg.role === 'user' && !isQqGroup ? undefined : fallbackAgentName),
+        msgVoiceEnabled,
+        msgAgentId,
+        showSuggestions: idx === lastAssistantIdxFromEnd,
+      }
+    }), [messages, isQqGroup, agents, agentAvatar, agentVoiceEnabled, agentVoiceMap, fallbackAgentName, lastAssistantIdxFromEnd])
+
   return (
     <div className="space-y-2 max-w-3xl mx-auto">
-      {messages.map((msg, idx) => {
-        // QQ group: parse [senderName]: content for user messages
-        let displayContent = msg.content
-        let senderName: string | undefined
-        if (isQqGroup && msg.role === 'user') {
-          const parsed = parseQqSender(msg.content)
-          if (parsed) {
-            senderName = parsed.senderName
-            displayContent = parsed.cleanContent
-          }
-        }
-
-        // Resolve agent avatar for group messages
-        let msgAgentAvatar = agentAvatar
-        let msgAgentName: string | undefined = senderName
-        let msgVoiceEnabled = agentVoiceEnabled ?? false
-        let msgAgentId: string | undefined
-        if (agents && msg.agent_id) {
-          const agent = agents.find((a) => a.id === msg.agent_id)
-          if (agent) {
-            msgAgentAvatar = agent.avatar || undefined
-            msgAgentName = agent.name
-            msgVoiceEnabled = (agent as any).voice_enabled ?? agentVoiceMap?.get(agent.id) ?? false
-            msgAgentId = agent.id
-          }
-        } else if (!msg.agent_id && agentVoiceMap) {
-          // Direct chat: use the active agent's voice_enabled
-          // agentVoiceMap only has entries for known agents, so check first entry
-          msgVoiceEnabled = agentVoiceEnabled ?? false
-        }
-        // For direct chat, get agent ID from the message's agent_id if available
-        if (!msgAgentId && msg.agent_id) {
-          msgAgentId = msg.agent_id
-        }
-        return (
-          <MessageBubble
-            key={msg.id != null ? `db-${msg.id}` : `idx-${idx}`}
-            message={{ ...msg, content: displayContent }}
-            onSuggestion={onSuggestion}
-            showSuggestions={idx === lastAssistantIdxFromEnd}
-            onRevert={msg.role === 'user' ? () => onRevert?.(idx) : undefined}
-            onForceRetry={msg.role === 'user' ? () => onForceRetry?.(idx) : undefined}
-            agentAvatar={msgAgentAvatar}
-            agentName={msgAgentName || msg.agent_name || (msg.role === 'user' && !isQqGroup ? undefined : fallbackAgentName)}
-            voiceEnabled={msgVoiceEnabled}
-            activeAgentId={msgAgentId}
-            verbose={verbose}
-          />
-        )
-      })}
+      {displayMessages.map(({ msg, idx, displayContent, msgAgentAvatar, msgAgentName, msgVoiceEnabled, msgAgentId, showSuggestions }) => (
+        <MessageBubble
+          key={msg.id != null ? `db-${msg.id}` : `idx-${idx}`}
+          message={{ ...msg, content: displayContent }}
+          onSuggestion={onSuggestion}
+          showSuggestions={showSuggestions}
+          onRevert={msg.role === 'user' ? () => onRevert?.(idx) : undefined}
+          onForceRetry={msg.role === 'user' ? () => onForceRetry?.(idx) : undefined}
+          agentAvatar={msgAgentAvatar}
+          agentName={msgAgentName}
+          voiceEnabled={msgVoiceEnabled}
+          activeAgentId={msgAgentId}
+          verbose={verbose}
+        />
+      ))}
     </div>
   )
-}
+})

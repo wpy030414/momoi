@@ -15,7 +15,7 @@ export async function initPg(dbUrl: string, user: string, password: string) {
   if (!parsed.password) parsed.password = password
   const connectionString = parsed.toString()
 
-  const pool = new Pool({ connectionString, max: 5 })
+  const pool = new Pool({ connectionString, max: 5, connectionTimeoutMillis: 10_000, idleTimeoutMillis: 30_000 })
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS conversations (
@@ -131,8 +131,13 @@ export async function initPg(dbUrl: string, user: string, password: string) {
     CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
 
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_messages_agent ON messages(agent_id);
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
     CREATE INDEX IF NOT EXISTS idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
+
+    CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_wechat_bindings_conv ON wechat_bindings(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_oauth_user ON user_oauth_bindings(user_id);
 
     CREATE TABLE IF NOT EXISTS user_agent_memories (
       id TEXT PRIMARY KEY,

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
@@ -46,7 +46,7 @@ interface MenuState {
 
 // ConversationTitle is now MarqueeText from ../ui/MarqueeText
 
-export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, standAlone }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, standAlone }: SidebarProps) {
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -495,4 +495,4 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, 
       )}
     </div>
   )
-}
+})

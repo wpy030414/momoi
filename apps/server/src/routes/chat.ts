@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming'
 import path from 'path'
 import fs from 'fs'
 import { db, conversations, messages, groupConversationAgents } from '../db/index.js'
-import { eq, and, count, sql } from 'drizzle-orm'
+import { eq, and, count, sql, desc } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
 import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutral-agent.js'
@@ -24,12 +24,17 @@ export const chatRoute = new Hono()
 
 // 构建中立 Agent 上下文：最近 20 条消息，用户/Agent 名字标注（follow_up 与 suggestions 共用）
 async function buildNeutralContext(convId: string): Promise<string> {
-  const allMsgs = await db.select().from(messages)
+  // Fetch only the last 20 messages at the DB level — avoids loading thousands of
+  // rows into memory only to discard all but 20 in JS.
+  const recentMsgs = await db.select().from(messages)
     .where(eq(messages.conversation_id, convId))
-    .orderBy(messages.created_at).all()
+    .orderBy(desc(messages.created_at))
+    .limit(20)
+    .all()
+  const orderedMsgs = recentMsgs.reverse()
   const agents = await listAgents()
   const agentNameById = new Map(agents.map((a) => [a.id, a.name]))
-  return allMsgs.slice(-20).map((m: typeof messages.$inferSelect) =>
+  return orderedMsgs.map((m: typeof messages.$inferSelect) =>
     m.role === 'user' ? `用户: ${m.content}` : `[${m.agent_id ? (agentNameById.get(m.agent_id) || m.agent_id) : '助手'}]: ${m.content}`
   ).join('\n')
 }
@@ -115,16 +120,23 @@ chatRoute.post('/', async (c) => {
     let streamConvId: string | null = null
     const send = (msg: ServerMessage) => {
       if (aborted) return
-      // 实时中继：仅转发对渲染有意义的流事件，跳过仅在源设备本地生效的
-      // conversation_id / user_message_id（其他设备以整条会话刷新兜底对齐）。
+      // 实时中继：token/thinking 类高频事件走缓冲批量转发，终端事件立即转发。
       if (streamConvId && msg.type !== 'conversation_id' && msg.type !== 'user_message_id') {
-        broadcastStream(userId, device_id || '', {
-          conversation_id: streamConvId,
-          event: msg,
-        })
+        if (msg.type === 'token' || msg.type === 'thinking') {
+          relayToken(msg)
+        } else {
+          // terminal / high-level events: broadcast immediately
+          broadcastStream(userId, device_id || '', {
+            conversation_id: streamConvId,
+            event: msg,
+          })
+        }
       }
+      // Pre-serialize outside the chain so the main loop isn't blocked waiting
+      // for the previous SSE write to complete before it can start serializing.
+      const data = JSON.stringify(msg)
       writeChain = writeChain
-        .then(() => stream.writeSSE({ data: JSON.stringify(msg), event: 'message' }))
+        .then(() => stream.writeSSE({ data, event: 'message' }))
         .catch((err) => {
           aborted = true
           const isTerminal = msg.type === 'done' || msg.type === 'error'
@@ -134,15 +146,36 @@ chatRoute.post('/', async (c) => {
         })
     }
 
+    // Batched token relay: accumulate token/thinking events and flush periodically
+    // to avoid per-token broadcast overhead (50-100/s → ~5/s with no user-visible
+    // degradation on other devices).
+    let tokenBuf = ''
+    let relayTimer: ReturnType<typeof setTimeout> | null = null
+    const flushRelay = () => {
+      if (!tokenBuf || !streamConvId || aborted) { tokenBuf = ''; return }
+      broadcastStream(userId, device_id || '', {
+        conversation_id: streamConvId,
+        event: { type: 'content_snapshot', content: tokenBuf },
+      })
+      tokenBuf = ''
+    }
+    const relayToken = (msg: ServerMessage) => {
+      const chunk = msg.type === 'token' ? (msg as any).text : ((msg as any).text || '')
+      tokenBuf += chunk
+      if (tokenBuf.length >= 80) {
+        if (relayTimer) clearTimeout(relayTimer)
+        flushRelay()
+      } else {
+        if (relayTimer) clearTimeout(relayTimer)
+        relayTimer = setTimeout(flushRelay, 200)
+      }
+    }
+
     // Keepalive — prevent proxies/browsers from closing idle SSE
     const keepalive = setInterval(() => {
       if (aborted) { clearInterval(keepalive); return }
-      try {
-        stream.write(':\n\n')
-      } catch {
-        aborted = true
-        clearInterval(keepalive)
-      }
+      writeChain = writeChain
+        .then(() => { if (!aborted) try { stream.write(':\n\n') } catch { aborted = true; clearInterval(keepalive) } })
     }, 15_000)
 
     try {
@@ -645,6 +678,8 @@ chatRoute.post('/', async (c) => {
       send({ type: 'error', message: errMsg })
     } finally {
       clearInterval(keepalive)
+      if (relayTimer) clearTimeout(relayTimer)
+      flushRelay() // flush any remaining buffered tokens
       // 等待所有 SSE 事件真正 flush 到响应流，再让 Hono 关闭连接
       await writeChain
     }

@@ -55,6 +55,7 @@ export const MIGRATION_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_messages_agent ON messages(agent_id);
   CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
   CREATE INDEX IF NOT EXISTS idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
 
@@ -127,4 +128,7 @@ export const MIGRATION_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
+  CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id);
+  CREATE INDEX IF NOT EXISTS idx_wechat_bindings_conv ON wechat_bindings(conversation_id);
+  CREATE INDEX IF NOT EXISTS idx_oauth_user ON user_oauth_bindings(user_id);
   CREATE INDEX IF NOT EXISTS idx_user_agent_memories ON user_agent_memories(user_id, agent_id);`

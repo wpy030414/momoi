@@ -42,11 +42,10 @@ eventsRoute.get('/', async (c) => {
     })
 
     const unsubscribe = subscribeRealtime(userId, deviceId, (dataString) => {
-      // 只发 data 字段，不依赖自定义 event 名（`event: xxx`）。
-      // 老内核 WebView（钉钉内置等）的 EventSource 对自定义事件名支持不可靠，
-      // 可能只触发默认 onmessage；data 已是完整 JSON（含 type），客户端统一
-      // 从 onmessage 解析，新旧内核 100% 兼容。
-      stream.writeSSE({ data: dataString })
+      // Return the writeSSE promise so the caller's writeChain properly awaits I/O
+      // completion before dequeuing the next event. Without this, the chain only
+      // serializes microtask scheduling, not actual byte delivery.
+      return stream.writeSSE({ data: dataString })
     })
 
     const cleanup = () => {

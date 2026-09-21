@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, KeyboardEvent, useCallback } from 'react'
+import { useState, useRef, useEffect, KeyboardEvent, useCallback, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowUp, Brain, Infinity, Loader2, Paperclip, X, Upload } from 'lucide-react'
 import { createPortal } from 'react-dom'
@@ -54,7 +54,7 @@ function detectMention(text: string, cursorPos: number): { query: string; start:
   return null
 }
 
-export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, supportInfiniteMode, noAgents, agents, conversationId, onEnsureConversation }: InputBarProps) {
+export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, supportInfiniteMode, noAgents, agents, conversationId, onEnsureConversation }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -142,7 +142,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
     }
   }
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Mention menu keyboard nav
     if (mentionOpen && filteredAgents.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -173,7 +173,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
       e.preventDefault()
       handleSend()
     }
-  }
+  }, [mentionOpen, filteredAgents, mentionIndex, selectMention, cannotSend, hasContent])
 
   const handleInput = () => {
     if (textareaRef.current) {
@@ -400,4 +400,4 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
       )}
     </div>
   )
-}
+})
