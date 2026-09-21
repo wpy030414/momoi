@@ -26,7 +26,8 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       type TEXT NOT NULL DEFAULT 'direct',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      deleted_at INTEGER
+      deleted_at INTEGER,
+      last_read_at INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS messages (

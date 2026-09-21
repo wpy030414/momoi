@@ -22,6 +22,8 @@ export interface Conversation {
   qq_bound?: number      // 1 if this conversation is bound to QQ (C2C or group)
   created_at: number
   updated_at: number
+  last_read_at?: number
+  unread_count?: number
 }
 
 export interface Message {
@@ -228,6 +230,7 @@ export type RealtimeEvent =
   | { type: 'conv_sync' }
   | { type: 'conv_changed'; conversation_id: string }
   | { type: 'group_members'; conversation_id: string }
+  | { type: 'unread_update'; conversation_id: string; unread_count: number }
 
 // ---- Ask User Tool ----
 

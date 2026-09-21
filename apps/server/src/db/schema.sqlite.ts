@@ -9,6 +9,7 @@ export const conversations = sqliteTable('conversations', {
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
   deleted_at: integer('deleted_at'),
+  last_read_at: integer('last_read_at'),
 })
 
 export const messages = sqliteTable('messages', {

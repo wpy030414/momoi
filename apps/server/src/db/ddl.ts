@@ -11,7 +11,8 @@ export const MIGRATION_SQL = `
     type TEXT NOT NULL DEFAULT 'direct',
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    deleted_at INTEGER
+    deleted_at INTEGER,
+    last_read_at INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS messages (

@@ -28,6 +28,14 @@ export async function initSqlite() {
   // Run migrations
   sqlDb.run(MIGRATION_SQL)
 
+  // Migration: add last_read_at for unread tracking (safe to run, throws if column exists)
+  try {
+    sqlDb.run(`ALTER TABLE conversations ADD COLUMN last_read_at INTEGER`)
+    console.log('[db] Migration: added last_read_at to conversations')
+  } catch {
+    // Column already exists, safe to ignore
+  }
+
   // Persistent index creation — safe to run on every startup
   sqlDb.run(`CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id)`)
   sqlDb.run(`CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id)`)
