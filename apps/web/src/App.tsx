@@ -640,6 +640,7 @@ export function App() {
             pushSupported={pushSupported}
             pushEnabled={pushEnabled}
             onPushToggle={handlePushToggle}
+            unreadCounts={chat.unreadCounts}
           />
         )}
       </div>

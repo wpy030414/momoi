@@ -117,6 +117,25 @@ export function useChat() {
   const pendingRef = useRef<Record<string, PendingQuestion | null>>({})
   const conversationsRef = useRef<Conversation[]>([])
 
+  // ---- 未读消息计数（侧边栏红点） ----
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
+  const unreadCountsRef = useRef<Record<string, number>>({})
+
+  const setUnreadCountFor = useCallback((key: string, count: number) => {
+    if (unreadCountsRef.current[key] === count) return
+    const all = { ...unreadCountsRef.current, [key]: count }
+    unreadCountsRef.current = all
+    setUnreadCounts(all)
+  }, [])
+
+  const clearUnreadFor = useCallback((key: string) => {
+    if (unreadCountsRef.current[key] === undefined) return
+    const all = { ...unreadCountsRef.current }
+    delete all[key]
+    unreadCountsRef.current = all
+    setUnreadCounts(all)
+  }, [])
+
   /** 视图 key：activeId ?? draftKey（null = 首页空态）。事件回调经 ref 读最新值。 */
   const activeIdRef = useRef<string | null>(null)
   const activeKeyRef = useRef<string | null>(null)
@@ -281,7 +300,17 @@ export function useChat() {
 
   const refreshConversations = useCallback(() => {
     api.listConversations()
-      .then((res) => setConversations(res.conversations))
+      .then((res) => {
+        setConversations(res.conversations)
+        // Server is authoritative for unread counts; sync them
+        const counts: Record<string, number> = {}
+        for (const conv of res.conversations) {
+          const uc = (conv as any).unread_count as number | undefined
+          if (uc && uc > 0) counts[conv.id] = uc
+        }
+        unreadCountsRef.current = counts
+        setUnreadCounts(counts)
+      })
       .catch(console.error)
   }, [])
 
@@ -309,6 +338,7 @@ export function useChat() {
       const type = ((res.conversation as Conversation).type as 'direct' | 'group') || 'direct'
       convTypesRef.current.set(id, type)
       applySnapshot(id, res.messages.map(mapServerMessage))
+      clearUnreadFor(id)
       return res
     } catch {
       if (loadGenRef.current !== gen) return null
@@ -970,6 +1000,8 @@ export function useChat() {
     setViewKey(null, null)
     setDraftType(null)
     setConversations([])
+    unreadCountsRef.current = {}
+    setUnreadCounts({})
     if (window.location.hash.startsWith('#/c/')) {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
@@ -1007,6 +1039,7 @@ export function useChat() {
       ++loadGenRef.current // 作废在途加载——防止慢响应在删除后复活会话
       setConversations((prev) => prev.filter((c) => c.id !== id))
       clearPartition(id)
+      clearUnreadFor(id)
       if (activeIdRef.current === id) {
         setViewKey(null, null)
         setDraftType(null)
@@ -1160,13 +1193,25 @@ export function useChat() {
           }
           break
         }
+        case 'unread_update': {
+          const cid = payload.conversation_id
+          const count = payload.unread_count
+          // 不给自己正在看的会话加红点
+          if (activeKeyRef.current === cid) return
+          if (count <= 0) {
+            clearUnreadFor(cid)
+          } else {
+            setUnreadCountFor(cid, count)
+          }
+          break
+        }
       }
     })
     return () => {
       unsubscribe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshConversations, refetchConversation, handleRemoteStreamEvent, getUser()])
+  }, [refreshConversations, refetchConversation, handleRemoteStreamEvent, getUser(), clearUnreadFor, setUnreadCountFor])
 
   // ---- 派生导出（签名与旧版一致，视图只是当前分区 key 的投影） ----
   const activeKey = activeId ?? draftKey
@@ -1194,5 +1239,7 @@ export function useChat() {
     forceComplianceRetry,
     pendingQuestion,
     sendAnswer,
+    // 未读计数（侧边栏红点）
+    unreadCounts,
   }
 }

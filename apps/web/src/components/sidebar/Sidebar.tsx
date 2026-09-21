@@ -43,6 +43,8 @@ interface SidebarProps {
   pushSupported?: boolean
   pushEnabled?: boolean
   onPushToggle?: () => void
+  /** 未读计数：conversation_id → 未读 assistant 消息数 */
+  unreadCounts?: Record<string, number>
 }
 
 interface MenuState {
@@ -52,7 +54,7 @@ interface MenuState {
 
 // ConversationTitle is now MarqueeText from ../ui/MarqueeText
 
-export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle, unreadCounts }: SidebarProps) {
   const LANGUAGE_OPTIONS = ['zh-CN', 'en', 'ja'] as const
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -249,6 +251,11 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
               {(conv as any).type === 'group' && (conv as any).agent_count > 0 && (
                 <span className="text-xs text-muted-foreground/60 flex-shrink-0">
                   ({(conv as any).agent_count + 1})
+                </span>
+              )}
+              {unreadCounts?.[conv.id] && unreadCounts[conv.id] > 0 && activeId !== conv.id && (
+                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none flex-shrink-0">
+                  {unreadCounts[conv.id] > 99 ? '99+' : unreadCounts[conv.id]}
                 </span>
               )}
               {renamingId !== conv.id && (
