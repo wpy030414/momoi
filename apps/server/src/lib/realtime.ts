@@ -108,6 +108,11 @@ export function broadcastGroupMembers(userId: string, conversationId: string) {
   publish(userId, undefined, { type: 'group_members', conversation_id: conversationId })
 }
 
+/** 未读计数变更：通知所有设备某会话存在未读消息 */
+export function broadcastUnreadUpdate(userId: string, conversationId: string, unreadCount: number) {
+  publish(userId, undefined, { type: 'unread_update', conversation_id: conversationId, unread_count: unreadCount })
+}
+
 /** 查询用户当前活跃设备数 */
 export function getActiveDeviceCount(userId: string): number {
   const set = subscribers.get(userId)

@@ -73,7 +73,7 @@ async function collectAIResponse(config: Awaited<ReturnType<typeof getConfig>>, 
 // ---- Agent Selection ----
 
 /** 查询用户对话过的 Agent（有 user 消息的 direct 会话关联的 agent_id），去重 */
-async function getConversedAgents(userId: string): Promise<string[]> {
+export async function getConversedAgents(userId: string): Promise<string[]> {
   const rows = await db
     .selectDistinct({ agent_id: conversations.agent_id })
     .from(conversations)
