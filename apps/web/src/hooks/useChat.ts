@@ -382,7 +382,7 @@ export function useChat() {
       history.replaceState(null, '', window.location.pathname + window.location.search)
       return null
     }
-  }, [applySnapshot, setViewKey])
+  }, [applySnapshot, clearUnreadFor, setViewKey])
 
   // Restore conversation from URL hash on mount (#/c/{id})
   useEffect(() => {
@@ -1085,7 +1085,7 @@ export function useChat() {
     } catch (err) {
       console.error('Failed to delete conversation:', err)
     }
-  }, [clearPartition, setViewKey])
+  }, [clearPartition, clearUnreadFor, setViewKey])
 
   const renameConversation = useCallback(async (id: string, title: string) => {
     try {

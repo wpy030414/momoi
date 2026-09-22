@@ -503,7 +503,7 @@ export function App() {
         toast({ title: t('menu.pushDeniedHint'), variant: 'info' })
       }
     }
-  }, [pushEnabled, currentUser, t])
+  }, [pushEnabled, currentUser, t, toast])
 
   // Sync toggle when permission is revoked externally（用户去浏览器设置里关掉通知 → 自动关开关）
   // Deliberately does NOT re-enable when permission is granted externally —

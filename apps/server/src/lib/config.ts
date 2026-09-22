@@ -109,7 +109,7 @@ export function invalidateConfigCache() { configCache = null }
 export async function getConfig(): Promise<AppConfig> {
   if (configCache && Date.now() - configCache.ts < CONFIG_TTL_MS) return configCache.data
   const rows = await db.select({ key: settings.key, value: settings.value }).from(settings).all()
-  const map = new Map(rows.map((r: typeof settings.$inferSelect) => [r.key, r.value]))
+  const map = new Map<string, string>(rows.map((r: typeof settings.$inferSelect) => [r.key, r.value] as [string, string]))
   configCache = { data: buildConfig(map), ts: Date.now() }
   return configCache.data
 }
@@ -384,7 +384,7 @@ export async function getVapidKeys(): Promise<{ publicKey: string; privateKey: s
   const keys = webPush.generateVAPIDKeys()
   await setSetting('vapid_private_key', keys.privateKey)
   await setSetting('vapid_public_key', keys.publicKey)
-  _vapidKeys = keys
+  _vapidKeys = keys as { publicKey: string; privateKey: string }
   console.log('[vapid] Generated new VAPID key pair')
   return _vapidKeys
 }

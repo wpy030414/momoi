@@ -54,7 +54,7 @@ export const serveClient = async (c: Context, next: Next) => {
       body = fs.readFileSync(file)
     }
 
-    return c.body(body, 200, headers)
+    return c.body(new Uint8Array(body), 200, headers)
   }
 
   // SPA fallback — index.html 永不缓存，保证发版即时生效
@@ -76,7 +76,7 @@ export const serveClient = async (c: Context, next: Next) => {
     } else {
       body = fs.readFileSync(index)
     }
-    return c.body(body, 200, headers)
+    return c.body(new Uint8Array(body), 200, headers)
   }
 
   return next()
