@@ -136,6 +136,31 @@ export function useChat() {
     setUnreadCounts(all)
   }, [])
 
+  /** 「浏览中即已读」自动续读：推进服务端 last_read_at。
+   *  正在查看的会话收到 unread_update(>0)（= 消息输出完成事件）时调用——
+   *  仅本地忽略红点是不够的：服务端权威计数仍在，切走后一次
+   *  refreshConversations / 迟到的 unread_update 会把红点补回来。
+   *  群聊多 Agent 连发时同一会话会密集触发：in-flight 去重 + dirty 补发，
+   *  保证在途期间新完成的消息也被最终水位覆盖。 */
+  const markReadInFlightRef = useRef<Set<string>>(new Set())
+  const markReadDirtyRef = useRef<Set<string>>(new Set())
+  const markConversationRead = useCallback((cid: string) => {
+    if (markReadInFlightRef.current.has(cid)) {
+      markReadDirtyRef.current.add(cid)
+      return
+    }
+    markReadInFlightRef.current.add(cid)
+    api.markConversationRead(cid)
+      .catch(() => { /* 失败静默：下一次 unread_update / 列表刷新会再次触发 */ })
+      .finally(() => {
+        markReadInFlightRef.current.delete(cid)
+        if (markReadDirtyRef.current.has(cid)) {
+          markReadDirtyRef.current.delete(cid)
+          markConversationRead(cid)
+        }
+      })
+  }, [])
+
   /** 视图 key：activeId ?? draftKey（null = 首页空态）。事件回调经 ref 读最新值。 */
   const activeIdRef = useRef<string | null>(null)
   const activeKeyRef = useRef<string | null>(null)
@@ -302,17 +327,23 @@ export function useChat() {
     api.listConversations()
       .then((res) => {
         setConversations(res.conversations)
-        // Server is authoritative for unread counts; sync them
+        // Server is authoritative for unread counts; sync them.
+        // 例外：正在查看的会话未读应恒为 0（浏览中即已读）——若服务端
+        // 仍有计数（如 SSE 断线期间错过了 unread_update），推进已读水位
+        // 自愈，且不写入本地计数，避免切走时旧值点亮红点。
         const counts: Record<string, number> = {}
         for (const conv of res.conversations) {
           const uc = (conv as any).unread_count as number | undefined
-          if (uc && uc > 0) counts[conv.id] = uc
+          if (uc && uc > 0) {
+            if (activeKeyRef.current === conv.id) markConversationRead(conv.id)
+            else counts[conv.id] = uc
+          }
         }
         unreadCountsRef.current = counts
         setUnreadCounts(counts)
       })
       .catch(console.error)
-  }, [])
+  }, [markConversationRead])
 
   /**
    * 会话视图加载公共入口（mount 恢复 / hashchange / 主动切换共用）。
@@ -1199,8 +1230,13 @@ export function useChat() {
         case 'unread_update': {
           const cid = payload.conversation_id
           const count = payload.unread_count
-          // 不给自己正在看的会话加红点
-          if (activeKeyRef.current === cid) return
+          // 正在查看的会话收到「消息输出完成」：不点红点，且必须推进服务端
+          // 已读水位——否则切走后服务端权威计数会把红点补回来（幽灵红点）。
+          if (activeKeyRef.current === cid) {
+            if (count > 0) markConversationRead(cid)
+            else clearUnreadFor(cid)
+            return
+          }
           if (count <= 0) {
             clearUnreadFor(cid)
           } else {
@@ -1214,7 +1250,7 @@ export function useChat() {
       unsubscribe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshConversations, refetchConversation, handleRemoteStreamEvent, getUser(), clearUnreadFor, setUnreadCountFor])
+  }, [refreshConversations, refetchConversation, handleRemoteStreamEvent, getUser(), clearUnreadFor, setUnreadCountFor, markConversationRead])
 
   // ---- 派生导出（签名与旧版一致，视图只是当前分区 key 的投影） ----
   const activeKey = activeId ?? draftKey

@@ -245,6 +245,10 @@ export const api = {
   // last_read_at 并广播 unread_update(0)。后台对账（conv_changed / 流收尾）、
   // 导出、群成员管理等一律走默认 false，不得产生「已读」副作用清掉红点。
   getConversation: (id: string, markRead = false) => request<{ conversation: import('@momoi/shared/types').Conversation; messages: import('@momoi/shared/types').Message[]; agents?: Array<{ id: string; name: string; avatar: string }>; is_qq_group?: boolean }>(`/api/conversations/${id}${markRead ? '?mark_read=1' : ''}`),
+  // 轻量已读标记：正在查看的会话收到 unread_update(>0)（= 消息输出完成事件）
+  // 时调用——「浏览中即已读」，推进 last_read_at，避免切走后被服务端权威
+  // 计数补上红点。与 getConversation(id, true) 的区别：不拉取消息，可高频调用。
+  markConversationRead: (id: string) => request<{ success: boolean }>(`/api/conversations/${id}/read`, { method: 'POST' }),
   createConversation: (title?: string) => request<{ conversation: import('@momoi/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title }) }),
   createGroupConversation: (agentIds: string[]) => request<{ conversation: import('@momoi/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: '群组对话', type: 'group', agent_ids: agentIds }) }),
   deleteConversation: (id: string) => request<{ success: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' }),

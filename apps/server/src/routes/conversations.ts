@@ -56,6 +56,19 @@ export const conversationsRoute = new Hono()
 // Apply user auth to all routes
 conversationsRoute.use('*', userAuthMiddleware)
 
+/** 推进会话已读水位（last_read_at = now）并广播 unread_update(0)。
+ *  GET /:id?mark_read=1（用户主动打开会话）与 POST /:id/read（浏览中
+ *  消息输出完成，客户端确认正在查看而自动续读）共用同一口径，避免漂移。 */
+async function advanceLastRead(userId: string, id: string): Promise<number> {
+  const now = Math.floor(Date.now() / 1000)
+  await db.update(conversations)
+    .set({ last_read_at: now })
+    .where(and(eq(conversations.id, id), eq(conversations.user_id, userId)))
+    .run()
+  broadcastUnreadUpdate(userId, id, 0)
+  return now
+}
+
 // List user's conversations
 conversationsRoute.get('/', async (c) => {
   const userId = getUserId(c)
@@ -102,13 +115,7 @@ conversationsRoute.get('/:id', async (c) => {
   // in sync (they clear the badge too, instead of waiting for the next
   // conv_sync to learn about it).
   if (c.req.query('mark_read') === '1') {
-    const now = Math.floor(Date.now() / 1000)
-    await db.update(conversations)
-      .set({ last_read_at: now })
-      .where(and(eq(conversations.id, id), eq(conversations.user_id, userId)))
-      .run()
-    conv.last_read_at = now
-    broadcastUnreadUpdate(userId, id, 0)
+    conv.last_read_at = await advanceLastRead(userId, id)
   }
 
   // Paginated messages: default 200, max 1000. Cursor `before` for older pages.
@@ -162,6 +169,23 @@ conversationsRoute.get('/:id', async (c) => {
     is_qq_group: isQqGroup,
     has_more: hasMore,
   })
+})
+
+// Mark-as-read WITHOUT fetching messages — called by the client when the
+// "message output complete" event (unread_update > 0) arrives for the
+// conversation the user is currently viewing: viewed-alive = read, so no
+// red dot should survive after they switch away. Lightweight & idempotent,
+// safe to call repeatedly during group-chat bursts.
+conversationsRoute.post('/:id/read', async (c) => {
+  const userId = getUserId(c)
+  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+
+  const id = c.req.param('id')
+  const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
+  if (!conv) return c.json({ error: 'Not found' }, 404)
+
+  await advanceLastRead(userId, id)
+  return c.json({ success: true })
 })
 
 // Create a new conversation
