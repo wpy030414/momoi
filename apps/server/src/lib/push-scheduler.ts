@@ -5,15 +5,14 @@
 // 1. 查询该用户对话过的所有 Agent → 随机选一个
 // 2. 取该 Agent 最近更新的 direct 会话
 // 3. 调用 AI 生成一条符合人设的通知消息
-// 4. 写入 messages 表
-// 5. 通过 Web Push 发送浏览器通知
-// 6. 重新调度下一次（2h ± 15min）
+// 4. 通过 Web Push 发送浏览器通知（不落库）
+// 5. 重新调度下一次（2h ± 15min）
 //
 // 深夜/凌晨时段（22:00-05:59）免打扰，延迟到 06:00。
 
 import { db, conversations, messages, pushSubscriptions } from '../db/index.js'
-import { and, eq, desc } from 'drizzle-orm'
-import { listAgents, getAgent, getVapidKeys } from '../lib/config.js'
+import { and, eq } from 'drizzle-orm'
+import { getAgent, getVapidKeys } from '../lib/config.js'
 import { streamChatCompletion } from '../ai/provider.js'
 import { getConfig } from '../lib/config.js'
 import type { ChatMessage } from '../ai/provider.js'
@@ -92,28 +91,9 @@ export async function getConversedAgents(userId: string): Promise<string[]> {
     .filter((id: string) => id)
 }
 
-/** 取该 Agent 最近更新的 direct 会话 */
-async function getLatestConversation(userId: string, agentId: string): Promise<typeof conversations.$inferSelect | null> {
-  const row = await db
-    .select()
-    .from(conversations)
-    .where(
-      and(
-        eq(conversations.user_id, userId),
-        eq(conversations.agent_id, agentId),
-        eq(conversations.type, 'direct'),
-      ),
-    )
-    .orderBy(desc(conversations.updated_at))
-    .limit(1)
-    .get()
-
-  return (row as typeof conversations.$inferSelect) ?? null
-}
-
 // ---- Web Push ----
 
-async function sendWebPush(userId: string, title: string, body: string): Promise<void> {
+export async function sendWebPush(userId: string, title: string, body: string): Promise<void> {
   try {
     const { publicKey, privateKey } = await getVapidKeys()
     const webPush = await import('web-push')
@@ -188,64 +168,41 @@ async function tick(userId: string): Promise<void> {
       return
     }
 
-    // 5. 取该 Agent 最近更新的会话
-    const conv = await getLatestConversation(userId, selectedAgentId)
-    if (!conv) {
-      console.log(`[push] No conversation found for user ${userId} agent ${selectedAgentId}`)
-      return
-    }
-
-    // 6. AI 生成通知内容
+    // 5. AI 生成通知内容
     const config = await getConfig()
-    const now = Date.now()
 
-    const messages: ChatMessage[] = [
+    const aiMessages: ChatMessage[] = [
       { role: 'system', content: agent.system_prompt },
       {
         role: 'user',
-        content: `给用户发一条不超过50字的提醒消息。用你的性格和语气自然地催促用户回来，不要重复之前的内容。`,
+        content: `给用户发一条简短的提醒消息，催促用户回来看看。要求：\n1. 用你的性格和语气自然地说话，以第一人称\n2. 标题不超过8字，正文不超过50字\n3. 严格按 JSON 格式回复，不要包含其他内容：{"title":"...","body":"..."}`,
       },
     ]
 
-    let notificationContent: string
+    let title = ''
+    let body = ''
     try {
-      notificationContent = await collectAIResponse(config, agent.model, messages)
-      if (!notificationContent) {
-        notificationContent = `${agent.name} 想念你了，快回来看看吧～`
-      }
+      const raw = await collectAIResponse(config, agent.model, aiMessages)
+      const json = JSON.parse(raw)
+      title = json.title || agent.name
+      body = json.body || ''
     } catch (err) {
       console.error(`[push] AI generation failed for agent ${selectedAgentId}:`, (err as Error).message)
-      notificationContent = `${agent.name} 想念你了，快回来看看吧～`
     }
+    if (!title) title = agent.name
+    if (!body) body = `我想你了，快回来看看吧～`
 
-    // 7. 写入 messages
-    const createdAt = Math.floor(now / 1000)
-    await db.insert(messages).values({
-      conversation_id: conv.id,
-      role: 'assistant',
-      content: notificationContent,
-      agent_id: selectedAgentId,
-      created_at: createdAt,
-    }).run()
+    // 6. Web Push 发送（不落库）
+    await sendWebPush(userId, title, body)
+    console.log(`[push] Sent web push for user ${userId} agent ${agent.name}: title="${title}" body="${body}"`)
 
-    // 更新会话的 updated_at
-    await db.update(conversations)
-      .set({ updated_at: createdAt })
-      .where(eq(conversations.id, conv.id))
-      .run()
-
-    console.log(`[push] Wrote notification message for user ${userId} agent ${agent.name}: "${notificationContent}"`)
-
-    // 8. Web Push 发送
-    await sendWebPush(userId, `${agent.name} 想你了`, notificationContent)
-
-    // 9. 清理旧定时器
+    // 7. 清理旧定时器
     const existing = timers.get(userId)
     if (existing) {
       clearTimeout(existing.timer)
     }
 
-    // 10. 重新调度下一次
+    // 8. 重新调度下一次
     const nextDelay = getRandomDelay()
     console.log(`[push] Next notification for user ${userId} in +${Math.round(nextDelay / 60000)}min`)
     scheduleTimer(userId, nextDelay)
