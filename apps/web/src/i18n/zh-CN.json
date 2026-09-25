@@ -116,7 +116,13 @@
     "agentsInWorld": "世界中的 Agent",
     "noWebgl": "此设备不支持 3D 渲染，已切换为平面地图",
     "degraded": "设备图形性能有限，已降低渲染精度",
-    "fallbackNotice": "地形生成失败，已使用随机自然地形"
+    "fallbackNotice": "地形生成失败，已使用随机自然地形",
+    "log": "事件日志",
+    "logEmpty": "还没有发生任何事。写下你的行动，让世界动起来。",
+    "turn": "回合 {{n}}",
+    "turnCount": "共 {{n}} 回合",
+    "acting": "{{name}} 正在行动…",
+    "actionPlaceholder": "作为上帝，你做了什么？例如：我在天空中降下一道雷，劈向东边的山脊。"
   },
   "menu": {
     "logout": "退出登录",

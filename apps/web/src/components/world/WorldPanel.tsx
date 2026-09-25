@@ -2,8 +2,11 @@
 // WorldPanel — 世界模拟的主视图（取代该会话的消息气泡区）
 // ============================================================
 // 挂在 App.tsx 主区三元链上，与 ChatPanel 同级而非其分支：世界需要自己的 chrome
-// （法则入口、世界信息、Phase 2 的上帝交互条），而 ChatPanel 的 25 个属性在世界
+// （事件日志、上帝行动条、法则入口、世界信息），而 ChatPanel 的二十余个属性在世界
 // 模式下无一有意义。
+//
+// 布局（自上而下）：三维沙盘（或二维降级地图）→ 事件日志 → 上帝行动条。
+// 沙盘占满剩余空间，日志可折叠，行动条固定在底部。
 //
 // 两层懒加载，让不开世界的用户零成本：
 //   1) useWorld 懒加载本组件外壳
@@ -12,14 +15,16 @@
 
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { WorldState } from '@momoi/shared/types'
+import type { WorldEntity, WorldEvent, WorldState } from '@momoi/shared/types'
 import { Button } from '../ui/button'
 import { Loading } from '../ui/spinner'
 import { Globe, Info, X } from 'lucide-react'
 import { detectWebGL } from '../../lib/webgl'
 import { WorldFallback } from './WorldFallback'
+import { WorldEventLog } from './WorldEventLog'
+import { GodActionBar } from './GodActionBar'
 import { LawsEditor } from './LawsEditor'
-import type { WorldAgent } from './WorldCanvas'
+import type { WorldAgentBrief } from '../../hooks/useWorld'
 
 // ⚠️ 模块作用域，不能在组件内 —— 组件内 lazy() 每次渲染都会重建 lazy 类型
 const LazyWorldCanvas = lazy(() =>
@@ -28,24 +33,35 @@ const LazyWorldCanvas = lazy(() =>
 
 interface WorldPanelProps {
   worldState: WorldState | null
-  worldAgents: WorldAgent[]
+  worldEntities: WorldEntity[]
+  worldEvents: WorldEvent[]
+  worldAgents: WorldAgentBrief[]
   loading: boolean
   error: string | null
+  acting: boolean
+  actingName: string | null
   savingLaws: boolean
   onSaveLaws: (laws: string) => Promise<void>
+  onAct: (content: string) => void
 }
 
 export function WorldPanel({
   worldState,
+  worldEntities,
+  worldEvents,
   worldAgents,
   loading,
   error,
+  acting,
+  actingName,
   savingLaws,
   onSaveLaws,
+  onAct,
 }: WorldPanelProps) {
   const { t } = useTranslation()
   const [lawsOpen, setLawsOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(true)
+  const [logCollapsed, setLogCollapsed] = useState(false)
   const [contextLost, setContextLost] = useState(false)
 
   // 探测结果在模块内缓存，多次渲染不重复分配 GL 上下文
@@ -58,7 +74,7 @@ export function WorldPanel({
   let body: React.ReactNode
   if (loading && !worldState) {
     body = <CenterNote title={t('common.loading')} />
-  } else if (error) {
+  } else if (error && !worldState) {
     body = <CenterNote title={t('world.failed')} detail={error} />
   } else if (worldState?.status === 'failed') {
     // failed 必须排在「地形未就绪」之前 —— 失败态本来就没有 spec，
@@ -66,20 +82,26 @@ export function WorldPanel({
     body = <CenterNote title={t('world.failed')} detail={worldState.status_error || t('world.failedHint')} />
   } else if (!worldState || worldState.status === 'generating' || !spec) {
     body = <Generating />
-  } else if (degraded || gl === 'none') {
+  } else if (gl === 'none' || degraded) {
     // 二维降级：实时性更好、无 GPU 依赖，且它本身就有用（那是一张地图）
-    body = <WorldFallback spec={spec} agents={worldAgents} />
+    body = <WorldFallback spec={spec} entities={worldEntities} agents={worldAgents} />
   } else {
     body = (
       <Suspense fallback={<CenterNote title={t('common.loading')} />}>
-        <LazyWorldCanvas spec={spec} agents={worldAgents} quality={gl} onContextLost={() => setContextLost(true)} />
+        <LazyWorldCanvas
+          spec={spec}
+          entities={worldEntities}
+          agents={worldAgents}
+          quality={gl}
+          onContextLost={() => setContextLost(true)}
+        />
       </Suspense>
     )
   }
 
   return (
     <div className="flex-1 flex flex-col min-h-0 relative">
-      {/* 画布区：填满主区，顶部留出 60px 顶栏 */}
+      {/* 沙盘区：填满剩余空间，顶部留出 60px 顶栏 */}
       <div className="flex-1 min-h-0 relative mt-[60px]">{body}</div>
 
       {/* 世界信息卡（可折叠）—— 悬浮在右上 */}
@@ -116,16 +138,36 @@ export function WorldPanel({
         </div>
       )}
 
-      {/* 降级提示：非阻断，浮在底部 */}
-      {(gl === 'none' || contextLost) && worldState?.status === 'ready' && (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 rounded-full border bg-card/95 backdrop-blur px-4 py-1.5 text-xs text-muted-foreground shadow">
+      {/* 降级提示：非阻断，浮在沙盘下缘 */}
+      {ready && gl === 'none' && (
+        <div className="absolute bottom-[calc(26vh+52px)] left-1/2 -translate-x-1/2 z-20 rounded-full border bg-card/95 backdrop-blur px-4 py-1.5 text-xs text-muted-foreground shadow">
           {t('world.noWebgl')}
         </div>
       )}
-      {gl === 'software' && !contextLost && worldState?.status === 'ready' && (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 rounded-full border bg-card/95 backdrop-blur px-4 py-1.5 text-xs text-muted-foreground shadow">
+      {ready && gl === 'software' && !contextLost && (
+        <div className="absolute bottom-[calc(26vh+52px)] left-1/2 -translate-x-1/2 z-20 rounded-full border bg-card/95 backdrop-blur px-4 py-1.5 text-xs text-muted-foreground shadow">
           {t('world.degraded')}
         </div>
+      )}
+
+      {/* 回合失败 / 拉取错误的行内提示（世界已就绪时） */}
+      {ready && error && (
+        <div className="absolute top-[68px] left-3 z-20 max-w-sm rounded-lg border border-destructive/40 bg-card/95 backdrop-blur px-3 py-2 text-xs text-destructive shadow">
+          {error}
+        </div>
+      )}
+
+      {/* 事件日志 + 上帝行动条：世界就绪后常驻 */}
+      {ready && (
+        <>
+          <WorldEventLog
+            events={worldEvents}
+            actingName={actingName}
+            collapsed={logCollapsed}
+            onToggleCollapsed={() => setLogCollapsed((v) => !v)}
+          />
+          <GodActionBar disabled={worldState?.status !== 'ready'} acting={acting} onSubmit={onAct} />
+        </>
       )}
 
       {spec && (

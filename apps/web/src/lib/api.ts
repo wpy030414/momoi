@@ -268,10 +268,8 @@ export const api = {
     conversation: import('@momoi/shared/types').Conversation
     world: import('@momoi/shared/types').WorldState
   }>('/api/worlds', { method: 'POST', body: JSON.stringify({ prompt, agent_ids: agentIds }) }),
-  getWorld: (convId: string) => request<{
-    world: import('@momoi/shared/types').WorldState
-    agents: Array<{ id: string; name: string; avatar: string }>
-  }>(`/api/worlds/${convId}`),
+  // 返回完整快照：世界状态 + 实体 + 事件日志 + 成员（含头像，供沙盘名牌使用）
+  getWorld: (convId: string) => request<import('@momoi/shared/types').WorldSnapshot>(`/api/worlds/${convId}`),
   updateWorldLaws: (convId: string, laws: string) => request<{ world: import('@momoi/shared/types').WorldState }>(
     `/api/worlds/${convId}`,
     { method: 'PATCH', body: JSON.stringify({ laws }) },

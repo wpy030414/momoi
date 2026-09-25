@@ -9,38 +9,37 @@
 // 与三维视图消费**完全相同的 buildTerrain 产物**，所以两者不会各说各话。
 
 import { useEffect, useMemo, useRef } from 'react'
-import { buildTerrain, spawnPoints, waterLevel } from '@momoi/shared/world'
+import { buildTerrain, waterLevel } from '@momoi/shared/world'
 import type { TerrainSpec } from '@momoi/shared/world'
-import type { WorldAgent } from './WorldCanvas'
+import type { WorldEntity } from '@momoi/shared/types'
+import type { WorldAgentBrief } from '../../hooks/useWorld'
 
 interface WorldFallbackProps {
   spec: TerrainSpec
-  agents: WorldAgent[]
+  /** 实体位置是受控的（来自世界快照 / 回合事件），不再由客户端自行散列 */
+  entities: WorldEntity[]
+  agents: WorldAgentBrief[]
 }
 
 /** 俯视地图的边长（像素）。256² 采样一次约 10ms，肉眼已足够细腻。 */
 const MAP_SIZE = 256
 const MAP_SEGMENTS = 255
 
-export function WorldFallback({ spec, agents }: WorldFallbackProps) {
+export function WorldFallback({ spec, entities, agents }: WorldFallbackProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  // 与 WorldCanvas 同款：用稳定的成员标识而非数组引用作依赖，避免每次父渲染
-  // 都重跑 spawnPoints（每个成员最多 480 次高度采样）并重绘整张地图。
+  // 与 WorldCanvas 同款：用稳定的标识而非数组引用作依赖，避免每次父渲染
+  // 都把整张地图（256² 采样）重绘一遍。
   const agentsRef = useRef(agents)
   agentsRef.current = agents
   const agentsKey = useMemo(() => agents.map((a) => a.id).join('|'), [agents])
-
-  const markers = useMemo(
-    () => spawnPoints(spec, agentsKey ? agentsKey.split('|') : []),
-    [spec, agentsKey],
-  )
+  const entitiesRef = useRef(entities)
+  entitiesRef.current = entities
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    const agents = agentsRef.current
 
     // 用较小的采样密度建网格，再放大到地图尺寸绘制（避免 256² 顶点的插值开销）
     const data = buildTerrain(spec, { segments: MAP_SEGMENTS })
@@ -77,27 +76,26 @@ export function WorldFallback({ spec, agents }: WorldFallbackProps) {
 
     ctx.putImageData(img, 0, 0)
 
-    // Agent 落点：归一化坐标 [-1,1] → 像素
-    for (const point of markers) {
-      const agent = agents.find((a) => a.id === point.id)
-      if (!agent) continue
-      const px = (point.x + 1) / 2 * MAP_SIZE
-      const py = (point.z + 1) / 2 * MAP_SIZE
+    // 实体标记：归一化坐标 [-1,1] → 像素。死亡者画成空心灰点。
+    for (const entity of entitiesRef.current) {
+      const px = ((entity.x + 1) / 2) * MAP_SIZE
+      const py = ((entity.z + 1) / 2) * MAP_SIZE
+      const alive = entity.status === 'alive'
       ctx.beginPath()
       ctx.arc(px, py, 5, 0, Math.PI * 2)
-      ctx.fillStyle = '#ffffff'
+      ctx.fillStyle = alive ? '#ffffff' : 'rgba(120,120,120,0.65)'
       ctx.fill()
       ctx.lineWidth = 2
       ctx.strokeStyle = '#1a1a1a'
       ctx.stroke()
       ctx.font = 'bold 11px sans-serif'
-      ctx.fillStyle = '#ffffff'
+      ctx.fillStyle = alive ? '#ffffff' : 'rgba(220,220,220,0.75)'
       ctx.strokeStyle = 'rgba(0,0,0,0.75)'
       ctx.lineWidth = 3
-      ctx.strokeText(agent.name, px + 8, py + 4)
-      ctx.fillText(agent.name, px + 8, py + 4)
+      ctx.strokeText(entity.name, px + 8, py + 4)
+      ctx.fillText(entity.name, px + 8, py + 4)
     }
-  }, [spec, agentsKey, markers])
+  }, [spec, agentsKey, entities])
 
   return (
     <div className="absolute inset-0 flex items-center justify-center overflow-hidden p-4">

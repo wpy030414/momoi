@@ -6,30 +6,25 @@
 // markdown 的懒加载：Rolldown 构建下裸动态导入库命名空间会坏。
 //
 // 场景刻意极简：一块位移网格 + 一片水面 + 若干名牌。没有 Sky shader、没有环境
-// 贴图、没有 HDR、没有后处理。水的意义是**可读性**（让海平面与「有毒」看得见），
-// 不是炫技。
+// 贴图、没有 HDR、没有后处理。水的意义是**可读性**（让海平面与「有毒」看得见）。
 //
-// 性能取向：**按需重绘**，不跑常驻 requestAnimationFrame。Phase 1 没有动画，
-// 唯一需要重绘的契机是相机变化或尺寸变化。代价是必须 enableDamping=false
-// （阻尼需要连续循环才能收敛）。收益在移动端是实的：读法则时没有 60fps 的
-// 持续 GPU 唤醒与发热。
+// 两个渲染取向（都要保住）：
+//  1) **按需重绘**，不跑常驻 rAF —— 静态时零 GPU 唤醒，读法则不发热
+//  2) 但实体移动需要动画 —— 故只在「有标记尚未到位」这段时间跑 rAF，跑完即停
 
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { buildTerrain, sampleHeight, spawnPoints, waterLevel, WORLD_LIMITS } from '@momoi/shared/world'
+import { buildTerrain, sampleHeight, waterLevel, WORLD_LIMITS } from '@momoi/shared/world'
 import type { TerrainSpec } from '@momoi/shared/world'
+import type { WorldEntity } from '@momoi/shared/types'
 import type { GLSupport } from '../../lib/webgl'
-
-export interface WorldAgent {
-  id: string
-  name: string
-  avatar: string
-}
+import type { WorldAgentBrief } from '../../hooks/useWorld'
 
 interface WorldCanvasProps {
   spec: TerrainSpec
-  agents: WorldAgent[]
+  entities: WorldEntity[]
+  agents: WorldAgentBrief[]
   quality: GLSupport
   /** WebGL 上下文丢失时回调（钉钉 WebView 切后台会丢），交由上层切降级视图 */
   onContextLost?: () => void
@@ -39,6 +34,8 @@ interface WorldCanvasProps {
 const S = WORLD_LIMITS.terrainSize / 2
 /** 归一化高度 → 场景高度 */
 const Y_SCALE = S * WORLD_LIMITS.heightScale
+/** 移动补间的收敛系数（每帧走剩余距离的 18%） */
+const TWEEN = 0.18
 
 const SKY_COLOR: Record<string, string> = {
   day: '#9dc4e8',
@@ -49,7 +46,21 @@ const SKY_COLOR: Record<string, string> = {
   void: '#050508',
 }
 
-export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanvasProps) {
+/** 一个标记的可变句柄 —— 位置做补间、状态变化改配色；几何与纹理随句柄一起释放 */
+interface MarkerHandle {
+  group: THREE.Group
+  pinGeo: THREE.BufferGeometry
+  pinMat: THREE.MeshStandardMaterial
+  labelTex: THREE.CanvasTexture
+  spriteMat: THREE.SpriteMaterial
+  /** 当前渲染位置（归一化） */
+  cur: THREE.Vector2
+  /** 目标位置（归一化） */
+  target: THREE.Vector2
+  status: WorldEntity['status']
+}
+
+export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: WorldCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const onContextLostRef = useRef(onContextLost)
   onContextLostRef.current = onContextLost
@@ -60,6 +71,14 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
   agentsRef.current = agents
   const agentsKey = useMemo(() => agents.map((a) => a.id).join('|'), [agents])
 
+  // 场景资源句柄：场景 effect 建立，标记 effect 使用
+  const sceneCtxRef = useRef<{
+    markersGroup: THREE.Group
+    render: () => void
+    startAnimation: () => void
+  } | null>(null)
+  const markersRef = useRef<Map<string, MarkerHandle>>(new Map())
+
   // 分段数只影响渲染精度，不影响地形本身（同一 heightAt 采样）。
   // 96 是拐点：约 3.7 万顶点、总采样耗时 10~30ms；再往上收益在典型相机距离下
   // 看不出来，代价却是手机上 100~200ms 的主线程阻塞。
@@ -69,10 +88,10 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
     return mobile ? WORLD_LIMITS.segmentsMobile : WORLD_LIMITS.segmentsDesktop
   }, [quality])
 
+  // ---------------- 场景（地形 / 水面 / 光 / 相机）----------------
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const agents = agentsRef.current
 
     const bg = new THREE.Color(SKY_COLOR[spec.sky.preset] ?? SKY_COLOR.day)
     const scene = new THREE.Scene()
@@ -115,10 +134,9 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     geo.computeVertexNormals()
     const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 })
-    const terrain = new THREE.Mesh(geo, terrainMat)
-    scene.add(terrain)
+    scene.add(new THREE.Mesh(geo, terrainMat))
 
-    // ---- 有限沙盘的「厚度」：让边界看起来是一块被切出来的地，而不是无限延伸的地面 ----
+    // ---- 有限沙盘的「厚度」：让边界看起来是一块被切出来的地，而非无限延伸的地面 ----
     let minY = Infinity
     for (let i = 0; i < data.heights.length; i++) minY = Math.min(minY, data.heights[i] * Y_SCALE)
     const slabGeo = new THREE.BoxGeometry(2 * S, Math.max(4, Math.abs(minY) * 0.5), 2 * S)
@@ -154,29 +172,9 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
     sun.position.set(S * 0.6, S * 1.2, S * 0.4)
     scene.add(sun)
 
-    // ---- Agent 名牌（Phase 1 仅展示，不交互）----
-    const markerDisposables: Array<{ dispose: () => void }> = []
-    const markers = spawnPoints(spec, agents.map((a) => a.id))
-    for (const point of markers) {
-      const agent = agents.find((a) => a.id === point.id)
-      if (!agent) continue
-      const x = point.x * S
-      const z = point.z * S
-      const y = sampleHeight(spec, point.x, point.z) * Y_SCALE
-
-      // 底座小柱：让名牌不至于悬浮
-      const pinGeo = new THREE.CylinderGeometry(1.6, 1.6, S * 0.06, 10)
-      const pinMat = new THREE.MeshStandardMaterial({ color: '#f0e6d2', roughness: 0.6, metalness: 0.1 })
-      const pin = new THREE.Mesh(pinGeo, pinMat)
-      pin.position.set(x, y + S * 0.03, z)
-      scene.add(pin)
-      markerDisposables.push(pinGeo, pinMat)
-
-      const label = makeLabelSprite(agent)
-      label.sprite.position.set(x, y + S * 0.085, z)
-      scene.add(label.sprite)
-      markerDisposables.push(label.sprite.material, label.texture)
-    }
+    // ---- 标记容器（内容由下方「标记」effect 维护）----
+    const markersGroup = new THREE.Group()
+    scene.add(markersGroup)
 
     // ---- 相机控制：只旋转 + 缩放，不平移 ----
     const controls = new OrbitControls(camera, renderer.domElement)
@@ -196,18 +194,15 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
     controls.target.set(0, 0, 0)
     // 不调 listenToKeyEvents：键盘平移/缩放不是要的能力
 
-    // ---- 尺寸与渲染循环 ----
+    // ---- 尺寸与渲染 ----
     //
     // ⚠️ renderFrame **绝不能**调用 controls.update()。
-    //
     // OrbitControls 的 update() 在**派发 change 事件之后**才记录 _lastPosition
     // （源码：this.dispatchEvent(_changeEvent) 在前，this._lastPosition.copy(...) 在后）。
     // 若 change 监听器里再调 update()，重入的那次看到的是**尚未更新**的 _lastPosition，
     // 于是判定「相机又动了」→ 再派发 → 再调 update() → 无限递归，
     // 表现为一拖动就 RangeError: Maximum call stack size exceeded。
-    //
-    // 输入处理器自己会调 update()（旋转/缩放/平移的各分支末尾），
-    // 所以这里的职责只有一件事：把当前状态画出来。
+    // 输入处理器自己会调 update()（旋转/缩放/平移各分支末尾），这里只负责画。
     const renderFrame = () => {
       renderer.render(scene, camera)
     }
@@ -220,8 +215,33 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
       renderFrame()
     }
 
-    // 应用初始状态（此后由输入处理器自行 update）。放在注册监听器之前，
-    // 免得这次 update 派发的 change 进来时 renderFrame 还没准备好。
+    // ---- 移动补间：只在「有标记未到位」时跑 rAF，跑完即停 ----
+    let rafId = 0
+    const tick = () => {
+      let moving = false
+      for (const m of markersRef.current.values()) {
+        const dx = m.target.x - m.cur.x
+        const dz = m.target.y - m.cur.y
+        if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) {
+          m.cur.copy(m.target)
+        } else {
+          m.cur.x += dx * TWEEN
+          m.cur.y += dz * TWEEN
+          moving = true
+        }
+        m.group.position.x = m.cur.x * S
+        m.group.position.z = m.cur.y * S
+        // 贴着地表走 —— 移动过程中高度也随之变化
+        m.group.position.y = sampleHeight(spec, m.cur.x, m.cur.y) * Y_SCALE
+      }
+      renderFrame()
+      rafId = moving ? requestAnimationFrame(tick) : 0
+    }
+    const startAnimation = () => {
+      if (!rafId) rafId = requestAnimationFrame(tick)
+    }
+
+    // 应用初始状态（此后由输入处理器自行 update）。放在注册监听器之前。
     controls.update()
 
     const ro = new ResizeObserver(resize)
@@ -236,13 +256,22 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
     }
     renderer.domElement.addEventListener('webglcontextlost', onLost)
 
+    sceneCtxRef.current = { markersGroup, render: renderFrame, startAnimation }
+
     // ---- 拆卸：WebGL 代码就是在这里泄漏的，必须逐项 dispose ----
     return () => {
+      if (rafId) cancelAnimationFrame(rafId)
+      sceneCtxRef.current = null
+      // markersRef 是本组件自己拥有的集合（非 React 节点 ref），拆卸时**必须**读它的
+      // 当前内容：标记由下方另一个 effect 在场景就绪后才创建，在本 effect 体开头捕获到
+      // 的会是一个空 Map —— 那会漏掉所有标记的 dispose，正是 WebGL 泄漏的典型来源。
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      for (const m of markersRef.current.values()) disposeMarker(m)
+      markersRef.current.clear()
       ro.disconnect()
       controls.removeEventListener('change', renderFrame)
       controls.dispose()
       renderer.domElement.removeEventListener('webglcontextlost', onLost)
-      for (const d of markerDisposables) d.dispose()
       geo.dispose()
       terrainMat.dispose()
       slabGeo.dispose()
@@ -253,16 +282,98 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
       renderer.forceContextLoss()
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement)
     }
-  }, [spec, agentsKey, quality, segments])
+  }, [spec, quality, segments])
+
+  // ---------------- 标记（随实体变化增删与移动）----------------
+  useEffect(() => {
+    const ctx = sceneCtxRef.current
+    if (!ctx) return
+    const live = new Set(entities.map((e) => e.id))
+
+    // 移除已不存在的实体标记
+    for (const [id, handle] of markersRef.current) {
+      if (live.has(id)) continue
+      ctx.markersGroup.remove(handle.group)
+      disposeMarker(handle)
+      markersRef.current.delete(id)
+    }
+
+    // 新增 / 更新
+    for (const entity of entities) {
+      let handle = markersRef.current.get(entity.id)
+      if (!handle) {
+        handle = createMarker(entity, agentsRef.current, spec)
+        ctx.markersGroup.add(handle.group)
+        markersRef.current.set(entity.id, handle)
+      }
+      handle.target.set(entity.x, entity.z)
+      if (handle.status !== entity.status) {
+        handle.status = entity.status
+        applyStatus(handle, entity.status)
+      }
+    }
+
+    ctx.startAnimation()
+  }, [entities, agentsKey, spec])
 
   return <div ref={hostRef} className="absolute inset-0" />
+}
+
+// ---------------------------------------------------------------
+// 标记（名牌 + 底座）
+// ---------------------------------------------------------------
+
+function createMarker(entity: WorldEntity, agents: WorldAgentBrief[], spec: TerrainSpec): MarkerHandle {
+  const group = new THREE.Group()
+
+  const pinGeo = new THREE.CylinderGeometry(1.6, 1.6, S * 0.06, 10)
+  const pinMat = new THREE.MeshStandardMaterial({ color: '#f0e6d2', roughness: 0.6, metalness: 0.1 })
+  const pin = new THREE.Mesh(pinGeo, pinMat)
+  pin.position.y = S * 0.03
+  group.add(pin)
+
+  const avatar = entity.agent_id ? agents.find((a) => a.id === entity.agent_id)?.avatar ?? '' : ''
+  const { sprite, texture } = makeLabelSprite(entity.name, avatar)
+  sprite.position.y = S * 0.085
+  group.add(sprite)
+
+  const handle: MarkerHandle = {
+    group,
+    pinGeo,
+    pinMat,
+    labelTex: texture,
+    spriteMat: sprite.material as THREE.SpriteMaterial,
+    cur: new THREE.Vector2(entity.x, entity.z),
+    target: new THREE.Vector2(entity.x, entity.z),
+    status: entity.status,
+  }
+  // 初始高度直接贴地，不依赖首帧动画来纠正
+  group.position.set(entity.x * S, sampleHeight(spec, entity.x, entity.z) * Y_SCALE, entity.z * S)
+  applyStatus(handle, entity.status)
+  return handle
+}
+
+function disposeMarker(handle: MarkerHandle): void {
+  handle.group.clear()
+  handle.pinGeo.dispose()
+  handle.labelTex.dispose()
+  handle.pinMat.dispose()
+  handle.spriteMat.dispose()
+}
+
+/** 死亡 / 消失：压暗并降低不透明度 —— 画面上一眼能看出谁已经不再行动 */
+function applyStatus(handle: MarkerHandle, status: WorldEntity['status']): void {
+  const alive = status === 'alive'
+  handle.pinMat.color.setStyle(alive ? '#f0e6d2' : '#555049')
+  handle.spriteMat.opacity = alive ? 1 : status === 'dead' ? 0.4 : 0.2
+  handle.spriteMat.transparent = true
 }
 
 /**
  * 生成一张名牌精灵：圆底 + 名字，有头像时把头像裁进圆里。
  * 用 CanvasTexture 而非图片加载流程（头像本身也是 data URL，异步重绘即可）。
  */
-function makeLabelSprite(agent: WorldAgent): { sprite: THREE.Sprite; texture: THREE.CanvasTexture } {
+function makeLabelSprite(name: string, avatar: string): { sprite: THREE.Sprite; texture: THREE.CanvasTexture } {
   const W = 256
   const H = 96
   const canvas = document.createElement('canvas')
@@ -270,32 +381,30 @@ function makeLabelSprite(agent: WorldAgent): { sprite: THREE.Sprite; texture: TH
   canvas.height = H
   const ctx = canvas.getContext('2d')!
 
-  const draw = (avatar: HTMLImageElement | null) => {
+  const draw = (img: HTMLImageElement | null) => {
     ctx.clearRect(0, 0, W, H)
-    // 圆底
     ctx.beginPath()
     ctx.arc(48, H / 2, 34, 0, Math.PI * 2)
-    ctx.fillStyle = avatar ? '#f0e6d2' : '#6f9e52'
+    ctx.fillStyle = img ? '#f0e6d2' : '#6f9e52'
     ctx.fill()
-    if (avatar) {
+    if (img) {
       ctx.save()
       ctx.beginPath()
       ctx.arc(48, H / 2, 32, 0, Math.PI * 2)
       ctx.clip()
-      ctx.drawImage(avatar, 48 - 32, H / 2 - 32, 64, 64)
+      ctx.drawImage(img, 48 - 32, H / 2 - 32, 64, 64)
       ctx.restore()
     } else {
       ctx.fillStyle = '#22301c'
       ctx.font = 'bold 34px sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(agent.name.slice(0, 1), 48, H / 2 + 2)
+      ctx.fillText(name.slice(0, 1), 48, H / 2 + 2)
     }
-    // 名字
     ctx.font = 'bold 30px sans-serif'
     ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'
-    const text = agent.name.slice(0, 8)
+    const text = name.slice(0, 8)
     const w = ctx.measureText(text).width
     ctx.fillStyle = 'rgba(0,0,0,0.55)'
     roundRect(ctx, 90, H / 2 - 22, w + 20, 44, 10)
@@ -311,13 +420,13 @@ function makeLabelSprite(agent: WorldAgent): { sprite: THREE.Sprite; texture: TH
   const sprite = new THREE.Sprite(material)
   sprite.scale.set(S * 0.22, S * 0.22 * (H / W), 1)
 
-  if (agent.avatar) {
+  if (avatar) {
     const img = new Image()
     img.onload = () => {
       draw(img)
       texture.needsUpdate = true
     }
-    img.src = agent.avatar
+    img.src = avatar
   }
 
   return { sprite, texture }

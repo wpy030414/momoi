@@ -704,11 +704,16 @@ export function App() {
                 <WorldPanel
                   key={chat.activeId ?? 'world'}
                   worldState={chat.worldState}
+                  worldEntities={chat.worldEntities}
+                  worldEvents={chat.worldEvents}
                   worldAgents={chat.worldAgents}
                   loading={chat.worldLoading}
                   error={chat.worldError}
+                  acting={chat.worldActing}
+                  actingName={chat.worldActingName}
                   savingLaws={chat.worldSavingLaws}
                   onSaveLaws={chat.saveWorldLaws}
+                  onAct={chat.actWorld}
                 />
               </Suspense>
             ) : (

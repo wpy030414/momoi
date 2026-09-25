@@ -1224,6 +1224,18 @@ export function useChat() {
             detail: { conversation_id: payload.conversation_id, status: payload.status },
           }))
           break
+        case 'world_turn':
+          // 世界回合开始 / 结束 —— 其它设备据此禁用输入并显示「谁正在行动」
+          window.dispatchEvent(new CustomEvent('realtime:world_turn', {
+            detail: { conversation_id: payload.conversation_id, turn: payload.turn, running: payload.running },
+          }))
+          break
+        case 'world_event':
+          // 回合中产生的单条事件 —— 追加到事件日志（useWorld 侧按 id 去重）
+          window.dispatchEvent(new CustomEvent('realtime:world_event', {
+            detail: { conversation_id: payload.conversation_id, event: payload.event },
+          }))
+          break
         case 'stream': {
           // 其他设备正在流式输出 —— 事件写入该会话自己的分区：
           // 当前正在查看（activeKey 或 hash 指向），或该分区已存在（打开过的

@@ -116,7 +116,13 @@
     "agentsInWorld": "Agents in this world",
     "noWebgl": "This device does not support 3D rendering — showing a flat map instead",
     "degraded": "Limited graphics performance detected — rendering at reduced quality",
-    "fallbackNotice": "Terrain generation failed; a random natural terrain was used instead"
+    "fallbackNotice": "Terrain generation failed; a random natural terrain was used instead",
+    "log": "Event log",
+    "logEmpty": "Nothing has happened yet. Write your action and set the world in motion.",
+    "turn": "Turn {{n}}",
+    "turnCount": "{{n}} turns",
+    "acting": "{{name}} is acting…",
+    "actionPlaceholder": "As God, what do you do? e.g. I send a bolt of lightning down onto the eastern ridge."
   },
   "menu": {
     "logout": "Logout",
