@@ -132,9 +132,9 @@ conversationsRoute.get('/:id', async (c) => {
   msgs.reverse()
   const hasMore = msgs.length === limit
 
-  // For group conversations, also return the agent list
+  // For group conversations, also return the agent list（世界会话同样需要成员列表）
   let groupAgents: Array<{ id: string; name: string; avatar: string }> | undefined
-  if ((conv as any).type === 'group') {
+  if ((conv as any).type === 'group' || (conv as any).type === 'world') {
     const rows = await db.select({
       agent_id: groupConversationAgents.agent_id,
       name: agents.name,
@@ -193,7 +193,13 @@ conversationsRoute.post('/', async (c) => {
   const userId = getUserId(c)
   if (!userId) return c.json({ error: 'Unauthorized' }, 401)
 
-  const body = await c.req.json<{ title?: string; agent_id?: string; type?: 'direct' | 'group'; agent_ids?: string[] }>()
+  const body = await c.req.json<{ title?: string; agent_id?: string; type?: 'direct' | 'group' | 'world'; agent_ids?: string[] }>()
+  // 世界会话必须经 POST /api/worlds 创建（那里会一并写入 worlds 行与地形生成任务）。
+  // 必须显式拒绝，而不是靠上面的类型标注 —— 运行时这是**未经校验的 JSON**，
+  // 否则能造出「有 conversations 行、无 worlds 行」的永久损坏侧边栏条目。
+  if ((body as { type?: string }).type === 'world') {
+    return c.json({ error: 'World conversations must be created via POST /api/worlds' }, 400)
+  }
   const id = randomUUID()
   const now = Math.floor(Date.now() / 1000)
 

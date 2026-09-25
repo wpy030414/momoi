@@ -11,6 +11,8 @@
 // 来源设备自跳过：聊天流事件携带发起方 deviceId，源设备自己的事件通道
 // 不重复推送（源设备已通过 POST /api/chat 的 fetch 流直接渲染）。
 
+import type { WorldStatus } from '@momoi/shared/types'
+
 interface RealtimeSubscriber {
   deviceId: string
   aborted: boolean
@@ -106,6 +108,18 @@ export function broadcastConversationChanged(userId: string, conversationId: str
 /** 群成员变更 */
 export function broadcastGroupMembers(userId: string, conversationId: string) {
   publish(userId, undefined, { type: 'group_members', conversation_id: conversationId })
+}
+
+/**
+ * 世界模拟：地形生成状态变更。
+ * 刻意**不复用 conv_changed** —— 客户端对 conv_changed 的响应是 refetchConversation
+ * （重拉消息列表），而世界没有消息，那会是一次无意义的请求，也把「消息变了」与
+ * 「世界状态变了」混为一谈（本仓库正是为此才给 group_members 单开了一个事件）。
+ * 只传状态不传 spec：该事件扇出到本账号每一台设备，数 KB 的地形参数不该搭上
+ * 根本没开世界面板的设备；客户端在转入 ready 时自行重拉。
+ */
+export function broadcastWorldStatus(userId: string, conversationId: string, status: WorldStatus) {
+  publish(userId, undefined, { type: 'world_status', conversation_id: conversationId, status })
 }
 
 /** 未读计数变更：通知所有设备某会话存在未读消息 */

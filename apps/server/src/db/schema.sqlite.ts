@@ -135,3 +135,24 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
   // 曾致 endpoint 键控 upsert 撞物理约束 500）
   uniqueIndex('uq_push_user_device').on(t.user_id, t.device_id),
 ])
+
+/**
+ * 世界模拟：与 conversations 1:1。
+ * 归属以 conversations.user_id 为唯一权威，故此处刻意不存 user_id。
+ * conversations 为软删除，故读取时须连带过滤 deleted_at IS NULL。
+ */
+export const worlds = sqliteTable('worlds', {
+  conversation_id: text('conversation_id').primaryKey().references(() => conversations.id, { onDelete: 'cascade' }),
+  /** 用户原文「世界地形规则」—— 创生后不可修改 */
+  terrain_prompt: text('terrain_prompt').notNull().default(''),
+  /** TerrainSpec 的 JSON 文本；生成中为空串 */
+  terrain_spec: text('terrain_spec').notNull().default(''),
+  /** 世界法则 —— 可修改 */
+  laws: text('laws').notNull().default(''),
+  status: text('status').notNull().default('generating'),
+  status_error: text('status_error').notNull().default(''),
+  /** 回合计数；Phase 1 仅初始化，Phase 2 的回合制引擎使用 */
+  turn: integer('turn').notNull().default(0),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+})

@@ -100,9 +100,15 @@ chatRoute.post('/', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string }>()
+  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string }>()
   const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id } = body
   const requestedAgentId = body.agent_id
+
+  // 世界模拟的回合引擎尚未接入（Phase 2）。此处显式拒绝，而不是让它落进单聊路径 ——
+  // 那会把消息气泡塞进世界会话，制造一个语义上自相矛盾的状态。
+  if ((conversation_type as string | undefined) === 'world') {
+    return c.json({ error: 'World simulation turns are not supported yet' }, 400)
+  }
   // 本轮实际采用的 Agent：新建会话取请求 agent_id；已有单聊会话锚定到
   // conversations.agent_id（见下方归属校验分支）。
   let agentId: string | undefined = requestedAgentId

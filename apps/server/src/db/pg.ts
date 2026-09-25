@@ -160,6 +160,20 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       created_at INTEGER NOT NULL,
       UNIQUE(user_id, device_id)
     );
+
+    -- 世界模拟：与 conversations 1:1（方言差异仅在建表语句，列与 sqlite 逐列一致）
+    CREATE TABLE IF NOT EXISTS worlds (
+      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+      terrain_prompt TEXT NOT NULL DEFAULT '',
+      terrain_spec TEXT NOT NULL DEFAULT '',
+      laws TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'generating',
+      status_error TEXT NOT NULL DEFAULT '',
+      turn INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_worlds_status ON worlds(status);
   `)
 
   const db = drizzlePg(pool, { schema }) as any

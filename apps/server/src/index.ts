@@ -6,6 +6,7 @@ import { logger } from 'hono/logger'
 
 import { env, bootstrapAgents } from './lib/config.js'
 import { STAND_ALONE } from './lib/standalone.js'
+import { sweepInterruptedWorlds } from './lib/world.js'
 import { db, users } from './db/index.js'
 
 // Stand-alone mode: seed the fixed 'admin' user row (idempotent) so the users
@@ -21,6 +22,12 @@ if (STAND_ALONE) {
 // Ensure neutral agent + at least one non-neutral agent exist on every startup.
 await bootstrapAgents()
 
+// 世界模拟：把被进程重启打断、仍停在 generating 的世界重新生成。
+// 必需 —— sql.js 每 30s 才持久化一次，生成中途 SIGTERM 会在磁盘上留下
+// 一行 generating，没有这一步那些世界会永远卡在「大地正在成形……」。
+// 生成是幂等的（只写 spec + ready），故重跑安全。
+await sweepInterruptedWorlds()
+
 import { conversationsRoute } from './routes/conversations.js'
 import { adminRoute } from './routes/admin.js'
 import { appRoute } from './routes/app.js'
@@ -30,6 +37,7 @@ import { userRoute } from './routes/user.js'
 import { standAloneUserRoute } from './routes/user-standalone.js'
 import { workspaceRoute } from './routes/workspace.js'
 import { groupRoute } from './routes/group.js'
+import { worldsRoute } from './routes/worlds.js'
 import { oauthRoute } from './routes/oauth.js'
 import { assetsRoute } from './routes/assets.js'
 import { voiceRoute } from './routes/voice.js'
@@ -65,6 +73,7 @@ app.route('/api/upload', uploadRoute)
 app.route('/api/user', STAND_ALONE ? standAloneUserRoute : userRoute)
 app.route('/api/workspace', workspaceRoute)
 app.route('/api/group', groupRoute)
+app.route('/api/worlds', worldsRoute)
 if (!STAND_ALONE) {
   // OAuth login is part of the Momoi auth stack — not offered in stand-alone.
   app.route('/api/oauth', oauthRoute)

@@ -136,3 +136,23 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
   // ADD CONSTRAINT uq_push_user_device UNIQUE (user_id, device_id)
   uniqueIndex('uq_push_user_device').on(t.user_id, t.device_id),
 ])
+
+/**
+ * 世界模拟：与 conversations 1:1。与 schema.sqlite.ts 逐列一致。
+ * 归属以 conversations.user_id 为唯一权威，故此处刻意不存 user_id。
+ */
+export const worlds = pgTable('worlds', {
+  conversation_id: text('conversation_id').primaryKey().references(() => conversations.id, { onDelete: 'cascade' }),
+  /** 用户原文「世界地形规则」—— 创生后不可修改 */
+  terrain_prompt: text('terrain_prompt').notNull().default(''),
+  /** TerrainSpec 的 JSON 文本；生成中为空串 */
+  terrain_spec: text('terrain_spec').notNull().default(''),
+  /** 世界法则 —— 可修改 */
+  laws: text('laws').notNull().default(''),
+  status: text('status').notNull().default('generating'),
+  status_error: text('status_error').notNull().default(''),
+  /** 回合计数；Phase 1 仅初始化，Phase 2 的回合制引擎使用 */
+  turn: integer('turn').notNull().default(0),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+})

@@ -139,6 +139,24 @@ export const MIGRATION_SQL = `
     UNIQUE(user_id, device_id)
   );
 
+  -- 世界模拟：与 conversations 1:1。归属一律以 conversations.user_id 为准，
+  -- 故此表刻意不存 user_id（重复一份会与权威值漂移，等于开出第二条鉴权路径）。
+  -- 注意 conversations 是软删除，worlds 行不会随之消失 —— 每次读取都必须
+  -- 连带过滤 conversations.deleted_at IS NULL。
+  CREATE TABLE IF NOT EXISTS worlds (
+    conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    terrain_prompt TEXT NOT NULL DEFAULT '',
+    terrain_spec TEXT NOT NULL DEFAULT '',
+    laws TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'generating',
+    status_error TEXT NOT NULL DEFAULT '',
+    turn INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_worlds_status ON worlds(status);
+
   CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
   CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id);
   CREATE INDEX IF NOT EXISTS idx_wechat_bindings_conv ON wechat_bindings(conversation_id);

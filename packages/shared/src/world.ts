@@ -234,6 +234,64 @@ function moistureAt(spec: TerrainSpec, x: number, z: number): number {
   return fbm(x * 0.8 + 3.1, z * 0.8 - 2.4, 3, (spec.seed ^ 0x9e3779b9) >>> 0)
 }
 
+/** 各水体类型对应的基础水位分位（占地形高度分布的比例） */
+const WATER_BASE_QUANTILE: Record<WaterKind, number> = {
+  none: 0,
+  ocean: 0.7,
+  lakes: 0.2,
+  toxic: 0.42,
+}
+
+/**
+ * islands 地貌自带环绕的海，水位至少到这里。
+ * 高群岛是「深海海底 + 岛体」的**双峰**分布，若沿用 0.55 这类中位分位，水位会恰好
+ * 落在海底平台上 —— 海平面等于海底深度，群岛看起来像一片悬空的台地而非岛屿。
+ */
+const ISLANDS_MIN_QUANTILE = 0.68
+
+/** `waterLevel` 的记忆化缓存：同一 spec 对象只算一次分位数 */
+const waterLevelCache = new WeakMap<TerrainSpec, number>()
+
+/**
+ * 水面高度（归一化坐标）。
+ *
+ * ⚠️ 刻意**不是**一个绝对值。高度场的实际取值范围随 style 与 amplitude 剧烈变化
+ *    （'plains' 实测只有 ±0.04，'mountains' 可达 ±0.7）。若把 seaLevel 当绝对值用，
+ *    低起伏地貌会把模型/兜底给的任何水位整个越过 —— 实测表现就是「提示词写了湖泊，
+ *    水面占比 0%」。
+ *
+ * 改为取**地形自身高度分布的分位数**：水体类型决定基础分位（海洋淹得多、湖泊淹得少），
+ *    spec 里的 `seaLevel` 降级为微调量。判定源仍然是唯一的 `heightAt`，故服务端与
+ *    客户端、逐点采样与网格采样必然一致。
+ *
+ * `water === 'none'` 返回 −Infinity：整片沙盘不存在水面。
+ */
+export function waterLevel(spec: TerrainSpec): number {
+  if (spec.terrain.water === 'none') return -Infinity
+  const cached = waterLevelCache.get(spec)
+  if (cached !== undefined) return cached
+
+  // 固定 33×33 探针估计分位数：确定性、与 buildTerrain 同一 heightAt，
+  // 频率量级（1.2~5.2）远低于探针密度，故足够代表整体分布。
+  const probe: number[] = []
+  for (let i = 0; i < 33; i++) {
+    for (let j = 0; j < 33; j++) {
+      probe.push(heightAt(spec, (i / 32) * 2 - 1, (j / 32) * 2 - 1))
+    }
+  }
+  probe.sort((a, b) => a - b)
+
+  const base = Math.max(
+    WATER_BASE_QUANTILE[spec.terrain.water],
+    spec.terrain.style === 'islands' ? ISLANDS_MIN_QUANTILE : 0,
+  )
+  const q = clamp01(base + spec.terrain.seaLevel * 0.25)
+  const idx = Math.min(probe.length - 1, Math.max(0, Math.round(q * (probe.length - 1))))
+  const level = probe[idx]
+  waterLevelCache.set(spec, level)
+  return level
+}
+
 /** 单点归一化高度 —— Agent 落点与「此处是什么地形」判定用 */
 export function sampleHeight(spec: TerrainSpec, x: number, z: number): number {
   return heightAt(spec, x, z)
@@ -247,8 +305,7 @@ export function sampleBiome(spec: TerrainSpec, x: number, z: number): BiomeRule 
 }
 
 export function isWater(spec: TerrainSpec, x: number, z: number): boolean {
-  if (spec.terrain.water === 'none') return false
-  return heightAt(spec, x, z) <= spec.terrain.seaLevel
+  return heightAt(spec, x, z) <= waterLevel(spec)
 }
 
 function classifyBiome(spec: TerrainSpec, h: number, moisture: number, slope: number): number {
@@ -317,8 +374,8 @@ export function buildTerrain(
     heights,
     moisture,
     biomes,
-    seaLevel: spec.terrain.seaLevel,
-    waterY: spec.terrain.seaLevel,
+    seaLevel: waterLevel(spec),
+    waterY: waterLevel(spec),
   }
 }
 
@@ -363,7 +420,8 @@ export function spawnPoints(
   agentIds: string[],
 ): Array<{ id: string; x: number; z: number }> {
   const out: Array<{ id: string; x: number; z: number }> = []
-  const landThreshold = spec.terrain.water === 'none' ? -Infinity : spec.terrain.seaLevel + 0.03
+  // 陆地判定：严格高于水位（水位本身由地形分位数决定，与渲染层同源）
+  const level = waterLevel(spec)
 
   for (const id of agentIds) {
     const rng = mulberry32((spec.seed ^ fnv1a(id)) >>> 0)
@@ -373,7 +431,7 @@ export function spawnPoints(
     for (let attempt = 0; attempt < 240 && !picked; attempt++) {
       const x = rng() * 2 - 1
       const z = rng() * 2 - 1
-      if (heightAt(spec, x, z) <= landThreshold) continue
+      if (heightAt(spec, x, z) <= level) continue
       if (out.some((p) => Math.hypot(p.x - x, p.z - z) < WORLD_LIMITS.spawnSpacing)) continue
       picked = { x, z }
     }
@@ -381,7 +439,7 @@ export function spawnPoints(
     for (let attempt = 0; attempt < 240 && !picked; attempt++) {
       const x = rng() * 2 - 1
       const z = rng() * 2 - 1
-      if (heightAt(spec, x, z) > landThreshold) picked = { x, z }
+      if (heightAt(spec, x, z) > level) picked = { x, z }
     }
     // 极端情形（整个世界都是水面）：落在世界中心，仍是合法坐标
     if (!picked) picked = { x: 0, z: 0 }
@@ -469,15 +527,9 @@ export function defaultTerrainSpec(prompt: string, laws = ''): TerrainSpec {
       roughness: hints.style === 'mountains' ? 0.55 : 0.4,
       octaves: hints.style === 'mountains' ? 6 : 4,
       warp: hints.style === 'mountains' ? 0.45 : 0.25,
-      // 海平面按水体类型取值：'lakes' 刻意压低，使水体成片而不成洋
-      seaLevel:
-        hints.water === 'none'
-          ? -0.6
-          : hints.water === 'ocean'
-            ? 0.02
-            : hints.water === 'toxic'
-              ? 0
-              : -0.08,
+      // seaLevel 只是水位分位的**微调量**（见 waterLevel）：0 即「按水体类型的默认分位」，
+      // 正值抬高分位（水更多），负值降低（水更少）。实际水位由地形自身分布决定。
+      seaLevel: 0,
       water: hints.water,
     },
     biomes: naturalBiomes(hints.biomes, hints.water),
@@ -629,6 +681,50 @@ export function normalizeTerrainSpec(raw: unknown, prompt = ''): NormalizeResult
   return { spec, repairs }
 }
 
+/**
+ * 生物群系 id 的同义词表。
+ *
+ * 模型很爱自造 id（'toxic'、'mountain'、'ice'…）。若不映射回闭合词表，后果有二：
+ *   1) 英文 id 会漏进中文摘要 —— 实测出现过「生物群系：toxic、…、biome5」；
+ *   2) 拿不到 BIOME_PALETTE 的配色，整条群系变成一块默认灰。
+ * 词表闭合是 TERRAIN_ENUMS 存在的意义，故这里必须收口。
+ */
+const BIOME_ALIASES: Record<string, string> = {
+  water: 'ocean', sea: 'ocean', lake: 'ocean', river: 'ocean', deep: 'ocean', ocean_floor: 'ocean',
+  toxic: 'swamp', poison: 'swamp', acid: 'swamp', acid_pool: 'swamp', bog: 'swamp',
+  marsh: 'swamp', wetland: 'swamp',
+  tree: 'forest', woods: 'forest', woodland: 'forest', pine: 'forest', conifer: 'forest',
+  mountain: 'rock', mountains: 'rock', stone: 'rock', cliff: 'rock', peak: 'rock',
+  rocky: 'rock', highland: 'rock', barren: 'rock',
+  desert: 'sand', dune: 'sand', dunes: 'sand', beach_sand: 'sand',
+  ice: 'snow', glacier: 'snow', frost: 'snow', snowcap: 'snow',
+  frozen: 'tundra', permafrost: 'tundra', cold: 'tundra',
+  meadow: 'grass', plain: 'grass', plains: 'grass', grassland: 'grass', prairie: 'grass',
+  volcanic: 'lava', magma: 'lava', fire: 'lava', molten: 'lava',
+  ash_land: 'ash', wasteland: 'ash', scorched: 'ash', burnt: 'ash',
+  crystal_field: 'crystal', crystals: 'crystal', glass: 'crystal',
+  rainforest: 'jungle', tropical: 'jungle', tropic: 'jungle',
+  bush: 'scrub', bushes: 'scrub', shrub: 'scrub', shrubland: 'scrub', steppe: 'scrub',
+}
+
+/** 把任意字符串解析为词表内的 id；词表已用尽则返回 null（该条规则被丢弃）。 */
+function resolveBiomeId(raw: string, used: Set<string>): string | null {
+  const key = raw.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  const vocab = TERRAIN_ENUMS.biomeId as readonly string[]
+  if (key && vocab.includes(key)) return used.has(key) ? firstUnusedBiomeId(used) : key
+  const alias = key ? BIOME_ALIASES[key] : undefined
+  if (alias && !used.has(alias)) return alias
+  // 模糊匹配：'dark_forest' → forest，'snowy_peak' → snow
+  for (const candidate of vocab) {
+    if (key.includes(candidate) && !used.has(candidate)) return candidate
+  }
+  return firstUnusedBiomeId(used)
+}
+
+function firstUnusedBiomeId(used: Set<string>): string | null {
+  return (TERRAIN_ENUMS.biomeId as readonly string[]).find((id) => !used.has(id)) ?? null
+}
+
 function normalizeBiomes(raw: unknown, fallback: BiomeRule[], repairs: string[]): BiomeRule[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     repairs.push('biomes 缺失或为空，注入自然群系阶梯')
@@ -639,11 +735,13 @@ function normalizeBiomes(raw: unknown, fallback: BiomeRule[], repairs: string[])
   for (const entry of raw.slice(0, 6)) {
     if (typeof entry !== 'object' || entry === null) continue
     const e = entry as Record<string, unknown>
-    let id = typeof e.id === 'string' ? e.id.trim().slice(0, 24) : ''
-    if (!id || seen.has(id)) {
-      if (id && seen.has(id)) repairs.push(`biomes.id 重复：${id}`)
-      id = `biome${out.length + 1}`
+    const rawId = typeof e.id === 'string' ? e.id.trim().slice(0, 24) : ''
+    const id = resolveBiomeId(rawId, seen)
+    if (!id) {
+      repairs.push(`biomes 词表已用尽，丢弃第 ${out.length + 1} 条（原 id "${rawId}"）`)
+      continue
     }
+    if (id !== rawId) repairs.push(`biomes.id "${rawId}" 不在词表内，映射为 "${id}"`)
     seen.add(id)
 
     const hex = typeof e.color === 'string' && /^#[0-9a-f]{6}$/i.test(e.color.trim())
