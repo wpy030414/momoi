@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "orbit-guard": "node scripts/orbit-render-loop-guard.mjs"
   },
   "dependencies": {
     "@momoi/shared": "workspace:*",

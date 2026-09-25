@@ -25,6 +25,15 @@ export interface WorldAgentBrief {
 const POLL_INTERVAL_MS = 2000
 const POLL_MAX_ATTEMPTS = 30
 
+/**
+ * 模块级空数组：必须沿用同一个引用。
+ * 若在返回值里写 `?? []`，每次渲染都会产出新数组 —— 它会顺着 props 传进
+ * WorldCanvas / WorldFallback 并进入它们的 effect 依赖，导致每次父渲染都重建
+ * 整个 three.js 场景。引用稳定的空数组让「没有成员」与「成员没变」无法区分，
+ * 从而不触发多余重建。
+ */
+const NO_AGENTS: WorldAgentBrief[] = []
+
 export function useWorldChat() {
   const groupChat = useGroupChat()
   const { activeId, isWorldMode, selectConversation, refreshConversations } = groupChat
@@ -157,7 +166,7 @@ export function useWorldChat() {
     ...groupChat,
     // isWorldMode 由 useGroupChat 提供（与 isGroupMode 在完全相同的三处赋值点同步）
     worldState: activeId ? worldByConv[activeId] ?? null : null,
-    worldAgents: activeId ? worldAgentsByConv[activeId] ?? [] : [],
+    worldAgents: activeId ? worldAgentsByConv[activeId] ?? NO_AGENTS : NO_AGENTS,
     worldLoading,
     worldError,
     worldSavingLaws,

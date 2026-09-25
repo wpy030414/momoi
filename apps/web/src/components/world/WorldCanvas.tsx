@@ -53,6 +53,12 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
   const hostRef = useRef<HTMLDivElement>(null)
   const onContextLostRef = useRef(onContextLost)
   onContextLostRef.current = onContextLost
+  // 用 ref 读最新成员，而**不**把 agents 放进 effect 依赖 —— 父组件每次渲染都会
+  // 交来一个新的数组对象，若直接依赖它，每次父渲染都会拆掉并重建整个 three.js
+  // 场景（表现为画面闪烁、GL 上下文泄漏、拖动迟滞）。
+  const agentsRef = useRef(agents)
+  agentsRef.current = agents
+  const agentsKey = useMemo(() => agents.map((a) => a.id).join('|'), [agents])
 
   // 分段数只影响渲染精度，不影响地形本身（同一 heightAt 采样）。
   // 96 是拐点：约 3.7 万顶点、总采样耗时 10~30ms；再往上收益在典型相机距离下
@@ -66,6 +72,7 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
+    const agents = agentsRef.current
 
     const bg = new THREE.Color(SKY_COLOR[spec.sky.preset] ?? SKY_COLOR.day)
     const scene = new THREE.Scene()
@@ -190,21 +197,36 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
     // 不调 listenToKeyEvents：键盘平移/缩放不是要的能力
 
     // ---- 尺寸与渲染循环 ----
+    //
+    // ⚠️ renderFrame **绝不能**调用 controls.update()。
+    //
+    // OrbitControls 的 update() 在**派发 change 事件之后**才记录 _lastPosition
+    // （源码：this.dispatchEvent(_changeEvent) 在前，this._lastPosition.copy(...) 在后）。
+    // 若 change 监听器里再调 update()，重入的那次看到的是**尚未更新**的 _lastPosition，
+    // 于是判定「相机又动了」→ 再派发 → 再调 update() → 无限递归，
+    // 表现为一拖动就 RangeError: Maximum call stack size exceeded。
+    //
+    // 输入处理器自己会调 update()（旋转/缩放/平移的各分支末尾），
+    // 所以这里的职责只有一件事：把当前状态画出来。
+    const renderFrame = () => {
+      renderer.render(scene, camera)
+    }
     const resize = () => {
       const w = host.clientWidth || 1
       const h = host.clientHeight || 1
       camera.aspect = w / h
       camera.updateProjectionMatrix()
       renderer.setSize(w, h, false)
-      render()
+      renderFrame()
     }
-    function render() {
-      controls.update()
-      renderer.render(scene, camera)
-    }
+
+    // 应用初始状态（此后由输入处理器自行 update）。放在注册监听器之前，
+    // 免得这次 update 派发的 change 进来时 renderFrame 还没准备好。
+    controls.update()
+
     const ro = new ResizeObserver(resize)
     ro.observe(host)
-    controls.addEventListener('change', render)
+    controls.addEventListener('change', renderFrame)
     resize()
 
     // 上下文丢失：钉钉 Android WebView 切后台时会丢，冻结成黑屏不如切降级视图
@@ -217,7 +239,7 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
     // ---- 拆卸：WebGL 代码就是在这里泄漏的，必须逐项 dispose ----
     return () => {
       ro.disconnect()
-      controls.removeEventListener('change', render)
+      controls.removeEventListener('change', renderFrame)
       controls.dispose()
       renderer.domElement.removeEventListener('webglcontextlost', onLost)
       for (const d of markerDisposables) d.dispose()
@@ -231,7 +253,7 @@ export function WorldCanvas({ spec, agents, quality, onContextLost }: WorldCanva
       renderer.forceContextLoss()
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement)
     }
-  }, [spec, agents, quality, segments])
+  }, [spec, agentsKey, quality, segments])
 
   return <div ref={hostRef} className="absolute inset-0" />
 }

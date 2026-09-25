@@ -24,14 +24,23 @@ const MAP_SEGMENTS = 255
 
 export function WorldFallback({ spec, agents }: WorldFallbackProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  // 与 WorldCanvas 同款：用稳定的成员标识而非数组引用作依赖，避免每次父渲染
+  // 都重跑 spawnPoints（每个成员最多 480 次高度采样）并重绘整张地图。
+  const agentsRef = useRef(agents)
+  agentsRef.current = agents
+  const agentsKey = useMemo(() => agents.map((a) => a.id).join('|'), [agents])
 
-  const markers = useMemo(() => spawnPoints(spec, agents.map((a) => a.id)), [spec, agents])
+  const markers = useMemo(
+    () => spawnPoints(spec, agentsKey ? agentsKey.split('|') : []),
+    [spec, agentsKey],
+  )
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    const agents = agentsRef.current
 
     // 用较小的采样密度建网格，再放大到地图尺寸绘制（避免 256² 顶点的插值开销）
     const data = buildTerrain(spec, { segments: MAP_SEGMENTS })
@@ -88,7 +97,7 @@ export function WorldFallback({ spec, agents }: WorldFallbackProps) {
       ctx.strokeText(agent.name, px + 8, py + 4)
       ctx.fillText(agent.name, px + 8, py + 4)
     }
-  }, [spec, agents, markers])
+  }, [spec, agentsKey, markers])
 
   return (
     <div className="absolute inset-0 flex items-center justify-center overflow-hidden p-4">
