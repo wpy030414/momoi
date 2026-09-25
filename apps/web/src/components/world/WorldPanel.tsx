@@ -16,9 +16,10 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { WorldEntity, WorldEvent, WorldState } from '@momoi/shared/types'
+import type { TerrainPatch } from '@momoi/shared/world'
 import { Button } from '../ui/button'
 import { Loading } from '../ui/spinner'
-import { Globe, Info, X } from 'lucide-react'
+import { Globe, Info, X, MapPin, Sparkles } from 'lucide-react'
 import { detectWebGL } from '../../lib/webgl'
 import { WorldFallback } from './WorldFallback'
 import { WorldEventLog } from './WorldEventLog'
@@ -35,7 +36,10 @@ interface WorldPanelProps {
   worldState: WorldState | null
   worldEntities: WorldEntity[]
   worldEvents: WorldEvent[]
+  worldPatches: TerrainPatch[]
   worldAgents: WorldAgentBrief[]
+  worldGodEntity: WorldEntity | null
+  worldAutoTick: boolean
   loading: boolean
   error: string | null
   acting: boolean
@@ -43,13 +47,18 @@ interface WorldPanelProps {
   savingLaws: boolean
   onSaveLaws: (laws: string) => Promise<void>
   onAct: (content: string) => void
+  onPlaceGod: (x: number, z: number) => void
+  onToggleAutoTick: (enabled: boolean) => void
 }
 
 export function WorldPanel({
   worldState,
   worldEntities,
   worldEvents,
+  worldPatches,
   worldAgents,
+  worldGodEntity,
+  worldAutoTick,
   loading,
   error,
   acting,
@@ -57,12 +66,15 @@ export function WorldPanel({
   savingLaws,
   onSaveLaws,
   onAct,
+  onPlaceGod,
+  onToggleAutoTick,
 }: WorldPanelProps) {
   const { t } = useTranslation()
   const [lawsOpen, setLawsOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(true)
   const [logCollapsed, setLogCollapsed] = useState(false)
   const [contextLost, setContextLost] = useState(false)
+  const [placing, setPlacing] = useState(false)
 
   // 探测结果在模块内缓存，多次渲染不重复分配 GL 上下文
   const gl = useMemo(() => detectWebGL(), [])
@@ -91,8 +103,14 @@ export function WorldPanel({
         <LazyWorldCanvas
           spec={spec}
           entities={worldEntities}
+          patches={worldPatches}
           agents={worldAgents}
           quality={gl}
+          placing={placing}
+          onPlace={(x, z) => {
+            onPlaceGod(x, z)
+            setPlacing(false)
+          }}
           onContextLost={() => setContextLost(true)}
         />
       </Suspense>
@@ -125,7 +143,43 @@ export function WorldPanel({
                   {t('world.agentsInWorld')}：{worldAgents.map((a) => a.name).join('、')}
                 </p>
               )}
-              <Button size="sm" variant="outline" className="w-full mt-1" onClick={() => setLawsOpen(true)}>
+              {worldPatches.length > 0 && (
+                <p className="text-xs text-muted-foreground/70">
+                  {t('world.reshaped', { n: worldPatches.length })}
+                </p>
+              )}
+              {worldGodEntity && (
+                <p className="text-xs text-amber-600 dark:text-amber-500">
+                  {t('world.godAt', {
+                    x: worldGodEntity.x.toFixed(2),
+                    z: worldGodEntity.z.toFixed(2),
+                  })}
+                </p>
+              )}
+
+              <div className="flex gap-1.5 pt-0.5">
+                <Button
+                  size="sm"
+                  variant={placing ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => setPlacing((v) => !v)}
+                  disabled={gl === 'none'}
+                >
+                  <MapPin className="h-3.5 w-3.5 mr-1" />
+                  {placing ? t('world.placing') : t('world.placeGod')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={worldAutoTick ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => onToggleAutoTick(!worldAutoTick)}
+                  disabled={acting}
+                >
+                  <Sparkles className="h-3.5 w-3.5 mr-1" />
+                  {t('world.autoTick')}
+                </Button>
+              </div>
+              <Button size="sm" variant="outline" className="w-full" onClick={() => setLawsOpen(true)}>
                 {t('world.laws')}
               </Button>
             </div>
@@ -147,6 +201,20 @@ export function WorldPanel({
       {ready && gl === 'software' && !contextLost && (
         <div className="absolute bottom-[calc(26vh+52px)] left-1/2 -translate-x-1/2 z-20 rounded-full border bg-card/95 backdrop-blur px-4 py-1.5 text-xs text-muted-foreground shadow">
           {t('world.degraded')}
+        </div>
+      )}
+
+      {/* 放置模式提示：浮在沙盘下缘 */}
+      {placing && (
+        <div className="absolute bottom-[calc(26vh+52px)] left-1/2 -translate-x-1/2 z-20 rounded-full border border-primary/50 bg-primary/10 backdrop-blur px-4 py-1.5 text-xs text-primary shadow">
+          {t('world.placeGodHint')}
+        </div>
+      )}
+
+      {/* 自动演算进行中：同一条位置，但语义不同，故与放置提示互斥显示 */}
+      {!placing && worldAutoTick && (
+        <div className="absolute bottom-[calc(26vh+52px)] left-1/2 -translate-x-1/2 z-20 rounded-full border bg-card/95 backdrop-blur px-4 py-1.5 text-xs text-muted-foreground shadow">
+          {t('world.autoTickRunning')}
         </div>
       )}
 

@@ -274,6 +274,16 @@ export const api = {
     `/api/worlds/${convId}`,
     { method: 'PATCH', body: JSON.stringify({ laws }) },
   ),
+  /** 放置 / 移动上帝的化身。坐标是归一化的 [-1,1] */
+  placeWorldGod: (convId: string, x: number, z: number) => request<{ entity: import('@momoi/shared/types').WorldEntity }>(
+    `/api/worlds/${convId}/god`,
+    { method: 'POST', body: JSON.stringify({ x, z }) },
+  ),
+  /** 自动演算开关（内存态，重启回到关闭） */
+  setWorldAutoTick: (convId: string, enabled: boolean) => request<{ enabled: boolean }>(
+    `/api/worlds/${convId}/auto-tick`,
+    { method: 'POST', body: JSON.stringify({ enabled }) },
+  ),
 
   // Infinite Mode
   setInfiniteMode: (conversationId: string, enabled: boolean) => request<{ success: boolean; enabled: boolean }>('/api/chat/infinite-mode', { method: 'POST', body: JSON.stringify({ conversation_id: conversationId, enabled }) }),

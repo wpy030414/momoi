@@ -122,7 +122,14 @@
     "turn": "Turn {{n}}",
     "turnCount": "{{n}} turns",
     "acting": "{{name}} is acting…",
-    "actionPlaceholder": "As God, what do you do? e.g. I send a bolt of lightning down onto the eastern ridge."
+    "actionPlaceholder": "As God, what do you do? e.g. I send a bolt of lightning down onto the eastern ridge.",
+    "reshaped": "The world has been reshaped in {{n}} places",
+    "godAt": "God is at ({{x}}, {{z}})",
+    "placeGod": "Place avatar",
+    "placing": "Pick a spot",
+    "placeGodHint": "Click anywhere on the sandbox to place God there",
+    "autoTick": "Auto-run",
+    "autoTickRunning": "The world is running on its own… (click Auto-run again to stop)"
   },
   "menu": {
     "logout": "Logout",

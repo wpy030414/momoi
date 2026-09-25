@@ -122,7 +122,14 @@
     "turn": "回合 {{n}}",
     "turnCount": "共 {{n}} 回合",
     "acting": "{{name}} 正在行动…",
-    "actionPlaceholder": "作为上帝，你做了什么？例如：我在天空中降下一道雷，劈向东边的山脊。"
+    "actionPlaceholder": "作为上帝，你做了什么？例如：我在天空中降下一道雷，劈向东边的山脊。",
+    "reshaped": "世界已被改造 {{n}} 处",
+    "godAt": "上帝位于 ({{x}}, {{z}})",
+    "placeGod": "放置化身",
+    "placing": "点选落点",
+    "placeGodHint": "点击沙盘上的任意位置，把上帝放在那里",
+    "autoTick": "自动演算",
+    "autoTickRunning": "世界正在自行运转…（再次点击「自动演算」可停下）"
   },
   "menu": {
     "logout": "退出登录",

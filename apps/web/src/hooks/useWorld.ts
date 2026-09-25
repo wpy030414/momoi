@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api'
 import { useGroupChat } from './useGroupChat'
 import type { ServerMessage, WorldEntity, WorldEvent, WorldState, WorldStatus } from '@momoi/shared/types'
+import type { TerrainPatch } from '@momoi/shared/world'
 
 export interface WorldAgentBrief {
   id: string
@@ -28,6 +29,10 @@ interface WorldRuntime {
   entities: WorldEntity[]
   events: WorldEvent[]
   agents: WorldAgentBrief[]
+  /** 改造补丁（升序）—— 渲染时 fold 到基准地形之上 */
+  patches: TerrainPatch[]
+  /** 自动演算开关（内存态，随快照返回） */
+  autoTick: boolean
   loading: boolean
   error: string | null
   /** 有回合在跑（禁用输入） */
@@ -41,6 +46,8 @@ const EMPTY_RUNTIME: WorldRuntime = {
   entities: [],
   events: [],
   agents: [],
+  patches: [],
+  autoTick: false,
   loading: false,
   error: null,
   acting: false,
@@ -83,6 +90,8 @@ export function useWorldChat() {
           entities: res.entities ?? [],
           events: res.events ?? [],
           agents: res.agents ?? [],
+          patches: res.patches ?? [],
+          autoTick: res.auto_tick === true,
           loading: false,
           error: null,
         },
@@ -111,7 +120,10 @@ export function useWorldChat() {
           // ⚠️ 去重：broadcastWorldEvent 不跳过来源设备，故触发本次回合的设备会
           //    既从本地 SSE 流收到、又从实时通道收到同一条事件
           if (rt.events.some((e) => e.id === msg.event.id)) return prev
-          return { ...prev, [convId]: { ...rt, events: [...rt.events, msg.event] } }
+          // 改造事件的 payload 里带着补丁本体 —— 就地并入，无需为一次改造重拉整个快照
+          const patch = msg.event.payload?.patch as TerrainPatch | undefined
+          const patches = patch ? [...rt.patches, patch] : rt.patches
+          return { ...prev, [convId]: { ...rt, events: [...rt.events, msg.event], patches } }
         })
         break
       case 'world_turn_end':
@@ -158,9 +170,15 @@ export function useWorldChat() {
       }
     }
     const onTurn = (e: Event) => {
-      const d = (e as CustomEvent).detail as { conversation_id?: string; running?: boolean } | undefined
+      const d = (e as CustomEvent).detail as
+        | { conversation_id?: string; running?: boolean; auto_tick?: boolean }
+        | undefined
       if (!d?.conversation_id || d.conversation_id !== activeId) return
-      patch(d.conversation_id, { acting: d.running === true })
+      patch(d.conversation_id, {
+        acting: d.running === true,
+        // 自动演算开关是内存态、没有别处可读，故随回合广播一起带过来
+        ...(typeof d.auto_tick === 'boolean' ? { autoTick: d.auto_tick } : {}),
+      })
     }
     const onEvent = (e: Event) => {
       const d = (e as CustomEvent).detail as { conversation_id?: string; event?: WorldEvent } | undefined
@@ -287,6 +305,40 @@ export function useWorldChat() {
     [activeId, applyWorldMessage, i18n.language, patch],
   )
 
+  const placeGod = useCallback(
+    async (x: number, z: number) => {
+      const convId = activeId
+      if (!convId) return
+      try {
+        const res = await api.placeWorldGod(convId, x, z)
+        setWorldByConv((prev) => {
+          const rt = prev[convId] ?? EMPTY_RUNTIME
+          // 就地替换（上帝按 kind 唯一，故先剔除旧的再并入）
+          const others = rt.entities.filter((e) => e.kind !== 'god')
+          return { ...prev, [convId]: { ...rt, entities: [...others, res.entity] } }
+        })
+      } catch (err) {
+        patch(convId, { error: (err as Error).message })
+      }
+    },
+    [activeId, patch],
+  )
+
+  const setAutoTick = useCallback(
+    async (enabled: boolean) => {
+      const convId = activeId
+      if (!convId) return
+      // 乐观更新：开关是即时反馈的控件，不该等一个往返
+      patch(convId, { autoTick: enabled })
+      try {
+        await api.setWorldAutoTick(convId, enabled)
+      } catch (err) {
+        patch(convId, { autoTick: !enabled, error: (err as Error).message })
+      }
+    },
+    [activeId, patch],
+  )
+
   const runtime = activeId ? worldByConv[activeId] ?? EMPTY_RUNTIME : EMPTY_RUNTIME
 
   return {
@@ -296,6 +348,10 @@ export function useWorldChat() {
     worldEntities: runtime.entities,
     worldEvents: runtime.events,
     worldAgents: runtime.agents,
+    worldPatches: runtime.patches,
+    worldAutoTick: runtime.autoTick,
+    /** 上帝的化身（未放置为 null）—— 沙盘与信息卡都要用 */
+    worldGodEntity: runtime.entities.find((e) => e.kind === 'god') ?? null,
     worldLoading: runtime.loading,
     worldError: runtime.error,
     worldActing: runtime.acting,
@@ -304,5 +360,7 @@ export function useWorldChat() {
     createWorld,
     saveWorldLaws,
     actWorld,
+    placeWorldGod: placeGod,
+    setWorldAutoTick: setAutoTick,
   }
 }

@@ -16,7 +16,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { buildTerrain, sampleHeight, waterLevel, WORLD_LIMITS } from '@momoi/shared/world'
-import type { TerrainSpec } from '@momoi/shared/world'
+import type { TerrainPatch, TerrainSpec } from '@momoi/shared/world'
 import type { WorldEntity } from '@momoi/shared/types'
 import type { GLSupport } from '../../lib/webgl'
 import type { WorldAgentBrief } from '../../hooks/useWorld'
@@ -24,8 +24,13 @@ import type { WorldAgentBrief } from '../../hooks/useWorld'
 interface WorldCanvasProps {
   spec: TerrainSpec
   entities: WorldEntity[]
+  /** 改造补丁（升序）—— fold 到基准地形之上；地形规则本身永不被改写 */
+  patches: TerrainPatch[]
   agents: WorldAgentBrief[]
   quality: GLSupport
+  /** 处于「放置上帝化身」模式：此时点击地形即落点 */
+  placing?: boolean
+  onPlace?: (x: number, z: number) => void
   /** WebGL 上下文丢失时回调（钉钉 WebView 切后台会丢），交由上层切降级视图 */
   onContextLost?: () => void
 }
@@ -58,12 +63,21 @@ interface MarkerHandle {
   /** 目标位置（归一化） */
   target: THREE.Vector2
   status: WorldEntity['status']
+  isGod: boolean
 }
 
-export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: WorldCanvasProps) {
+export function WorldCanvas({ spec, entities, patches, agents, quality, placing, onPlace, onContextLost }: WorldCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const onContextLostRef = useRef(onContextLost)
   onContextLostRef.current = onContextLost
+  // 放置模式与回调走 ref：点击处理在 effect 内注册一次，不该为它们的引用变化重挂
+  const placingRef = useRef(placing)
+  placingRef.current = placing
+  const onPlaceRef = useRef(onPlace)
+  onPlaceRef.current = onPlace
+  // 补丁同样走 ref —— 场景与补间的闭包需要读最新值，而不该因它变化重建整个场景
+  const patchesRef = useRef(patches)
+  patchesRef.current = patches
   // 用 ref 读最新成员，而**不**把 agents 放进 effect 依赖 —— 父组件每次渲染都会
   // 交来一个新的数组对象，若直接依赖它，每次父渲染都会拆掉并重建整个 three.js
   // 场景（表现为画面闪烁、GL 上下文泄漏、拖动迟滞）。
@@ -71,10 +85,11 @@ export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: 
   agentsRef.current = agents
   const agentsKey = useMemo(() => agents.map((a) => a.id).join('|'), [agents])
 
-  // 场景资源句柄：场景 effect 建立，标记 effect 使用
+  // 场景资源句柄：场景 effect 建立，标记 / 补丁 effect 使用
   const sceneCtxRef = useRef<{
     markersGroup: THREE.Group
-    render: () => void
+    /** 用给定的补丁重建地形高度与顶点色（供补丁变化时调用，不必重建整个场景） */
+    buildWith: (patches: TerrainPatch[]) => void
     startAnimation: () => void
   } | null>(null)
   const markersRef = useRef<Map<string, MarkerHandle>>(new Map())
@@ -116,29 +131,47 @@ export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: 
     renderer.domElement.oncontextmenu = () => false
 
     // ---- 地形网格 ----
-    const data = buildTerrain(spec, { segments })
     const geo = new THREE.PlaneGeometry(2 * S, 2 * S, segments, segments)
     geo.rotateX(-Math.PI / 2)
-    const pos = geo.attributes.position as THREE.BufferAttribute
-    const colors = new Float32Array(pos.count * 3)
-    const color = new THREE.Color()
-    for (let i = 0; i < pos.count; i++) {
-      pos.setY(i, data.heights[i] * Y_SCALE)
-      // 顶点色而非贴图/自定义 shader：buildTerrain 已经返回逐顶点群系下标，
-      // 顶点色是白捡的。setStyle 会做 sRGB→线性转换，正是顶点色所需的色彩空间。
-      color.setStyle(spec.biomes[data.biomes[i]]?.color ?? '#7d7a73')
-      colors[i * 3] = color.r
-      colors[i * 3 + 1] = color.g
-      colors[i * 3 + 2] = color.b
-    }
+    const posAttr = geo.attributes.position as THREE.BufferAttribute
+    const colors = new Float32Array(posAttr.count * 3)
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-    geo.computeVertexNormals()
     const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 })
-    scene.add(new THREE.Mesh(geo, terrainMat))
+    const terrain = new THREE.Mesh(geo, terrainMat)
+    scene.add(terrain)
+
+    const color = new THREE.Color()
+    /**
+     * 用给定的补丁重建地形高度与顶点色。
+     * 补丁变化时**只重建高度场**，不重建渲染器 / 相机 / 控制器 —— 否则相机
+     * 会被重置，而用户往往正盯着刚被改造的那片地。
+     */
+    const buildWith = (activePatches: TerrainPatch[]) => {
+      const data = buildTerrain(spec, { segments, patches: activePatches })
+      for (let i = 0; i < posAttr.count; i++) {
+        posAttr.setY(i, data.heights[i] * Y_SCALE)
+        // 顶点色而非贴图/自定义 shader：buildTerrain 已经返回逐顶点群系下标，
+        // 顶点色是白捡的。setStyle 会做 sRGB→线性转换，正是顶点色所需的色彩空间。
+        color.setStyle(spec.biomes[data.biomes[i]]?.color ?? '#7d7a73')
+        colors[i * 3] = color.r
+        colors[i * 3 + 1] = color.g
+        colors[i * 3 + 2] = color.b
+      }
+      posAttr.needsUpdate = true
+      ;(geo.attributes.color as THREE.BufferAttribute).needsUpdate = true
+      geo.computeVertexNormals()
+      // 地形一变，标记的高度也要跟着重新贴合
+      for (const m of markersRef.current.values()) {
+        m.group.position.y = sampleHeight(spec, m.cur.x, m.cur.y, activePatches) * Y_SCALE
+      }
+    }
+    buildWith(patchesRef.current)
 
     // ---- 有限沙盘的「厚度」：让边界看起来是一块被切出来的地，而非无限延伸的地面 ----
+    // 用**基准**地形的最低点：改造会改变地表，但沙盘的体积感不该随之抖动
+    const baseData = buildTerrain(spec, { segments })
     let minY = Infinity
-    for (let i = 0; i < data.heights.length; i++) minY = Math.min(minY, data.heights[i] * Y_SCALE)
+    for (let i = 0; i < baseData.heights.length; i++) minY = Math.min(minY, baseData.heights[i] * Y_SCALE)
     const slabGeo = new THREE.BoxGeometry(2 * S, Math.max(4, Math.abs(minY) * 0.5), 2 * S)
     const slabMat = new THREE.MeshStandardMaterial({ color: '#2a2622', roughness: 1, metalness: 0 })
     const slab = new THREE.Mesh(slabGeo, slabMat)
@@ -219,6 +252,7 @@ export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: 
     let rafId = 0
     const tick = () => {
       let moving = false
+      const activePatches = patchesRef.current
       for (const m of markersRef.current.values()) {
         const dx = m.target.x - m.cur.x
         const dz = m.target.y - m.cur.y
@@ -232,7 +266,7 @@ export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: 
         m.group.position.x = m.cur.x * S
         m.group.position.z = m.cur.y * S
         // 贴着地表走 —— 移动过程中高度也随之变化
-        m.group.position.y = sampleHeight(spec, m.cur.x, m.cur.y) * Y_SCALE
+        m.group.position.y = sampleHeight(spec, m.cur.x, m.cur.y, activePatches) * Y_SCALE
       }
       renderFrame()
       rafId = moving ? requestAnimationFrame(tick) : 0
@@ -243,6 +277,37 @@ export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: 
 
     // 应用初始状态（此后由输入处理器自行 update）。放在注册监听器之前。
     controls.update()
+
+    // ---- 点击地形放置上帝化身 ----
+    // 用 pointerdown → pointerup 的位移阈值区分「点击」与「拖动旋转」：
+    // 用户完全可能先转个视角再落点，故放置模式**不**禁用旋转。
+    const raycaster = new THREE.Raycaster()
+    const pointer = new THREE.Vector2()
+    let downAt: { x: number; y: number } | null = null
+    const onPointerDown = (e: PointerEvent) => {
+      downAt = { x: e.clientX, y: e.clientY }
+    }
+    const onPointerUp = (e: PointerEvent) => {
+      const from = downAt
+      downAt = null
+      if (!placingRef.current || !from || !onPlaceRef.current) return
+      if (Math.hypot(e.clientX - from.x, e.clientY - from.y) > 6) return // 那是拖动
+      const rect = renderer.domElement.getBoundingClientRect()
+      pointer.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      raycaster.setFromCamera(pointer, camera)
+      const hit = raycaster.intersectObject(terrain, false)[0]
+      if (!hit) return
+      // 几何体的 rotateX(-π/2) 已烘焙进顶点，故网格本地坐标即世界坐标
+      onPlaceRef.current(
+        Math.min(1, Math.max(-1, hit.point.x / S)),
+        Math.min(1, Math.max(-1, hit.point.z / S)),
+      )
+    }
+    renderer.domElement.addEventListener('pointerdown', onPointerDown)
+    renderer.domElement.addEventListener('pointerup', onPointerUp)
 
     const ro = new ResizeObserver(resize)
     ro.observe(host)
@@ -256,7 +321,7 @@ export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: 
     }
     renderer.domElement.addEventListener('webglcontextlost', onLost)
 
-    sceneCtxRef.current = { markersGroup, render: renderFrame, startAnimation }
+    sceneCtxRef.current = { markersGroup, buildWith, startAnimation }
 
     // ---- 拆卸：WebGL 代码就是在这里泄漏的，必须逐项 dispose ----
     return () => {
@@ -271,6 +336,8 @@ export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: 
       ro.disconnect()
       controls.removeEventListener('change', renderFrame)
       controls.dispose()
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+      renderer.domElement.removeEventListener('pointerup', onPointerUp)
       renderer.domElement.removeEventListener('webglcontextlost', onLost)
       geo.dispose()
       terrainMat.dispose()
@@ -283,6 +350,14 @@ export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: 
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement)
     }
   }, [spec, quality, segments])
+
+  // ---------------- 改造补丁（只重建高度场，不重建场景）----------------
+  useEffect(() => {
+    const ctx = sceneCtxRef.current
+    if (!ctx) return
+    ctx.buildWith(patchesRef.current)
+    ctx.startAnimation()
+  }, [patches])
 
   // ---------------- 标记（随实体变化增删与移动）----------------
   useEffect(() => {
@@ -316,7 +391,7 @@ export function WorldCanvas({ spec, entities, agents, quality, onContextLost }: 
     ctx.startAnimation()
   }, [entities, agentsKey, spec])
 
-  return <div ref={hostRef} className="absolute inset-0" />
+  return <div ref={hostRef} className={placing ? 'absolute inset-0 cursor-crosshair' : 'absolute inset-0'} />
 }
 
 // ---------------------------------------------------------------
@@ -327,13 +402,20 @@ function createMarker(entity: WorldEntity, agents: WorldAgentBrief[], spec: Terr
   const group = new THREE.Group()
 
   const pinGeo = new THREE.CylinderGeometry(1.6, 1.6, S * 0.06, 10)
-  const pinMat = new THREE.MeshStandardMaterial({ color: '#f0e6d2', roughness: 0.6, metalness: 0.1 })
+  // 上帝用金色底座，与 Agent 一眼可分 —— 它不是一个「角色」，是这个世界的主宰
+  const pinMat = new THREE.MeshStandardMaterial({
+    color: entity.kind === 'god' ? '#e8c96a' : '#f0e6d2',
+    roughness: 0.6,
+    metalness: entity.kind === 'god' ? 0.5 : 0.1,
+    emissive: entity.kind === 'god' ? new THREE.Color('#6a5314') : new THREE.Color('#000000'),
+  })
   const pin = new THREE.Mesh(pinGeo, pinMat)
   pin.position.y = S * 0.03
   group.add(pin)
 
-  const avatar = entity.agent_id ? agents.find((a) => a.id === entity.agent_id)?.avatar ?? '' : ''
-  const { sprite, texture } = makeLabelSprite(entity.name, avatar)
+  const isGod = entity.kind === 'god'
+  const avatar = !isGod && entity.agent_id ? agents.find((a) => a.id === entity.agent_id)?.avatar ?? '' : ''
+  const { sprite, texture } = makeLabelSprite(entity.name, avatar, isGod)
   sprite.position.y = S * 0.085
   group.add(sprite)
 
@@ -346,6 +428,7 @@ function createMarker(entity: WorldEntity, agents: WorldAgentBrief[], spec: Terr
     cur: new THREE.Vector2(entity.x, entity.z),
     target: new THREE.Vector2(entity.x, entity.z),
     status: entity.status,
+    isGod,
   }
   // 初始高度直接贴地，不依赖首帧动画来纠正
   group.position.set(entity.x * S, sampleHeight(spec, entity.x, entity.z) * Y_SCALE, entity.z * S)
@@ -364,7 +447,9 @@ function disposeMarker(handle: MarkerHandle): void {
 /** 死亡 / 消失：压暗并降低不透明度 —— 画面上一眼能看出谁已经不再行动 */
 function applyStatus(handle: MarkerHandle, status: WorldEntity['status']): void {
   const alive = status === 'alive'
-  handle.pinMat.color.setStyle(alive ? '#f0e6d2' : '#555049')
+  // 上帝不会被压暗（祂不受世界法则约束），保留金色
+  const base = handle.isGod ? '#e8c96a' : '#f0e6d2'
+  handle.pinMat.color.setStyle(alive ? base : '#555049')
   handle.spriteMat.opacity = alive ? 1 : status === 'dead' ? 0.4 : 0.2
   handle.spriteMat.transparent = true
 }
@@ -373,7 +458,7 @@ function applyStatus(handle: MarkerHandle, status: WorldEntity['status']): void 
  * 生成一张名牌精灵：圆底 + 名字，有头像时把头像裁进圆里。
  * 用 CanvasTexture 而非图片加载流程（头像本身也是 data URL，异步重绘即可）。
  */
-function makeLabelSprite(name: string, avatar: string): { sprite: THREE.Sprite; texture: THREE.CanvasTexture } {
+function makeLabelSprite(name: string, avatar: string, isGod = false): { sprite: THREE.Sprite; texture: THREE.CanvasTexture } {
   const W = 256
   const H = 96
   const canvas = document.createElement('canvas')
@@ -385,9 +470,16 @@ function makeLabelSprite(name: string, avatar: string): { sprite: THREE.Sprite; 
     ctx.clearRect(0, 0, W, H)
     ctx.beginPath()
     ctx.arc(48, H / 2, 34, 0, Math.PI * 2)
-    ctx.fillStyle = img ? '#f0e6d2' : '#6f9e52'
+    ctx.fillStyle = img ? '#f0e6d2' : isGod ? '#e8c96a' : '#6f9e52'
     ctx.fill()
-    if (img) {
+    if (isGod) {
+      // 神不用首字，用一个记号 —— 它代表的是「谁在看着这个世界」
+      ctx.fillStyle = '#3a2c05'
+      ctx.font = 'bold 38px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('✦', 48, H / 2 + 3)
+    } else if (img) {
       ctx.save()
       ctx.beginPath()
       ctx.arc(48, H / 2, 32, 0, Math.PI * 2)
@@ -406,7 +498,7 @@ function makeLabelSprite(name: string, avatar: string): { sprite: THREE.Sprite; 
     ctx.textBaseline = 'middle'
     const text = name.slice(0, 8)
     const w = ctx.measureText(text).width
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    ctx.fillStyle = isGod ? 'rgba(90,66,10,0.85)' : 'rgba(0,0,0,0.55)'
     roundRect(ctx, 90, H / 2 - 22, w + 20, 44, 10)
     ctx.fill()
     ctx.fillStyle = '#ffffff'

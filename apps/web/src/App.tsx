@@ -706,7 +706,10 @@ export function App() {
                   worldState={chat.worldState}
                   worldEntities={chat.worldEntities}
                   worldEvents={chat.worldEvents}
+                  worldPatches={chat.worldPatches}
                   worldAgents={chat.worldAgents}
+                  worldGodEntity={chat.worldGodEntity}
+                  worldAutoTick={chat.worldAutoTick}
                   loading={chat.worldLoading}
                   error={chat.worldError}
                   acting={chat.worldActing}
@@ -714,6 +717,8 @@ export function App() {
                   savingLaws={chat.worldSavingLaws}
                   onSaveLaws={chat.saveWorldLaws}
                   onAct={chat.actWorld}
+                  onPlaceGod={chat.placeWorldGod}
+                  onToggleAutoTick={chat.setWorldAutoTick}
                 />
               </Suspense>
             ) : (
