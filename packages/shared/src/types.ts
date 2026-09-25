@@ -2,6 +2,11 @@
 // Momoi — Shared Types
 // ============================================================
 
+import type { TerrainSpec } from './world.js'
+
+// 世界地形类型定义在 shared/world.ts（与服务端的噪声实现、校验层同源），此处 re-export
+export type { BiomeRule, TerrainPatch, TerrainSpec } from './world.js'
+
 // ---- Conversation & Messages ----
 
 export interface Attachment {
@@ -16,8 +21,9 @@ export interface Conversation {
   id: string
   title: string
   agent_id: string
-  type: 'direct' | 'group'
-  agent_count?: number  // 群组内 Agent 数量（不含中立 Agent，不含用户）
+  /** 'world' 由 POST /api/worlds 创建；POST /api/conversations 会显式拒绝该值 */
+  type: 'direct' | 'group' | 'world'
+  agent_count?: number  // 群组/世界内 Agent 数量（不含中立 Agent，不含用户）
   wechat_bound?: number  // 1 if this conversation is bound to WeChat
   qq_bound?: number      // 1 if this conversation is bound to QQ (C2C or group)
   created_at: number
@@ -231,6 +237,32 @@ export type RealtimeEvent =
   | { type: 'conv_changed'; conversation_id: string }
   | { type: 'group_members'; conversation_id: string }
   | { type: 'unread_update'; conversation_id: string; unread_count: number }
+  /**
+   * 世界模拟：地形生成状态变更。**只传状态、不传 spec** —— 该事件会扇出到本账号
+   * 的每一台设备，而数 KB 的地形参数不该搭上根本没开世界面板的设备；客户端在
+   * 转入 'ready' 时自行重拉 GET /api/worlds/:id。
+   */
+  | { type: 'world_status'; conversation_id: string; status: WorldStatus }
+
+// ---- 世界模拟（World Simulation）----
+
+export type WorldStatus = 'generating' | 'ready' | 'failed'
+
+/** GET /api/worlds/:conversationId 返回的世界状态；生成中 terrain_spec 为 null */
+export interface WorldState {
+  conversation_id: string
+  status: WorldStatus
+  status_error: string
+  /** 用户原文「世界地形规则」—— 创生后**不可修改** */
+  terrain_prompt: string
+  /** 由 terrain_prompt 翻译出的结构化地形参数（LLM 或关键词兜底） */
+  terrain_spec: TerrainSpec | null
+  /** 世界法则 —— **可修改** */
+  laws: string
+  turn: number
+  created_at: number
+  updated_at: number
+}
 
 // ---- Ask User Tool ----
 

@@ -6,7 +6,9 @@
   "exports": {
     "./types": "./src/types.ts",
     "./constants": "./src/constants.ts",
-    "./thinking": "./src/thinking.ts"
+    "./thinking": "./src/thinking.ts",
+    "./world": "./src/world.ts",
+    "./noise": "./src/noise.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
