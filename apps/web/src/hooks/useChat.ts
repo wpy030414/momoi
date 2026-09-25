@@ -172,8 +172,8 @@ export function useChat() {
   const streamsRef = useRef<Map<string, LocalStream>>(new Map())
   /** 远程流（他设备）最近事件时间戳，TTL 内视为流进行中 */
   const remoteLastAtRef = useRef<Map<string, number>>(new Map())
-  /** 会话类型缓存（direct / group），供远程流事件判组 */
-  const convTypesRef = useRef<Map<string, 'direct' | 'group'>>(new Map())
+  /** 会话类型缓存（direct / group / world），供远程流事件判组 */
+  const convTypesRef = useRef<Map<string, 'direct' | 'group' | 'world'>>(new Map())
 
   useEffect(() => {
     conversationsRef.current = conversations
@@ -223,13 +223,18 @@ export function useChat() {
     setPendingByConv(all)
   }, [])
 
-  /** 会话类型：草稿视为单聊；缓存 → 会话列表 → direct 兜底 */
-  const convTypeOf = useCallback((key: string): 'direct' | 'group' => {
+  /**
+   * 会话类型：草稿视为单聊；缓存 → 会话列表 → direct 兜底。
+   *
+   * ⚠️ 联合类型必须含 'world' —— 否则世界会话会**静默**回退成 'direct'，
+   *    让流式气泡分派（Phase 2 的世界回合）把世界当成单聊处理，且不报任何错。
+   */
+  const convTypeOf = useCallback((key: string): 'direct' | 'group' | 'world' => {
     if (isDraftKey(key)) return 'direct'
     const cached = convTypesRef.current.get(key)
     if (cached) return cached
     const conv = conversationsRef.current.find((c) => c.id === key)
-    return ((conv?.type as 'direct' | 'group') || 'direct')
+    return ((conv?.type as 'direct' | 'group' | 'world') || 'direct')
   }, [])
 
   /** 分区是否有活动流：本地流注册表中存在，或远程流 TTL 窗口内 */
@@ -369,7 +374,7 @@ export function useChat() {
       // 均不标记，避免后台拉取误清侧边栏红点。
       const res = await api.getConversation(id, true)
       if (loadGenRef.current !== gen) return null
-      const type = ((res.conversation as Conversation).type as 'direct' | 'group') || 'direct'
+      const type = ((res.conversation as Conversation).type as 'direct' | 'group' | 'world') || 'direct'
       convTypesRef.current.set(id, type)
       applySnapshot(id, res.messages.map(mapServerMessage))
       clearUnreadFor(id)
@@ -414,7 +419,7 @@ export function useChat() {
   const refetchConversation = useCallback(async (id: string) => {
     const res = await api.getConversation(id).catch(() => null)
     if (!res) return
-    const type = ((res.conversation as Conversation).type as 'direct' | 'group') || 'direct'
+    const type = ((res.conversation as Conversation).type as 'direct' | 'group' | 'world') || 'direct'
     convTypesRef.current.set(id, type)
     if (messagesByConvRef.current[id] !== undefined) {
       // conv_changed = 他端改动 DB（回退等）：DB 权威对账，绝不复活已删消息
@@ -1211,6 +1216,13 @@ export function useChat() {
           // 群成员变更 —— 若正在查看该群，重拉以刷新成员数（App 侧同时刷新）
           refreshConversations()
           window.dispatchEvent(new CustomEvent('realtime:group_members', { detail: { conversation_id: payload.conversation_id } }))
+          break
+        case 'world_status':
+          // 世界地形生成状态变更 —— 转交 useWorld 处理（与 group_members 同款派发，
+          // 因为它有自己的缓存与重拉时机，不适合在聊天分区里处理）
+          window.dispatchEvent(new CustomEvent('realtime:world_status', {
+            detail: { conversation_id: payload.conversation_id, status: payload.status },
+          }))
           break
         case 'stream': {
           // 其他设备正在流式输出 —— 事件写入该会话自己的分区：

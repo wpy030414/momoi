@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useGroupChat } from './hooks/useGroupChat'
+import { useWorldChat } from './hooks/useWorld'
 import { useTheme } from './hooks/useTheme'
 import { useAdminPanel } from './hooks/useAdminPanel'
 import { useDocsPanel } from './hooks/useDocsPanel'
 import { useMemoryPanel } from './hooks/useMemoryPanel'
 import { Sidebar } from './components/sidebar/Sidebar'
+import { AgentPickerList } from './components/sidebar/AgentPickerList'
+import { NewWorkflowDialog } from './components/sidebar/NewWorkflowDialog'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
@@ -16,7 +18,7 @@ import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
 import { Button } from './components/ui/button'
 import { useToast } from './components/ui/toast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
-import { PanelLeft, X, Check, Eye, EyeOff } from 'lucide-react'
+import { PanelLeft, X, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 import { ensureLocale } from './i18n'
 // 静态导入：模块零依赖且体积 ~1 KB，且 isPushSupported 每次渲染都要同步调用，
@@ -25,13 +27,18 @@ import { ensureLocale } from './i18n'
 import { isPushSupported, subscribePush, unsubscribePush } from './lib/push-subscription'
 
 // First-use introduction — lazy chunk; users who dismissed it once never load it.
+// 世界面板懒加载：不开世界的用户一个字节都不下载。世内部再懒加载 three 那个 chunk。
+const WorldPanel = lazy(() =>
+  import('./components/world/WorldPanel').then((m) => ({ default: m.WorldPanel })),
+)
+
 const IntroductionDialog = lazy(() =>
   import('./components/intro/IntroductionDialog').then(m => ({ default: m.IntroductionDialog })))
 
 export function App() {
   const { t, i18n } = useTranslation()
   const { toast } = useToast()
-  const chat = useGroupChat()
+  const chat = useWorldChat()
   // v7 exhaustive-deps：闭包内经 chat.fn() 成员链「调用」要求把根对象（每渲染
   // 新建）列入 deps → useCallback 失效。解构为裸标识符即可保留逐成员 memo
   // （useChat/useGroupChat 的函数成员均逐个 useCallback，引用稳定）。
@@ -613,7 +620,7 @@ export function App() {
             activeId={chat.activeId}
             onSelect={chat.selectConversation}
             onNew={chat.createConversation}
-            onNewGroup={handleNewGroup}
+            onNewWorkflow={handleNewGroup}
             onRename={chat.renameConversation}
             onDelete={handleDeleteConversation}
             onMerge={handleMergeConversation}
@@ -689,6 +696,22 @@ export function App() {
               )}
             </div>
             {/* Chat area */}
+            {/* 主区：世界会话渲染三维沙盘，其余渲染消息气泡。
+                用 key={chat.activeId} 让切换会话时重挂载 —— 3D 画布的上下文、
+                相机与几何体都应随会话重建，而不是复用。 */}
+            {chat.isWorldMode ? (
+              <Suspense fallback={null}>
+                <WorldPanel
+                  key={chat.activeId ?? 'world'}
+                  worldState={chat.worldState}
+                  worldAgents={chat.worldAgents}
+                  loading={chat.worldLoading}
+                  error={chat.worldError}
+                  savingLaws={chat.worldSavingLaws}
+                  onSaveLaws={chat.saveWorldLaws}
+                />
+              </Suspense>
+            ) : (
             <ChatPanel
               messages={chat.messages}
               loading={chat.loading}
@@ -720,6 +743,7 @@ export function App() {
               conversationId={chat.activeId}
               onEnsureConversation={ensureConversation}
             />
+            )}
           </div>
         )}
 
@@ -771,71 +795,23 @@ export function App() {
         />
       </Suspense>
 
-      {/* Group Chat Agent Selection Dialog */}
-      {groupDialogOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card rounded-xl border shadow-lg p-6 w-full max-w-sm mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">{t('chat.selectAgents')}</h3>
-              <button onClick={() => { setGroupDialogOpen(false); setSelectedGroupAgents([]) }} className="hover:bg-muted rounded-md p-1">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="text-sm text-muted-foreground mb-4">{t('chat.minAgentsRequired')}</p>
-            <div className="space-y-2 mb-6 max-h-[60vh] overflow-y-auto">
-              {agents.map((agent) => {
-                const isSelected = selectedGroupAgents.includes(agent.id)
-                return (
-                  <button
-                    key={agent.id}
-                    onClick={() => {
-                      setSelectedGroupAgents((prev) =>
-                        isSelected ? prev.filter((id) => id !== agent.id) : [...prev, agent.id],
-                      )
-                    }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
-                      isSelected ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
-                    }`}
-                  >
-                    {agent.avatar ? (
-                      <img src={agent.avatar} alt={agent.name} className="w-8 h-8 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium">
-                        {agent.name.charAt(0)}
-                      </div>
-                    )}
-                    <span className="flex-1 text-left text-sm font-medium">{agent.name}</span>
-                    {isSelected && <Check className="h-4 w-4 text-primary" />}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => { setGroupDialogOpen(false); setSelectedGroupAgents([]) }}
-              >
-                {t('common.cancel')}
-              </Button>
-              <Button
-                className="flex-1"
-                disabled={selectedGroupAgents.length < 2}
-                onClick={async () => {
-                  if (selectedGroupAgents.length >= 2) {
-                    setGroupDialogOpen(false)
-                    await chat.createGroupConversation(selectedGroupAgents)
-                    setSelectedGroupAgents([])
-                    // 侧边栏不自动收回：选好 Agent 后停留在群聊新会话视图
-                  }
-                }}
-              >
-                {t('common.confirm')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 新工作流：模式选择（群组会话 / 世界模拟）+ Agent 选择 + 世界提示词 */}
+      <NewWorkflowDialog
+        open={groupDialogOpen}
+        onOpenChange={(open) => {
+          setGroupDialogOpen(open)
+          if (!open) setSelectedGroupAgents([])
+        }}
+        agents={agents}
+        agentsLoading={agentsLoading}
+        onConfirmGroup={async (agentIds) => {
+          // 侧边栏不自动收回：选好 Agent 后停留在群聊新会话视图
+          await chat.createGroupConversation(agentIds)
+        }}
+        onConfirmWorld={async (agentIds, prompt) => {
+          await chat.createWorld(agentIds, prompt)
+        }}
+      />
 
       {/* Group Member Management Dialog (same UI as new group agent selection) */}
       {groupManageOpen && groupManageConvId && (
@@ -848,33 +824,16 @@ export function App() {
               </button>
             </div>
             <p className="text-sm text-muted-foreground mb-4">{t('chat.minAgentsRequired')}</p>
-            <div className="space-y-2 mb-6 max-h-[60vh] overflow-y-auto">
-              {agents.map((agent) => {
-                const isSelected = selectedGroupAgents.includes(agent.id)
-                return (
-                  <button
-                    key={agent.id}
-                    onClick={() => {
-                      setSelectedGroupAgents((prev) =>
-                        isSelected ? prev.filter((id) => id !== agent.id) : [...prev, agent.id],
-                      )
-                    }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
-                      isSelected ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
-                    }`}
-                  >
-                    {agent.avatar ? (
-                      <img src={agent.avatar} alt={agent.name} className="w-8 h-8 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium">
-                        {agent.name.charAt(0)}
-                      </div>
-                    )}
-                    <span className="flex-1 text-left text-sm font-medium">{agent.name}</span>
-                    {isSelected && <Check className="h-4 w-4 text-primary" />}
-                  </button>
-                )
-              })}
+            <div className="mb-6">
+              <AgentPickerList
+                agents={agents}
+                selected={selectedGroupAgents}
+                onToggle={(id) =>
+                  setSelectedGroupAgents((prev) =>
+                    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                  )
+                }
+              />
             </div>
             <div className="flex gap-2">
               <Button

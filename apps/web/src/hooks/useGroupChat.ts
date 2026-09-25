@@ -31,6 +31,7 @@ export function useGroupChat() {
   } = chat
   const [groupAgents, setGroupAgents] = useState<AgentBrief[]>([])
   const [isGroupMode, setIsGroupMode] = useState(false)
+  const [isWorldMode, setIsWorldMode] = useState(false)
   const [isQqGroup, setIsQqGroup] = useState(false)
   const [allAgents, setAllAgents] = useState<AgentBrief[]>([])
   // 群模式同步守卫：包装层刚同步过的会话不再重复请求；世代计数丢弃乱序响应
@@ -56,6 +57,7 @@ export function useGroupChat() {
       const knownType = conversations.find((c) => c.id === activeId)?.type
       if (knownType === 'direct') {
         setIsGroupMode(false)
+        setIsWorldMode(false)
         setGroupAgents([])
         setIsQqGroup(false)
         lastGroupSyncRef.current = activeId
@@ -66,12 +68,21 @@ export function useGroupChat() {
         const conv = res.conversation as Conversation
         if (conv.type === 'group') {
           setIsGroupMode(true)
+          setIsWorldMode(false)
           if (res.agents) {
             setGroupAgents(res.agents)
           }
           setIsQqGroup(res.is_qq_group === true)
+        } else if (conv.type === 'world') {
+          // 世界会话的成员由 useWorld 通过 GET /api/worlds/:id 单独取得，
+          // 不塞进 groupAgents —— 避免两处各存一份成员列表
+          setIsGroupMode(false)
+          setIsWorldMode(true)
+          setGroupAgents([])
+          setIsQqGroup(false)
         } else {
           setIsGroupMode(false)
+          setIsWorldMode(false)
           setGroupAgents([])
           setIsQqGroup(false)
         }
@@ -81,9 +92,11 @@ export function useGroupChat() {
       // 群聊草稿态（activeId 为 null）：保持群聊模式与已选成员，等待首条消息
       lastGroupSyncRef.current = null
       setIsGroupMode(true)
+      setIsWorldMode(false)
     } else {
       lastGroupSyncRef.current = null
       setIsGroupMode(false)
+      setIsWorldMode(false)
       setGroupAgents([])
     }
   }, [activeId, draftType, conversations])
@@ -97,18 +110,27 @@ export function useGroupChat() {
     const knownType = conversations.find((c) => c.id === id)?.type
     if (knownType === 'group') {
       setIsGroupMode(true)
+      setIsWorldMode(false)
+    } else if (knownType === 'world') {
+      setIsGroupMode(false)
+      setIsWorldMode(true)
+      setGroupAgents([])
     } else if (knownType === 'direct') {
       setIsGroupMode(false)
+      setIsWorldMode(false)
       setGroupAgents([])
     }
     const res = await selectInnerConversation(id)
     if (!res) return // 内层世代守卫已拦截（乱序 / 加载失败）
-    if ((res.conversation as Conversation).type === 'group') {
+    const convType = (res.conversation as Conversation).type
+    if (convType === 'group') {
       setIsGroupMode(true)
+      setIsWorldMode(false)
       setGroupAgents(res.agents || [])
       setIsQqGroup((res as any).is_qq_group === true)
     } else {
       setIsGroupMode(false)
+      setIsWorldMode(convType === 'world')
       setGroupAgents([])
       setIsQqGroup(false)
     }
@@ -214,6 +236,7 @@ export function useGroupChat() {
     ...chat,
     groupAgents,
     isGroupMode,
+    isWorldMode,
     isQqGroup,
     createGroupConversation,
     addAgentToGroup,

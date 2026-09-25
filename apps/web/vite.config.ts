@@ -89,6 +89,12 @@ export default defineConfig({
           if (id.includes('node_modules/i18next/') || id.includes('node_modules/react-i18next/')) {
             return 'vendor-i18n'
           }
+          // 3D 引擎：仅世界模拟面板按需加载（~150KB gzip）。独立分块有两点好处：
+          // 一是不进主包、也不与世界面板的业务 chunk 混在一起；二是业务代码发版时
+          // 用户仍能命中这个稳定大块的缓存。不开世界会话的用户一个字节都不下载。
+          if (id.includes('node_modules/three/')) {
+            return 'vendor-three'
+          }
           // 其余 node_modules 交给 Rolldown 默认拆分策略
         },
       },

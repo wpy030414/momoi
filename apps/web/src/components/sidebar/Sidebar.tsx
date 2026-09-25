@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
 import { MarqueeText } from '../ui/MarqueeText'
-import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen, Brain, Bell, BellOff } from 'lucide-react'
+import { Plus, MessageSquare, MessagesSquare, Globe, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen, Brain, Bell, BellOff } from 'lucide-react'
 import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation } from '@momoi/shared/types'
@@ -14,7 +14,7 @@ interface SidebarProps {
   activeId: string | null
   onSelect: (id: string) => void
   onNew: () => void
-  onNewGroup: () => void
+  onNewWorkflow: () => void
   onRename: (id: string, title: string) => void
   onDelete: (id: string) => void
   onExport: (id: string) => void
@@ -54,7 +54,7 @@ interface MenuState {
 
 // ConversationTitle is now MarqueeText from ../ui/MarqueeText
 
-export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle, unreadCounts }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewWorkflow, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle, unreadCounts }: SidebarProps) {
   const LANGUAGE_OPTIONS = ['zh-CN', 'en', 'ja'] as const
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -190,9 +190,9 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
           <Plus className="h-4 w-4" />
           {t('sidebar.newChat')}
         </Button>
-        <Button className="w-full gap-2" variant="outline" onClick={onNewGroup}>
+        <Button className="w-full gap-2" variant="outline" onClick={onNewWorkflow}>
           <Plus className="h-4 w-4" />
-          {t('sidebar.newGroupChat')}
+          {t('sidebar.newWorkflow')}
         </Button>
       </div>
 
@@ -220,6 +220,8 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
               <span className="relative flex-shrink-0">
                 {(conv as any).type === 'group' ? (
                   <MessagesSquare className="h-4 w-4" />
+                ) : (conv as any).type === 'world' ? (
+                  <Globe className="h-4 w-4" />
                 ) : (
                   <MessageSquare className="h-4 w-4" />
                 )}
@@ -248,7 +250,7 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
               ) : (
                 <MarqueeText text={conv.title === "New Chat" ? t("sidebar.newChat") : conv.title} />
               )}
-              {(conv as any).type === 'group' && (conv as any).agent_count > 0 && (
+              {((conv as any).type === 'group' || (conv as any).type === 'world') && (conv as any).agent_count > 0 && (
                 <span className="text-xs text-muted-foreground/60 flex-shrink-0">
                   ({(conv as any).agent_count + 1})
                 </span>
@@ -327,13 +329,15 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
               {t('sidebar.mergeGroupChat')}
             </button>
           )}
-          <button
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
-            onClick={() => { onExport(menu.convId); closeMenu() }}
-          >
-            <Download className="h-3.5 w-3.5" />
-            {t('sidebar.saveAsMd')}
-          </button>
+          {(conversations.find((c) => c.id === menu.convId) as any)?.type !== 'world' && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+              onClick={() => { onExport(menu.convId); closeMenu() }}
+            >
+              <Download className="h-3.5 w-3.5" />
+              {t('sidebar.saveAsMd')}
+            </button>
+          )}
           <button
             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10 transition-colors"
             onClick={() => { onDelete(menu.convId); closeMenu() }}

@@ -11,7 +11,8 @@
     "genesis:check": "tsx scripts/world-genesis-check.ts",
     "start": "cross-env NODE_ENV=production node dist/index.js",
     "start:standalone": "cross-env NODE_ENV=production node dist/index.js --stand-alone",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "world:e2e": "tsx scripts/world-e2e.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.85.1",
