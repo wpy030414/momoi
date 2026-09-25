@@ -88,6 +88,31 @@ function buildRequestBody(
   return body
 }
 
+/**
+ * 展开 fetch 失败的完整根因。undici 把连接层错误包成笼统的
+ * 'fetch failed'，真实原因在 err.cause；Node ≥20 Happy Eyeballs
+ *（::1/127.0.0.1 并发尝试）失败时 cause 是 AggregateError，
+ * 每个地址的具体错误（connect ECONNREFUSED 127.0.0.1:19068）
+ * 藏在 cause.errors[] 里。
+ */
+export function describeNetworkError(err: unknown): string {
+  const e = err as Error & { cause?: { code?: string; message?: string; address?: string; port?: number; errors?: unknown[] } }
+  const parts: string[] = [e?.message ?? String(err)]
+  const c = e?.cause
+  if (c) {
+    const bits = [c.code, c.message, c.address ? `${c.address}:${c.port}` : ''].filter(Boolean).join(' ')
+    parts.push(`(cause: ${bits || 'unknown'})`)
+    if (Array.isArray(c.errors) && c.errors.length > 0) {
+      const details = c.errors
+        .map((x) => (x as { message?: string; code?: string })?.message ?? (x as { code?: string })?.code ?? '')
+        .filter(Boolean)
+        .join('; ')
+      if (details) parts.push(`(${details})`)
+    }
+  }
+  return parts.join(' ')
+}
+
 export async function* streamChatCompletion(
   config: AppConfig,
   model: string,
@@ -172,58 +197,84 @@ export async function* streamChatCompletion(
         return
       }
 
+      // 先单独守护 JSON.parse；后续处理产生的错误（含流内 error）
+      // 必须能逃出循环——若共用一个 try/catch，throw 会被当作
+      //「坏 JSON 行」静默吞掉，真实上游错误就永远不可见。
+      let json: {
+        error?: { message?: string }
+        choices?: Array<{
+          delta?: {
+            content?: string
+            reasoning_content?: string
+            tool_calls?: Array<{
+              index: number
+              id?: string
+              function?: { name?: string; arguments?: string }
+            }>
+          }
+          finish_reason?: string
+        }>
+      }
       try {
-        const json = JSON.parse(data)
-        const choice = json.choices?.[0]
-        if (!choice) continue
-
-        const delta = choice.delta || {}
-        const finishReason = choice.finish_reason
-
-        // Stream text content
-        if (delta.content) {
-          yield { type: 'token', text: delta.content }
-        }
-
-        // Stream reasoning/thinking content (only when thinking is enabled)
-        if (thinkingMode && delta.reasoning_content) {
-          yield { type: 'thinking', text: delta.reasoning_content }
-        }
-
-        // Accumulate tool calls
-        if (delta.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const idx = tc.index
-            if (!pendingToolCalls.has(idx)) {
-              pendingToolCalls.set(idx, {
-                id: tc.id || '',
-                index: idx,
-                name: tc.function?.name || '',
-                arguments: '',
-              })
-            }
-            const pending = pendingToolCalls.get(idx)!
-            if (tc.id) pending.id = tc.id
-            if (tc.function?.name) pending.name = tc.function.name
-            if (tc.function?.arguments) pending.arguments += tc.function.arguments
-          }
-        }
-
-        // Emit finish
-        if (finishReason) {
-          receivedFinish = true
-          if (pendingToolCalls.size > 0) {
-            const calls = [...pendingToolCalls.values()]
-              .sort((a, b) => a.index - b.index)
-              .map((c) => ({ id: c.id, name: c.name, arguments: c.arguments }))
-            yield { type: 'tool_call', toolCalls: calls, finishReason }
-          } else {
-            yield { type: 'finish', finishReason }
-          }
-          return
-        }
+        json = JSON.parse(data)
       } catch {
-        // Skip malformed JSON lines
+        continue // Skip malformed JSON lines
+      }
+
+      // 网关或上游可能在 SSE 流内以 data: {"error":...} + data: [DONE]
+      // 返回错误——无 choices 字段。静默跳过会让外层收到零 token 的
+      //「成功」流，把真实错误掩盖成无意义的空 JSON 解析错误。
+      if (json.error) {
+        const msg = json.error?.message || JSON.stringify(json.error)
+        throw new Error(`API error (in-stream): ${msg}`)
+      }
+      const choice = json.choices?.[0]
+      if (!choice) continue
+
+      const delta = choice.delta || {}
+      const finishReason = choice.finish_reason
+
+      // Stream text content
+      if (delta.content) {
+        yield { type: 'token', text: delta.content }
+      }
+
+      // Stream reasoning/thinking content (only when thinking is enabled)
+      if (thinkingMode && delta.reasoning_content) {
+        yield { type: 'thinking', text: delta.reasoning_content }
+      }
+
+      // Accumulate tool calls
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index
+          if (!pendingToolCalls.has(idx)) {
+            pendingToolCalls.set(idx, {
+              id: tc.id || '',
+              index: idx,
+              name: tc.function?.name || '',
+              arguments: '',
+            })
+          }
+          const pending = pendingToolCalls.get(idx)!
+          if (tc.id) pending.id = tc.id
+          if (tc.function?.name) pending.name = tc.function.name
+          if (tc.function?.arguments) pending.arguments += tc.function.arguments
+        }
+      }
+
+      // Emit finish
+      if (finishReason) {
+        receivedFinish = true
+        if (pendingToolCalls.size > 0) {
+          const calls = [...pendingToolCalls.values()]
+            .sort((a, b) => a.index - b.index)
+            .map((c) => ({ id: c.id, name: c.name, arguments: c.arguments }))
+          yield { type: 'tool_call', toolCalls: calls, finishReason }
+        } else {
+          yield { type: 'finish', finishReason }
+        }
+        return
       }
     }
   }

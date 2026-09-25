@@ -13,7 +13,9 @@
 import { db, conversations, messages, pushSubscriptions } from '../db/index.js'
 import { and, eq } from 'drizzle-orm'
 import { getAgent, getVapidKeys } from '../lib/config.js'
+import { getWebPush, VAPID_SUBJECT } from '../lib/web-push.js'
 import { streamChatCompletion } from '../ai/provider.js'
+import { describeNetworkError } from '../ai/provider.js'
 import { getConfig } from '../lib/config.js'
 import type { ChatMessage } from '../ai/provider.js'
 
@@ -58,7 +60,8 @@ function delayToDawn(): number {
   return dawn.getTime() - now.getTime() + (Math.random() * 10 * 60 * 1000) // +0-10min jitter
 }
 
-/** 收集流式 AI 结果为完整字符串 */
+/** 收集流式 AI 结果为完整字符串。当流正常结束但未产生任何 token 时,
+ *  抛出错误——避免空字符串回传给 JSON.parse 后只得到无意义的 SyntaxError。 */
 async function collectAIResponse(config: Awaited<ReturnType<typeof getConfig>>, model: string, messages: ChatMessage[]): Promise<string> {
   let content = ''
   for await (const event of streamChatCompletion(config, model, messages, [], false)) {
@@ -66,7 +69,9 @@ async function collectAIResponse(config: Awaited<ReturnType<typeof getConfig>>, 
       content += event.text
     }
   }
-  return content.trim()
+  const result = content.trim()
+  if (!result) throw new Error('AI stream produced no content')
+  return result
 }
 
 // ---- Agent Selection ----
@@ -93,22 +98,29 @@ export async function getConversedAgents(userId: string): Promise<string[]> {
 
 // ---- Web Push ----
 
-export async function sendWebPush(userId: string, title: string, body: string): Promise<void> {
+/**
+ * 向用户的所有已注册设备（订阅行）发送 Web Push。
+ * 返回实际成功送达的设备数——调用方据此打日志，
+ * 避免「零订阅/发送即失败」也被记为 Sent。
+ */
+export async function sendWebPush(userId: string, title: string, body: string): Promise<number> {
+  let sent = 0
   try {
     const { publicKey, privateKey } = await getVapidKeys()
-    const webPush = await import('web-push')
+    const webPush = await getWebPush()
 
-    webPush.setVapidDetails(
-      'mailto:no-reply@momoi.local',
-      publicKey,
-      privateKey,
-    )
+    webPush.setVapidDetails(VAPID_SUBJECT, publicKey, privateKey)
 
     const subs = await db
       .select()
       .from(pushSubscriptions)
       .where(eq(pushSubscriptions.user_id, userId))
       .all()
+
+    if (subs.length === 0) {
+      console.warn(`[push] No subscriptions for user ${userId} — nothing sent`)
+      return 0
+    }
 
     for (const sub of subs) {
       try {
@@ -119,21 +131,34 @@ export async function sendWebPush(userId: string, title: string, body: string): 
           },
           JSON.stringify({ title, body }),
         )
+        sent++
       } catch (err: any) {
-        // 404/410 → subscription expired / unsubscribed → clean up
-        if (err?.statusCode === 404 || err?.statusCode === 410) {
+        // 404/410 → subscription expired / unsubscribed
+        // 401/403 → VAPID 密钥与订阅不匹配（如 Apple 403 BadJwtToken）等
+        //           永久性失败——该订阅绑定旧密钥，永远无法送达，清理之，
+        //           由客户端检测密钥指纹变化后重新订阅。
+        if (err?.statusCode === 404 || err?.statusCode === 410
+            || err?.statusCode === 401 || err?.statusCode === 403) {
           await db
             .delete(pushSubscriptions)
             .where(eq(pushSubscriptions.endpoint, sub.endpoint))
             .run()
-          console.log(`[push] Removed expired subscription for user ${userId}`)
+          console.log(
+            `[push] Removed dead subscription for user ${userId} ` +
+            `(HTTP ${err?.statusCode}${err?.body ? `: ${String(err.body).slice(0, 120)}` : ''})`,
+          )
         } else {
-          console.error(`[push] Failed to send notification:`, err?.message ?? err)
+          console.error(
+            `[push] Failed to send notification (HTTP ${err?.statusCode ?? 'n/a'}):`,
+            err?.message ?? err,
+          )
         }
       }
     }
+    return sent
   } catch (err) {
     console.error(`[push] Web Push error for user ${userId}:`, (err as Error).message)
+    return 0
   }
 }
 
@@ -187,14 +212,20 @@ async function tick(userId: string): Promise<void> {
       title = json.title || agent.name
       body = json.body || ''
     } catch (err) {
-      console.error(`[push] AI generation failed for agent ${selectedAgentId}:`, (err as Error).message)
+      // describeNetworkError 展开 undici 藏在 err.cause（含 Happy
+      // Eyeballs AggregateError.errors）里的连接层根因
+      console.error(`[push] AI generation failed for agent ${selectedAgentId}:`, describeNetworkError(err))
     }
     if (!title) title = agent.name
     if (!body) body = `我想你了，快回来看看吧～`
 
     // 6. Web Push 发送（不落库）
-    await sendWebPush(userId, title, body)
-    console.log(`[push] Sent web push for user ${userId} agent ${agent.name}: title="${title}" body="${body}"`)
+    const sent = await sendWebPush(userId, title, body)
+    if (sent > 0) {
+      console.log(`[push] Sent web push to ${sent} device(s) for user ${userId} agent ${agent.name}: title="${title}" body="${body}"`)
+    } else {
+      console.warn(`[push] Web push NOT delivered for user ${userId} (agent ${agent.name}): title="${title}"`)
+    }
 
     // 7. 清理旧定时器
     const existing = timers.get(userId)

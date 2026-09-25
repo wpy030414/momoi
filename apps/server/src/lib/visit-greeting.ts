@@ -13,6 +13,7 @@ import { db, conversations, messages } from '../db/index.js'
 import { and, eq, desc } from 'drizzle-orm'
 import { getAgent } from '../lib/config.js'
 import { streamChatCompletion } from '../ai/provider.js'
+import { describeNetworkError } from '../ai/provider.js'
 import { getConfig } from '../lib/config.js'
 import { getConversedAgents, sendWebPush } from '../lib/push-scheduler.js'
 import type { ChatMessage } from '../ai/provider.js'
@@ -47,7 +48,8 @@ async function getLastAssistantMessage(
   return row.created_at
 }
 
-/** 收集流式 AI 结果为完整字符串 */
+/** 收集流式 AI 结果为完整字符串。当流正常结束但未产生任何 token 时,
+ *  抛出错误——避免空字符串回传给 JSON.parse 后只得到无意义的 SyntaxError。 */
 async function collectAIResponse(
   config: Awaited<ReturnType<typeof getConfig>>,
   model: string,
@@ -59,7 +61,9 @@ async function collectAIResponse(
       content += event.text
     }
   }
-  return content.trim()
+  const result = content.trim()
+  if (!result) throw new Error('AI stream produced no content')
+  return result
 }
 
 // ---- Main ----
@@ -122,14 +126,20 @@ export async function triggerVisitGreeting(userId: string): Promise<void> {
       title = json.title || agent.name
       body = json.body || ''
     } catch (err) {
-      console.error(`[visit-greeting] AI generation failed for agent ${selected.agentId}:`, (err as Error).message)
+      // describeNetworkError 展开 undici 藏在 err.cause（含 Happy
+      // Eyeballs AggregateError.errors）里的连接层根因
+      console.error(`[visit-greeting] AI generation failed for agent ${selected.agentId}:`, describeNetworkError(err))
     }
     if (!title) title = agent.name
     if (!body) body = `欢迎回来～`
 
     // 5. Web Push 发送（不落库）
-    await sendWebPush(userId, title, body)
-    console.log(`[visit-greeting] Sent web push for user ${userId} agent ${agent.name}: title="${title}" body="${body}"`)
+    const sent = await sendWebPush(userId, title, body)
+    if (sent > 0) {
+      console.log(`[visit-greeting] Sent web push to ${sent} device(s) for user ${userId} agent ${agent.name}: title="${title}" body="${body}"`)
+    } else {
+      console.warn(`[visit-greeting] Web push NOT delivered for user ${userId} (agent ${agent.name}): title="${title}" body="${body}"`)
+    }
   } catch (err) {
     console.error(`[visit-greeting] Error for user ${userId}:`, (err as Error).message)
   }
