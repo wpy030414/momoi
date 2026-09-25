@@ -27,10 +27,13 @@ import {
   isWorldGenerating,
   listWorldEntities,
   listWorldEvents,
+  listWorldPatches,
+  placeGodEntity,
   releaseWorldTurn,
   resumeWorldGeneration,
   updateWorldLaws,
 } from '../lib/world.js'
+import { isWorldAutoTicking, startWorldAutoTick, stopWorldAutoTick } from '../lib/world-ticker.js'
 import { runWorldTurn } from '../ai/world-orchestrator.js'
 import { trackUserActivity } from './user.js'
 
@@ -44,6 +47,13 @@ const EVENT_PAGE_SIZE = 200
 const TURN_CONTEXT_EVENTS = 60
 /** 上帝在事件日志里的显示名 */
 const GOD_NAME = '上帝'
+
+/** 归一化坐标钳制到 ±1；非数值返回 null */
+function clampCoord(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : Number(v)
+  if (!Number.isFinite(n)) return null
+  return Math.min(1, Math.max(-1, n))
+}
 
 export const worldsRoute = new Hono()
 worldsRoute.use('*', userAuthMiddleware)
@@ -154,12 +164,68 @@ worldsRoute.get('/:id', async (c) => {
     world,
     entities,
     events,
+    patches: await listWorldPatches(id),
     agents: rows.map((r: { agent_id: string; name: string; avatar: string }) => ({
       id: r.agent_id,
       name: r.name,
       avatar: r.avatar,
     })),
+    auto_tick: isWorldAutoTicking(id),
   })
+})
+
+/**
+ * 放置（或移动）上帝的化身。
+ *
+ * Phase 3 起「上帝」在世界里也有位置 —— 而位置**是有意义的**：只有感知半径内的
+ * 存在能确定祂在哪，远处的只感到「有什么在看着」。这正是「把 Avatar 放在世界的
+ * 任何位置，与 Agent 互动」的落点。
+ *
+ * 上帝**不受世界法则约束**（那是祂写的），也无法被 Agent 作用于（见 world_act）。
+ */
+worldsRoute.post('/:id/god', async (c) => {
+  const userId = getUserId(c)
+  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+
+  const id = c.req.param('id')
+  const world = await getWorldState(id, userId)
+  if (!world) return c.json({ error: 'Not found' }, 404)
+  if (world.status !== 'ready') return c.json({ error: 'World is not ready' }, 409)
+
+  const body = await c.req.json<{ x?: number; z?: number }>()
+  const x = clampCoord(body.x)
+  const z = clampCoord(body.z)
+  if (x === null || z === null) {
+    return c.json({ error: 'x and z must be numbers within -1..1' }, 400)
+  }
+
+  const entity = await placeGodEntity(id, x, z)
+  return c.json({ entity })
+})
+
+/**
+ * 自动演算开关。开启后世界自行推进：每隔一段时间的间隔跑一个回合（无上帝行动）。
+ * 开关是内存态（见 lib/world-ticker.ts 的说明）。
+ */
+worldsRoute.post('/:id/auto-tick', async (c) => {
+  const userId = getUserId(c)
+  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+
+  const id = c.req.param('id')
+  const world = await getWorldState(id, userId)
+  if (!world) return c.json({ error: 'Not found' }, 404)
+
+  const body = await c.req.json<{ enabled?: boolean }>()
+  const enabled = body.enabled === true
+  if (enabled) {
+    if (world.status !== 'ready') return c.json({ error: 'World is not ready' }, 409)
+    startWorldAutoTick(id, userId)
+  } else {
+    stopWorldAutoTick(id)
+  }
+  // 广播一次带开关状态的回合事件，让各设备的开关同步（内存态没有别处可读）
+  broadcastWorldTurn(userId, id, world.turn, false, enabled)
+  return c.json({ enabled })
 })
 
 /**
@@ -231,9 +297,12 @@ worldsRoute.post('/:id/act', async (c) => {
   const spec = world.terrain_spec
   const entities = await ensureWorldEntities(id, spec)
   const recentEvents = await listWorldEvents(id, TURN_CONTEXT_EVENTS)
+  const patches = await listWorldPatches(id)
   const turn = world.turn + 1
   await db.update(worlds).set({ turn, updated_at: Math.floor(Date.now() / 1000) })
     .where(eq(worlds.conversation_id, id)).run()
+
+  const autoTick = isWorldAutoTicking(id)
 
   return streamSSE(c, async (stream) => {
     const abort = new AbortController()
@@ -246,8 +315,8 @@ worldsRoute.post('/:id/act', async (c) => {
     const send = (msg: ServerMessage): void => {
       // 他设备：单条事件与回合生命周期分别中继（源设备自己直接读这个流）
       if (msg.type === 'world_event') broadcastWorldEvent(userId, id, msg.event)
-      else if (msg.type === 'world_turn_start') broadcastWorldTurn(userId, id, msg.turn, true)
-      else if (msg.type === 'world_turn_end') broadcastWorldTurn(userId, id, msg.turn, false)
+      else if (msg.type === 'world_turn_start') broadcastWorldTurn(userId, id, msg.turn, true, autoTick)
+      else if (msg.type === 'world_turn_end') broadcastWorldTurn(userId, id, msg.turn, false, autoTick)
       if (closed) return
       writeChain = writeChain
         .then(() => stream.writeSSE({ data: JSON.stringify(msg), event: 'message' }))
@@ -269,6 +338,8 @@ worldsRoute.post('/:id/act', async (c) => {
         godAction: content,
         entities,
         recentEvents,
+        patches,
+        godEntity: entities.find((e) => e.kind === 'god') ?? null,
         send,
         signal: abort.signal,
         language: body.language,
@@ -279,7 +350,7 @@ worldsRoute.post('/:id/act', async (c) => {
     } finally {
       clearInterval(keepalive)
       releaseWorldTurn(id)
-      broadcastWorldTurn(userId, id, turn, false)
+      broadcastWorldTurn(userId, id, turn, false, autoTick)
       await writeChain   // 流关闭前 flush 尾部事件
     }
   })

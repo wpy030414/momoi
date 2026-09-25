@@ -191,6 +191,21 @@ export const MIGRATION_SQL = `
   CREATE INDEX IF NOT EXISTS idx_world_entities_conv ON world_entities(conversation_id);
   CREATE INDEX IF NOT EXISTS idx_world_events_conv ON world_events(conversation_id, turn, seq);
 
+  -- 世界改造：**叠加层**，永不写回 terrain_spec —— 这是「地形规则不可修改」与
+  -- 「Agent 可以改造世界」能够共存的关键（D49）。按 seq 升序 fold 到 base 之上。
+  CREATE TABLE IF NOT EXISTS world_patches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL DEFAULT 0,
+    patch TEXT NOT NULL,                            -- TerrainPatch JSON
+    source TEXT NOT NULL DEFAULT 'agent',           -- 'agent' | 'god'
+    agent_id TEXT,
+    actor_name TEXT NOT NULL DEFAULT '',
+    turn INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE INDEX IF NOT EXISTS idx_world_patches_conv ON world_patches(conversation_id, seq);
+
   CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
   CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id);
   CREATE INDEX IF NOT EXISTS idx_wechat_bindings_conv ON wechat_bindings(conversation_id);

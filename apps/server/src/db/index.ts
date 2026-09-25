@@ -46,4 +46,5 @@ export const {
   worlds,
   worldEntities,
   worldEvents,
+  worldPatches,
 } = result.schema

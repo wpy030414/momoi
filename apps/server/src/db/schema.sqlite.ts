@@ -189,3 +189,17 @@ export const worldEvents = sqliteTable('world_events', {
   payload: text('payload'),
   created_at: integer('created_at').notNull(),
 })
+
+/** 世界改造的叠加层（D49）。按 seq 升序 fold 到 base 地形之上，永不改写 terrain_spec。 */
+export const worldPatches = sqliteTable('world_patches', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  conversation_id: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  seq: integer('seq').notNull().default(0),
+  /** TerrainPatch 的 JSON 文本 */
+  patch: text('patch').notNull(),
+  source: text('source').notNull().default('agent'),
+  agent_id: text('agent_id'),
+  actor_name: text('actor_name').notNull().default(''),
+  turn: integer('turn').notNull().default(0),
+  created_at: integer('created_at').notNull(),
+})

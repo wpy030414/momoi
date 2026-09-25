@@ -10,15 +10,21 @@
 import type { ServerMessage, WorldActorKind, WorldEntity, WorldEvent } from '@momoi/shared/types'
 import type { TerrainSpec } from '@momoi/shared/world'
 import { runPiAgentLoop } from './pi-adapter.js'
+import type { TerrainPatch } from '@momoi/shared/world'
 import { describeLocation, describeSurroundings } from '../tools/world-tools.js'
 import type { WorldEventDraft, WorldSignal, WorldView } from '../tools/world-tools.js'
-import { appendWorldEvents, saveWorldEntities } from '../lib/world.js'
+import { appendWorldEvents, appendWorldPatches, saveWorldEntities } from '../lib/world.js'
 import type { WorldEventInput } from '../lib/world.js'
 
 /** 事件日志里出现的历史条数上限（简报里给 Agent 看多少过去） */
 const BRIEFING_HISTORY = 20
 /** 上帝在事件日志里的显示名 */
 const GOD_NAME = '上帝'
+/**
+ * 感知半径（归一化）。上帝化身放在哪里是有意义的：只有附近的存在能确定祂的位置，
+ * 远处的只能感到「有什么在看着」。这正是「把 Avatar 放在世界的任何位置」的落点。
+ */
+const GOD_PERCEIVE_RADIUS = 0.6
 
 export interface WorldTurnOptions {
   conversationId: string
@@ -33,6 +39,10 @@ export interface WorldTurnOptions {
   entities: WorldEntity[]
   /** 最近的事件（升序）—— 会被就地追加，供后续 Agent 看到本回合前面发生的事 */
   recentEvents: WorldEvent[]
+  /** 已有的改造补丁（升序）—— 会被就地追加 */
+  patches: TerrainPatch[]
+  /** 上帝的化身（未放置则为 null） */
+  godEntity?: WorldEntity | null
   /** 下发本回合的 SSE 事件 */
   send: (msg: ServerMessage) => void
   signal?: AbortSignal
@@ -44,8 +54,9 @@ export interface WorldTurnOptions {
  * （与群聊编排的容错一致 —— 一个 Agent 崩了不该让整轮消失）。
  */
 export async function runWorldTurn(opts: WorldTurnOptions): Promise<void> {
-  const { conversationId, userId, turn, spec, laws, godAction, entities, recentEvents, send, signal, language } = opts
-  const view: WorldView = { conversationId, spec, laws, turn, entities, recentEvents }
+  const { conversationId, userId, turn, spec, laws, godAction, entities, recentEvents, patches, send, signal, language } = opts
+  const godEntity = opts.godEntity ?? null
+  const view: WorldView = { conversationId, spec, laws, turn, entities, recentEvents, patches }
 
   /** 落库一批事件并逐条下发（编排器是唯一写入方） */
   const commit = async (
@@ -69,7 +80,11 @@ export async function runWorldTurn(opts: WorldTurnOptions): Promise<void> {
   }
 
   // ---- 1) 上帝的行动先入史，让所有 Agent 都能看到 ----
-  await commit([{ kind: 'act', content: godAction }], { kind: 'god', id: null, name: GOD_NAME })
+  // 自动演算时 godAction 为空 —— 那是「世界自行运转」，不记一条空洞的上帝事件；
+  // 否则日志会被一串一模一样的「（时间流逝）」淹掉。
+  if (godAction.trim()) {
+    await commit([{ kind: 'act', content: godAction }], { kind: 'god', id: null, name: GOD_NAME })
+  }
 
   send({ type: 'world_turn_start', turn, entities: entities.map((e) => ({ ...e })) })
 
@@ -79,10 +94,10 @@ export async function runWorldTurn(opts: WorldTurnOptions): Promise<void> {
     if (signal?.aborted) break
     send({ type: 'world_agent_start', entity_id: actor.id, name: actor.name })
 
-    const box: WorldSignal = { view, actorId: actor.id, pending: [] }
+    const box: WorldSignal = { view, actorId: actor.id, pending: [], pendingPatches: [] }
     try {
       const res = await runPiAgentLoop({
-        userMessage: buildBriefing(view, actor, godAction),
+        userMessage: buildBriefing(view, actor, godAction, godEntity),
         // 世界不传递聊天历史 —— 事件日志已经是历史
         history: [],
         // 世界回合不流式下发 token / 思考 / 工具轨迹：客户端渲染的是事件日志，
@@ -111,6 +126,16 @@ export async function runWorldTurn(opts: WorldTurnOptions): Promise<void> {
     }
 
     await commit(box.pending, { kind: 'agent', id: actor.id, name: actor.name })
+    // 改造补丁落库后**就地并入 view.patches** —— 后续 Agent 看到的世界
+    // 必须包含前面 Agent 已经动过的土，否则它们会对着一个不存在的地形行动
+    if (box.pendingPatches.length > 0) {
+      await appendWorldPatches(conversationId, turn, box.pendingPatches, {
+        source: 'agent',
+        agentId: actor.agent_id,
+        name: actor.name,
+      })
+      view.patches.push(...box.pendingPatches)
+    }
     // 每拍都持久化实体 —— 中途崩溃不至于丢掉前面几拍的移动与死亡
     await saveWorldEntities(entities)
     send({ type: 'world_agent_done', entity_id: actor.id, name: actor.name })
@@ -121,13 +146,36 @@ export async function runWorldTurn(opts: WorldTurnOptions): Promise<void> {
 }
 
 /**
+ * 上帝离我有多近？
+ *
+ * 化身的**位置**是有意义的：只有感知半径内的存在能确定祂在哪，远处的只感到
+ * 「有什么在看着」。这让「把 Avatar 放在世界的任何位置」真的影响交互。
+ */
+function describeGodPresence(view: WorldView, actor: WorldEntity, godEntity: WorldEntity | null): string[] {
+  if (!godEntity) return []
+  const d = Math.hypot(godEntity.x - actor.x, godEntity.z - actor.z)
+  if (d <= GOD_PERCEIVE_RADIUS) {
+    return [
+      `上帝就在近旁：(${godEntity.x.toFixed(2)}, ${godEntity.z.toFixed(2)})，与你相距 ${d.toFixed(2)} —— ` +
+        `那里是${describeLocation(view.spec, godEntity.x, godEntity.z, view.patches)}。祂看得见你。`,
+    ]
+  }
+  return ['你能感到上帝的存在，却无法确定祂在何处 —— 祂离你很远。']
+}
+
+/**
  * 构造某个 Agent 的世界简报。
  *
  * 这是它在世界里的「眼睛与耳朵」：确切的自身坐标、附近有什么（含对方所处地形）、
  * 最近发生了什么、以及上帝这一步做了什么。坐标系在这里再讲一遍 ——
  * Agent 最容易犯的错就是把归一化坐标当成世界单位。
  */
-function buildBriefing(view: WorldView, actor: WorldEntity, godAction: string): string {
+function buildBriefing(
+  view: WorldView,
+  actor: WorldEntity,
+  godAction: string,
+  godEntity: WorldEntity | null,
+): string {
   const history = view.recentEvents
     .filter((e) => e.kind !== 'move') // 移动事件噪音大、信息量低，不值得占简报篇幅
     .slice(-BRIEFING_HISTORY)
@@ -135,7 +183,8 @@ function buildBriefing(view: WorldView, actor: WorldEntity, godAction: string): 
   const lines = [
     '【世界状态】',
     `回合：${view.turn}`,
-    `你的位置：(${actor.x.toFixed(2)}, ${actor.z.toFixed(2)}) —— ${describeLocation(view.spec, actor.x, actor.z)}`,
+    `你的位置：(${actor.x.toFixed(2)}, ${actor.z.toFixed(2)}) —— ${describeLocation(view.spec, actor.x, actor.z, view.patches)}`,
+    ...describeGodPresence(view, actor, godEntity),
     '你附近：',
     describeSurroundings(view, actor.id),
     '',
@@ -145,7 +194,7 @@ function buildBriefing(view: WorldView, actor: WorldEntity, godAction: string): 
       : '  （还没有）',
     '',
     '【上帝的行动】',
-    godAction,
+    godAction.trim() || '（上帝沉默不语 —— 世界自行运转）',
     '',
     '轮到你了。请用工具表达你的行动（world_move / world_speak / world_observe / world_act），',
     '并在回复文本里叙述你做了什么 —— 两者必须一致。',

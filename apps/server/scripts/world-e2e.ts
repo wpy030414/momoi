@@ -247,7 +247,40 @@ check('空行动 → 400', (await call('POST', `/api/worlds/${convId}/act`, { co
 check('不存在世界的行动 → 404',
   (await call('POST', `/api/worlds/${missing}/act`, { content: 'x' })).status === 404)
 
-console.log('\n【15】软删除后世界不可访问')
+console.log('\n【16】上帝化身（Phase 3）')
+const god1 = await call('POST', `/api/worlds/${convId}/god`, { x: 0.25, z: -0.4 })
+check('放置 200', god1.status === 200, JSON.stringify(god1.data))
+check('kind=god', god1.data?.entity?.kind === 'god', god1.data?.entity?.kind)
+check('坐标为所放之处', god1.data?.entity?.x === 0.25 && god1.data?.entity?.z === -0.4)
+const godId = god1.data?.entity?.id
+const snapGod = await call('GET', `/api/worlds/${convId}`)
+check('快照里出现上帝实体', (snapGod.data?.entities ?? []).some((e: any) => e.kind === 'god'))
+const god2 = await call('POST', `/api/worlds/${convId}/god`, { x: -0.5, z: 0.5 })
+check('再次放置是**移动**而非新增（同一 id）', god2.data?.entity?.id === godId, `${godId} vs ${god2.data?.entity?.id}`)
+const snapGod2 = await call('GET', `/api/worlds/${convId}`)
+check('上帝实体只有一个', (snapGod2.data?.entities ?? []).filter((e: any) => e.kind === 'god').length === 1)
+check('坐标已更新', (snapGod2.data?.entities ?? []).find((e: any) => e.kind === 'god')?.x === -0.5)
+check('越界坐标被钳制', (await call('POST', `/api/worlds/${convId}/god`, { x: 99, z: -99 })).data?.entity?.x === 1)
+check('非数值坐标 → 400', (await call('POST', `/api/worlds/${convId}/god`, { x: 'abc', z: 0 })).status === 400)
+check('不存在世界 → 404', (await call('POST', `/api/worlds/${missing}/god`, { x: 0, z: 0 })).status === 404)
+
+console.log('\n【17】改造补丁字段')
+check('快照含 patches 数组', Array.isArray(snapGod2.data?.patches))
+console.log(`  当前补丁数：${(snapGod2.data?.patches ?? []).length}（由 Agent 自行决定是否改造）`)
+
+console.log('\n【18】自动演算开关')
+const on = await call('POST', `/api/worlds/${convId}/auto-tick`, { enabled: true })
+check('开启 200', on.status === 200, JSON.stringify(on.data))
+check('返回 enabled:true', on.data?.enabled === true)
+const snapOn = await call('GET', `/api/worlds/${convId}`)
+check('快照 auto_tick 为 true', snapOn.data?.auto_tick === true)
+const off = await call('POST', `/api/worlds/${convId}/auto-tick`, { enabled: false })
+check('关闭 200', off.status === 200 && off.data?.enabled === false)
+const snapOff = await call('GET', `/api/worlds/${convId}`)
+check('快照 auto_tick 为 false', snapOff.data?.auto_tick === false)
+check('不存在的世界 → 404', (await call('POST', `/api/worlds/${missing}/auto-tick`, { enabled: true })).status === 404)
+
+console.log('\n【19】软删除后世界不可访问')
 check('删除会话 200', (await call('DELETE', `/api/conversations/${convId}`)).status === 200)
 check('软删后 GET 世界 → 404', (await call('GET', `/api/worlds/${convId}`)).status === 404)
 

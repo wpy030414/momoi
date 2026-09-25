@@ -294,20 +294,25 @@ export function waterLevel(spec: TerrainSpec): number {
   return level
 }
 
-/** 单点归一化高度 —— Agent 落点与「此处是什么地形」判定用 */
-export function sampleHeight(spec: TerrainSpec, x: number, z: number): number {
-  return heightAt(spec, x, z)
+/**
+ * 单点归一化高度 —— Agent 落点、位置描述、移动判定用。
+ * 传入 patches 时叠加世界的改造层（与网格渲染走同一份 fold 实现）。
+ */
+export function sampleHeight(spec: TerrainSpec, x: number, z: number, patches?: TerrainPatch[]): number {
+  return foldPatches(heightAt(spec, x, z), x, z, patches)
 }
 
-export function sampleBiome(spec: TerrainSpec, x: number, z: number): BiomeRule {
-  const h = heightAt(spec, x, z)
+export function sampleBiome(spec: TerrainSpec, x: number, z: number, patches?: TerrainPatch[]): BiomeRule {
+  const h = sampleHeight(spec, x, z, patches)
   const moisture = moistureAt(spec, x, z)
   const i = classifyBiome(spec, h, moisture, 0)
   return spec.biomes[i] ?? spec.biomes[spec.biomes.length - 1]
 }
 
-export function isWater(spec: TerrainSpec, x: number, z: number): boolean {
-  return heightAt(spec, x, z) <= waterLevel(spec)
+export function isWater(spec: TerrainSpec, x: number, z: number, patches?: TerrainPatch[]): boolean {
+  // 水位本身是**世界**的属性（基准地形的分位数），不随改造漂移 ——
+  // Agent 抬高陆地只会让水变少，不会把海也一起抬高。
+  return sampleHeight(spec, x, z, patches) <= waterLevel(spec)
 }
 
 function classifyBiome(spec: TerrainSpec, h: number, moisture: number, slope: number): number {
@@ -381,28 +386,51 @@ export function buildTerrain(
   }
 }
 
+/**
+ * 把一串补丁**按 seq 顺序**依次折叠到某一点的高度上。
+ *
+ * ⚠️ 网格（buildTerrain）与逐点采样（sampleHeight）必须共用这一份实现。
+ *    否则 Agent 抬高了地形，而服务端描述地形时还在报基准高度 —— 两边各说各话，
+ *    且这种分歧是静默的（不报错、类型检查也看不出）。
+ */
+export function foldPatches(h: number, x: number, z: number, patches?: TerrainPatch[]): number {
+  if (!patches || patches.length === 0) return h
+  let out = h
+  for (const p of patches) out = foldOnePatch(out, x, z, p)
+  return out
+}
+
+function foldOnePatch(h: number, x: number, z: number, p: TerrainPatch): number {
+  const radius = Math.max(0.01, p.radius)
+  const dist = Math.hypot(x - p.center[0], z - p.center[1])
+  if (dist > radius) return h
+  // 径向平滑衰减：中心最强，边缘归零
+  const falloff = 1 - dist / radius
+  const w = falloff * falloff * (3 - 2 * falloff) * clamp01(p.strength)
+  switch (p.op) {
+    case 'raise':
+      return h + w * 0.5
+    case 'lower':
+    case 'carve':
+      return h - w * 0.5
+    case 'flatten':
+      return h * (1 - w)
+    case 'flood':
+      return h - w * 0.3
+    default:
+      // 'paint' 不改高度（材质由渲染层按 biome 覆盖处理）
+      return h
+  }
+}
+
 function applyPatches(heights: Float32Array, N: number, patches: TerrainPatch[]): void {
   const size = N + 1
-  for (const p of patches) {
-    const [cx, cz] = p.center
-    const radius = Math.max(0.01, p.radius)
-    const strength = clamp01(p.strength)
-    for (let iz = 0; iz <= N; iz++) {
-      const nz = (iz / N) * 2 - 1
-      for (let ix = 0; ix <= N; ix++) {
-        const nx = (ix / N) * 2 - 1
-        const dist = Math.hypot(nx - cx, nz - cz)
-        if (dist > radius) continue
-        // 径向平滑衰减：中心最强，边缘归零
-        const falloff = 1 - dist / radius
-        const w = falloff * falloff * (3 - 2 * falloff) * strength
-        const k = iz * size + ix
-        if (p.op === 'raise') heights[k] += w * 0.5
-        else if (p.op === 'lower' || p.op === 'carve') heights[k] -= w * 0.5
-        else if (p.op === 'flatten') heights[k] *= 1 - w
-        else if (p.op === 'flood') heights[k] -= w * 0.3
-        // 'paint' 不改高度（材质由渲染层按 biome 覆盖处理）
-      }
+  for (let iz = 0; iz <= N; iz++) {
+    const nz = (iz / N) * 2 - 1
+    for (let ix = 0; ix <= N; ix++) {
+      const nx = (ix / N) * 2 - 1
+      const k = iz * size + ix
+      heights[k] = foldPatches(heights[k], nx, nz, patches)
     }
   }
 }

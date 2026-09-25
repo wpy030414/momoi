@@ -126,6 +126,35 @@ const minGap = Math.min(
 )
 console.log(`  最小间距 ${minGap.toFixed(3)}（阈值 ${WORLD_LIMITS.spawnSpacing}）`)
 
+console.log(`\n${'='.repeat(60)}\n【改造补丁：网格与逐点采样必须一致】`)
+{
+  const sp = defaultTerrainSpec('连绵的山脉与森林', '')
+  const patches = [
+    { op: 'raise' as const, center: [0.1, -0.2] as [number, number], radius: 0.4, strength: 0.9 },
+    { op: 'carve' as const, center: [-0.3, 0.2] as [number, number], radius: 0.3, strength: 0.7 },
+    { op: 'flatten' as const, center: [0.5, 0.5] as [number, number], radius: 0.5, strength: 0.4 },
+  ]
+  const N = 32
+  const d = buildTerrain(sp, { segments: N, patches })
+  let maxDiff = 0
+  for (const [ix, iz] of [[8, 24], [16, 16], [24, 8], [5, 5], [28, 28]]) {
+    const nx = (ix / N) * 2 - 1
+    const nz = (iz / N) * 2 - 1
+    const mesh = d.heights[iz * (N + 1) + ix]
+    const sampled = sampleHeight(sp, nx, nz, patches)
+    maxDiff = Math.max(maxDiff, Math.abs(mesh - sampled))
+  }
+  console.log(`  网格 vs 采样 最大偏差 ${maxDiff.toExponential(2)}  ${maxDiff < 1e-6 ? '✅' : '❌'}`)
+  // 补丁确实改变了地形
+  const withOut = buildTerrain(sp, { segments: N })
+  let changed = 0
+  for (let i = 0; i < d.heights.length; i++) if (Math.abs(d.heights[i] - withOut.heights[i]) > 1e-6) changed++
+  console.log(`  补丁实际改变了 ${((changed / d.heights.length) * 100).toFixed(0)}% 的顶点 ${changed > 0 ? '✅' : '❌'}`)
+  // 补丁范围之外不受影响
+  const farIdx = (31 * (N + 1)) + 31   // (1,1) 角落，三个补丁都够不到
+  console.log(`  补丁范围外不受影响 ${Math.abs(d.heights[farIdx] - withOut.heights[farIdx]) < 1e-9 ? '✅' : '❌'}`)
+}
+
 console.log(`\n${'='.repeat(60)}\n【校验层：垃圾输入】`)
 const garbage = [
   { seed: 'NaN', terrain: { style: 'nonsense', amplitude: 99, octaves: 3.7, water: 'lava' }, biomes: [] },

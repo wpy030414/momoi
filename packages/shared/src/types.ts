@@ -2,7 +2,7 @@
 // Momoi — Shared Types
 // ============================================================
 
-import type { TerrainSpec } from './world.js'
+import type { TerrainPatch, TerrainSpec } from './world.js'
 
 // 世界地形类型定义在 shared/world.ts（与服务端的噪声实现、校验层同源），此处 re-export
 export type { BiomeRule, TerrainPatch, TerrainSpec } from './world.js'
@@ -257,7 +257,7 @@ export type RealtimeEvent =
    * 世界回合的生命周期（开始 / 结束）。其它设备据此禁用输入并显示「谁正在行动」——
    * 单靠 world_event 无法判断一轮是否还在跑（最后一个事件与结束之间没有信号）。
    */
-  | { type: 'world_turn'; conversation_id: string; turn: number; running: boolean }
+  | { type: 'world_turn'; conversation_id: string; turn: number; running: boolean; auto_tick?: boolean }
 
 // ---- 世界模拟（World Simulation）----
 
@@ -269,8 +269,16 @@ export interface WorldSnapshot {
   entities: WorldEntity[]
   /** 按 (turn, seq) 升序的最近若干条事件 */
   events: WorldEvent[]
+  /** 按 (seq) 升序的改造补丁 —— 渲染时 fold 到基准地形之上，永不写回 terrain_spec */
+  patches: TerrainPatch[]
   /** 参与成员（含头像，供沙盘名牌使用） */
   agents: Array<{ id: string; name: string; avatar: string }>
+  /**
+   * 自动演算开关。**内存态，不落库** —— 与无限演算模式的 infiniteState 同一惯例
+   * （重启即关闭是合理且安全的默认，而为此加一个 worlds 列要付的代价是 PG 那条
+   * 并不存在的 ALTER 通道）。故它挂在快照旁，而不是塞进 WorldState。
+   */
+  auto_tick: boolean
 }
 
 export type WorldEntityKind = 'agent' | 'god'

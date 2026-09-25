@@ -131,9 +131,18 @@ export function broadcastWorldEvent(userId: string, conversationId: string, even
   publish(userId, undefined, { type: 'world_event', conversation_id: conversationId, event })
 }
 
-/** 世界回合开始 / 结束 —— 其它设备据此禁用输入并显示进行中状态 */
-export function broadcastWorldTurn(userId: string, conversationId: string, turn: number, running: boolean) {
-  publish(userId, undefined, { type: 'world_turn', conversation_id: conversationId, turn, running })
+/**
+ * 世界回合开始 / 结束 —— 其它设备据此禁用输入并显示进行中状态。
+ * `autoTick` 随每次广播带上，让各设备的自动演算开关保持同步（该开关是内存态，没有别处可读）。
+ */
+export function broadcastWorldTurn(
+  userId: string,
+  conversationId: string,
+  turn: number,
+  running: boolean,
+  autoTick?: boolean,
+) {
+  publish(userId, undefined, { type: 'world_turn', conversation_id: conversationId, turn, running, auto_tick: autoTick })
 }
 
 /** 未读计数变更：通知所有设备某会话存在未读消息 */

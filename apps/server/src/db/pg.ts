@@ -204,6 +204,18 @@ export async function initPg(dbUrl: string, user: string, password: string) {
 
     CREATE INDEX IF NOT EXISTS idx_world_entities_conv ON world_entities(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_world_events_conv ON world_events(conversation_id, turn, seq);
+    CREATE TABLE IF NOT EXISTS world_patches (
+      id SERIAL PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL DEFAULT 0,
+      patch TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'agent',
+      agent_id TEXT,
+      actor_name TEXT NOT NULL DEFAULT '',
+      turn INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_world_patches_conv ON world_patches(conversation_id, seq);
   `)
 
   const db = drizzlePg(pool, { schema }) as any

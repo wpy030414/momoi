@@ -10,13 +10,13 @@
 //      否则已删除会话的世界仍可被访问。
 
 import { randomUUID } from 'crypto'
-import { db, conversations, worlds, worldEntities, worldEvents, groupConversationAgents, agents as agentsTable } from '../db/index.js'
+import { db, conversations, worlds, worldEntities, worldEvents, worldPatches, groupConversationAgents, agents as agentsTable } from '../db/index.js'
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 import type {
   WorldActorKind, WorldEntity, WorldEntityStatus, WorldEvent, WorldEventKind, WorldState, WorldStatus,
 } from '@momoi/shared/types'
-import type { TerrainSpec } from '@momoi/shared/world'
+import type { TerrainPatch, TerrainSpec } from '@momoi/shared/world'
 import { WORLD_LIMITS, spawnPoints, terrainSummary } from '@momoi/shared/world'
 import { getConfig, listAgents } from './config.js'
 import { broadcastWorldStatus } from './realtime.js'
@@ -236,6 +236,102 @@ export async function saveWorldEntities(entities: WorldEntity[]): Promise<void> 
       .where(eq(worldEntities.id, e.id))
       .run()
   }
+}
+
+// ---------------------------------------------------------------
+// 改造补丁（叠加层，永不写回 terrain_spec）
+// ---------------------------------------------------------------
+
+/** 按 seq 升序读取世界的改造补丁 —— 顺序即折叠顺序，不可打乱 */
+export async function listWorldPatches(conversationId: string): Promise<TerrainPatch[]> {
+  const rows: Array<{ patch: string }> = await db
+    .select({ patch: worldPatches.patch })
+    .from(worldPatches)
+    .where(eq(worldPatches.conversation_id, conversationId))
+    .orderBy(asc(worldPatches.seq))
+    .all()
+  const out: TerrainPatch[] = []
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.patch) as TerrainPatch
+      // 逐条校验，坏行不污染整份补丁链
+      if (parsed && Array.isArray(parsed.center) && parsed.center.length === 2) out.push(parsed)
+    } catch {
+      console.warn('[world] 跳过无法解析的补丁行')
+    }
+  }
+  return out
+}
+
+/** 追加一批改造补丁（编排器是唯一调用方）。seq 全局单调递增。 */
+export async function appendWorldPatches(
+  conversationId: string,
+  turn: number,
+  patches: TerrainPatch[],
+  actor: { source: 'agent' | 'god'; agentId: string | null; name: string },
+): Promise<void> {
+  if (patches.length === 0) return
+  const maxRow = await db
+    .select({ maxSeq: sql<number>`COALESCE(MAX(world_patches.seq), 0)` })
+    .from(worldPatches)
+    .where(eq(worldPatches.conversation_id, conversationId))
+    .get()
+  let seq = Number(maxRow?.maxSeq ?? 0)
+  const at = now()
+  for (const patch of patches) {
+    seq += 1
+    await db.insert(worldPatches).values({
+      conversation_id: conversationId,
+      seq,
+      patch: JSON.stringify(patch),
+      source: actor.source,
+      agent_id: actor.agentId,
+      actor_name: actor.name,
+      turn,
+      created_at: at,
+    }).run()
+  }
+}
+
+// ---------------------------------------------------------------
+// 上帝的化身
+// ---------------------------------------------------------------
+
+/** 上帝在事件日志与沙盘上的显示名 */
+export const GOD_ENTITY_NAME = '上帝'
+
+/**
+ * 取（或创建）本世界的上帝化身。**按 kind 唯一** —— 一个世界只有一个上帝。
+ * 用户第一次放置化身时创建；此后移动只改坐标。
+ */
+export async function placeGodEntity(
+  conversationId: string,
+  x: number,
+  z: number,
+): Promise<WorldEntity> {
+  const existing = (await listWorldEntities(conversationId)).find((e) => e.kind === 'god')
+  const at = now()
+  if (existing) {
+    await db.update(worldEntities)
+      .set({ x, z, updated_at: at })
+      .where(eq(worldEntities.id, existing.id))
+      .run()
+    return { ...existing, x, z, updated_at: at }
+  }
+  const entity: WorldEntity = {
+    id: randomUUID(),
+    conversation_id: conversationId,
+    kind: 'god',
+    agent_id: null,
+    name: GOD_ENTITY_NAME,
+    x,
+    z,
+    status: 'alive',
+    created_at: at,
+    updated_at: at,
+  }
+  await db.insert(worldEntities).values(entity).run()
+  return entity
 }
 
 // ---------------------------------------------------------------

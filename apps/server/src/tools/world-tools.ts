@@ -11,8 +11,8 @@
 
 import type { ToolDefinition } from '@momoi/shared/types'
 import type { WorldEntity, WorldEntityStatus, WorldEvent, WorldEventKind } from '@momoi/shared/types'
-import { biomeName, isWater, sampleBiome, sampleHeight } from '@momoi/shared/world'
-import type { TerrainSpec } from '@momoi/shared/world'
+import { TERRAIN_ENUMS, biomeName, isWater, sampleBiome, sampleHeight } from '@momoi/shared/world'
+import type { TerrainPatch, TerrainSpec } from '@momoi/shared/world'
 import type { ToolContext, ToolModule, ToolResult } from './types.js'
 
 /** 编排器交给工具的世界当前状态。工具**就地**修改 entities，事件追加进 pending。 */
@@ -25,6 +25,8 @@ export interface WorldView {
   entities: WorldEntity[]
   /** 最近的事件，供观察与简报 */
   recentEvents: WorldEvent[]
+  /** 已有的改造补丁（升序）—— Agent 看到的应当是**已被改造过**的世界 */
+  patches: TerrainPatch[]
 }
 
 /** 工具产生的、尚待落库的事件草稿 */
@@ -40,6 +42,8 @@ export interface WorldSignal {
   actorId: string
   /** 本回合已产生的事件草稿 —— 编排器统一落库与下发 */
   pending: WorldEventDraft[]
+  /** 本回合产生的改造补丁 —— 同样由编排器统一落库 */
+  pendingPatches: TerrainPatch[]
 }
 
 // ---------------------------------------------------------------
@@ -47,13 +51,13 @@ export interface WorldSignal {
 // ---------------------------------------------------------------
 
 /** 把归一化坐标描述成人能读懂的地点（Agent 用它判断「我在哪」） */
-export function describeLocation(spec: TerrainSpec, x: number, z: number): string {
-  if (isWater(spec, x, z)) {
+export function describeLocation(spec: TerrainSpec, x: number, z: number, patches?: TerrainPatch[]): string {
+  if (isWater(spec, x, z, patches)) {
     const kind = spec.terrain.water === 'toxic' ? '有毒的水域' : '水域'
     return kind
   }
-  const biome = sampleBiome(spec, x, z)
-  const h = sampleHeight(spec, x, z)
+  const biome = sampleBiome(spec, x, z, patches)
+  const h = sampleHeight(spec, x, z, patches)
   const relief = h > 0.25 ? '高耸' : h > 0.05 ? '略高' : h > -0.1 ? '平坦' : '低洼'
   return `${biomeName(biome.id)}（${relief}）`
 }
@@ -102,7 +106,7 @@ export function describeSurroundings(view: WorldView, actorId: string, radius = 
   return others
     .map(({ e, d }) => {
       const status = e.status === 'dead' ? '（已死）' : ''
-      return `${e.name}${status} 在 (${e.x.toFixed(2)}, ${e.z.toFixed(2)})，相距 ${d.toFixed(2)} —— 那里是${describeLocation(view.spec, e.x, e.z)}`
+      return `${e.name}${status} 在 (${e.x.toFixed(2)}, ${e.z.toFixed(2)})，相距 ${d.toFixed(2)} —— 那里是${describeLocation(view.spec, e.x, e.z, view.patches)}`
     })
     .join('\n')
 }
@@ -139,7 +143,7 @@ const worldMove: ToolModule = {
 
     const from = { x: actor.x, z: actor.z }
     if (from.x === x && from.z === z) {
-      return { summary: `你已经在 (${x}, ${z}) —— ${describeLocation(signal.view.spec, x, z)}` }
+      return { summary: `你已经在 (${x}, ${z}) —— ${describeLocation(signal.view.spec, x, z, signal.view.patches)}` }
     }
 
     actor.x = x
@@ -151,7 +155,7 @@ const worldMove: ToolModule = {
     })
 
     return {
-      summary: `你移动到 (${x.toFixed(2)}, ${z.toFixed(2)})。此处是${describeLocation(signal.view.spec, x, z)}。`,
+      summary: `你移动到 (${x.toFixed(2)}, ${z.toFixed(2)})。此处是${describeLocation(signal.view.spec, x, z, signal.view.patches)}。`,
     }
   },
 }
@@ -226,7 +230,7 @@ const worldObserve: ToolModule = {
       return {
         summary:
           `${target.name}：${target.status === 'alive' ? '活着' : target.status === 'dead' ? '已死' : '已消失'}，` +
-          `位于 (${target.x.toFixed(2)}, ${target.z.toFixed(2)})，那里是${describeLocation(view.spec, target.x, target.z)}。` +
+          `位于 (${target.x.toFixed(2)}, ${target.z.toFixed(2)})，那里是${describeLocation(view.spec, target.x, target.z, view.patches)}。` +
           `与你相距 ${distance(target, actor).toFixed(2)}。`,
       }
     }
@@ -235,7 +239,7 @@ const worldObserve: ToolModule = {
     const recent = view.recentEvents.slice(-6)
     return {
       summary:
-        `你位于 (${actor.x.toFixed(2)}, ${actor.z.toFixed(2)}) —— ${describeLocation(view.spec, actor.x, actor.z)}。\n` +
+        `你位于 (${actor.x.toFixed(2)}, ${actor.z.toFixed(2)}) —— ${describeLocation(view.spec, actor.x, actor.z, view.patches)}。\n` +
         `附近：\n${describeSurroundings(view, actor.id, r)}\n` +
         `最近发生：\n${recent.length ? recent.map((e) => `  ${e.turn}·${e.actor_name}：${e.content}`).join('\n') : '  （还没有）'}`,
     }
@@ -285,6 +289,10 @@ const worldAct: ToolModule = {
       if (target.status !== 'alive') {
         return { summary: `Error: ${target.name} 已经不是活着的状态了`, error: true }
       }
+      // 上帝化身不是可以被作用的对象 —— 它高于世界法则
+      if (target.kind === 'god') {
+        return { summary: 'Error: 你无法对上帝有所作为。你可以对祂说话。', error: true }
+      }
     }
 
     // target_status 只在确实有目标时才有意义 —— 防止「凭空声明某人死亡」
@@ -317,8 +325,118 @@ const worldAct: ToolModule = {
   },
 }
 
+/**
+ * 单回合最多改造的次数。防止一个 Agent 一口气把整个世界推平 ——
+ * 改造是**永久**的，代价必须可见。
+ */
+const MAX_RESHAPES_PER_TURN = 2
+
+/** 单次改造的作用半径上限（归一化）。整个世界是 ±1，故 0.5 已是一大片。 */
+const MAX_RESHAPE_RADIUS = 0.5
+
+const RESHAPE_LABEL: Record<TerrainPatch['op'], string> = {
+  raise: '抬高了',
+  lower: '压低了',
+  carve: '凿开了',
+  flatten: '削平了',
+  flood: '灌入了水',
+  paint: '换上了',
+}
+
+const worldReshape: ToolModule = {
+  definition: {
+    name: 'world_reshape',
+    description:
+      '**永久地**改造世界的地貌：抬高或压低一片区域、凿出谷地、削平、灌水、或替换地表材质。' +
+      '世界地形规则（上帝制定）不可违逆，但你可以在其之上动土。改造会被所有存在看见，且不可撤销。' +
+      '坐标与 world_move 同一套：中心 (0,0)，x 向东、z 向南，边界 ±1。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        op: {
+          type: 'string',
+          description: '改造方式',
+          enum: ['raise', 'lower', 'carve', 'flatten', 'flood', 'paint'],
+        },
+        x: { type: 'number', description: '中心 x 坐标，−1 到 1' },
+        z: { type: 'number', description: '中心 z 坐标，−1 到 1' },
+        radius: { type: 'number', description: `作用半径（归一化，最大 ${MAX_RESHAPE_RADIUS}）` },
+        strength: { type: 'number', description: '强度 0~1，越大越猛烈' },
+        biome: {
+          type: 'string',
+          description: `仅 op='paint' 时用：换成哪种地表（${TERRAIN_ENUMS.biomeId.join(' / ')}）`,
+        },
+      },
+      required: ['op', 'x', 'z', 'radius', 'strength'],
+    },
+  },
+  async execute(input, ctx): Promise<ToolResult> {
+    const got = actorOf(ctx)
+    if (isResult(got)) return got
+    const { signal, actor } = got
+
+    if (signal.pendingPatches.length >= MAX_RESHAPES_PER_TURN) {
+      return {
+        summary: `Error: 这一拍你已经改造了 ${MAX_RESHAPES_PER_TURN} 次。世界的改变是永久的，慢一些。`,
+        error: true,
+      }
+    }
+
+    const opRaw = String(input.op ?? '').trim()
+    const ops: TerrainPatch['op'][] = ['raise', 'lower', 'carve', 'flatten', 'flood', 'paint']
+    if (!ops.includes(opRaw as TerrainPatch['op'])) {
+      return { summary: `Error: op 必须是 ${ops.join(' / ')} 之一`, error: true }
+    }
+    const op = opRaw as TerrainPatch['op']
+
+    const x = clampCoord(input.x)
+    const z = clampCoord(input.z)
+    if (x === null || z === null) {
+      return { summary: 'Error: x 与 z 必须是 −1 到 1 之间的数值', error: true }
+    }
+
+    const radiusRaw = typeof input.radius === 'number' ? input.radius : Number(input.radius)
+    if (!Number.isFinite(radiusRaw) || radiusRaw <= 0) {
+      return { summary: 'Error: radius 必须是正数', error: true }
+    }
+    const radius = Math.min(MAX_RESHAPE_RADIUS, radiusRaw)
+
+    const strengthRaw = typeof input.strength === 'number' ? input.strength : Number(input.strength)
+    const strength = Number.isFinite(strengthRaw) ? Math.min(1, Math.max(0, strengthRaw)) : 0.5
+
+    let biome: string | undefined
+    if (op === 'paint') {
+      const wanted = String(input.biome ?? '').trim()
+      if (!(TERRAIN_ENUMS.biomeId as readonly string[]).includes(wanted)) {
+        return {
+          summary: `Error: biome 必须是词表内的地表之一（${TERRAIN_ENUMS.biomeId.join(' / ')}）`,
+          error: true,
+        }
+      }
+      biome = wanted
+    }
+
+    const patch: TerrainPatch = { op, center: [x, z], radius, strength }
+    if (biome) patch.biome = biome
+    signal.pendingPatches.push(patch)
+
+    const detail = biome ? `（${biomeName(biome)}）` : ''
+    signal.pending.push({
+      kind: 'act',
+      content: `${RESHAPE_LABEL[op]} (${x.toFixed(2)}, ${z.toFixed(2)}) 周围半径 ${radius.toFixed(2)} 的地貌${detail}`,
+      payload: { patch },
+    })
+
+    // 用「含本次改造」的补丁列表描述结果 —— 否则 Agent 会读到改造前的旧地貌
+    const after = describeLocation(signal.view.spec, x, z, [...signal.view.patches, ...signal.pendingPatches])
+    return {
+      summary: `你${RESHAPE_LABEL[op]}这一带的地貌${detail}。此地现在是${after}。这个改变是永久的。`,
+    }
+  },
+}
+
 /** 世界回合可用的全部工具（顺序即暴露给 LLM 的顺序） */
-export const worldTools: ToolModule[] = [worldObserve, worldMove, worldSpeak, worldAct]
+export const worldTools: ToolModule[] = [worldObserve, worldMove, worldSpeak, worldAct, worldReshape]
 
 /** 世界回合的工具白名单 —— 见文件头注释 */
 export const WORLD_TOOL_NAMES: string[] = [...worldTools.map((t) => t.definition.name), 'load_skill']
