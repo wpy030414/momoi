@@ -19,7 +19,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { PanelLeft, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 import { ensureLocale } from './i18n'
-import { isPushSupported } from './lib/push-subscription'
+// 静态导入：模块零依赖且体积 ~1 KB，且 isPushSupported 每次渲染都要同步调用，
+// 模块本就在主包中——动态导入不产生任何分包收益（曾因此触发
+// INEFFECTIVE_DYNAMIC_IMPORT 警告），故统一走静态导入。
+import { isPushSupported, subscribePush, unsubscribePush } from './lib/push-subscription'
 
 // First-use introduction — lazy chunk; users who dismissed it once never load it.
 const IntroductionDialog = lazy(() =>
@@ -485,7 +488,6 @@ export function App() {
   const handlePushToggle = useCallback(async () => {
     if (pushEnabled) {
       // Turning off: unsubscribe and forget
-      const { unsubscribePush } = await import('./lib/push-subscription')
       await unsubscribePush()
       setPushEnabled(false)
       localStorage.removeItem('momoi_push_enabled')
@@ -493,7 +495,6 @@ export function App() {
       // Turning on: request permission — modern Chrome always shows the
       // HTML-based permission dialog on user gesture. Only resolves to
       // "denied" silently when user has blocked the site in browser settings.
-      const { subscribePush } = await import('./lib/push-subscription')
       const result = await Notification.requestPermission()
       if (result === 'granted' && currentUser) {
         await subscribePush(currentUser)
@@ -536,7 +537,7 @@ export function App() {
     if (localStorage.getItem('momoi_intro_seen') !== 'true') setIntroOpen(true)
     // Auto-subscribe if permission was already granted and toggle is on
     if (pushEnabled && Notification.permission === 'granted') {
-      import('./lib/push-subscription').then(m => m.subscribePush(currentUser))
+      subscribePush(currentUser)
     }
   }, [currentUser, pushEnabled])
 

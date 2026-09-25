@@ -88,8 +88,17 @@ export async function subscribePush(userId: string): Promise<void> {
   // 6. 订阅 Push
   const deviceId = getDeviceId()
 
-  // 先检查是否已有订阅
+  // 先检查是否已有订阅。
+  // ⚠ 关键：推送服务把订阅与订阅时的 VAPID 公钥绑定。若服务端密钥
+  // 曾重新生成（数据重置等），旧订阅已被永久拒绝（Apple 403
+  // BadJwtToken），复用无意义——比对记录的公钥指纹，不一致则退订重订。
   let subscription = await registration.pushManager.getSubscription()
+
+  if (subscription && localStorage.getItem(VAPID_KEY_STORAGE) !== vapidPublicKey) {
+    console.log('[push] VAPID key changed since last subscribe — resubscribing with current key')
+    await subscription.unsubscribe()
+    subscription = null
+  }
 
   if (!subscription) {
     try {
@@ -98,6 +107,7 @@ export async function subscribePush(userId: string): Promise<void> {
         // @ts-expect-error: node types conflict with DOM's BufferSource/Uint8Array
         applicationServerKey: urlB64ToUint8Array(vapidPublicKey),
       })
+      localStorage.setItem(VAPID_KEY_STORAGE, vapidPublicKey)
     } catch (err) {
       console.error('[push] PushManager.subscribe failed:', err)
       return
@@ -111,10 +121,13 @@ export async function subscribePush(userId: string): Promise<void> {
 
 /** 取消订阅 */
 export async function unsubscribePush(): Promise<void> {
-  const registration = await navigator.serviceWorker?.getRegistration()
-  if (!registration) return
+  localStorage.removeItem(VAPID_KEY_STORAGE)
 
-  const subscription = await registration.pushManager.getSubscription()
+  const registration = await navigator.serviceWorker?.getRegistration()
+  const subscription = await registration?.pushManager.getSubscription()
+  // 先取 endpoint 再本地退订——服务端按 endpoint 精确删除该行
+  const endpoint = subscription?.endpoint
+
   if (subscription) {
     await subscription.unsubscribe()
   }
@@ -122,11 +135,14 @@ export async function unsubscribePush(): Promise<void> {
   await fetch('/api/push-notification/unsubscribe', {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ deviceId: getDeviceId() }),
+    body: JSON.stringify({ endpoint, deviceId: getDeviceId() }),
   })
 
   console.log('[push] Unsubscribed')
 }
+
+/** localStorage key：记录订阅时所用的 VAPID 公钥（用于检测服务端换钥） */
+const VAPID_KEY_STORAGE = 'momoi_vapid_pk'
 
 /** 获取 device_id（与 SSE 连接共用） */
 function getDeviceId(): string {

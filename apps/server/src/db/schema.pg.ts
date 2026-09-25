@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, serial, primaryKey, index } from 'drizzle-orm/pg-core'
+import { pgTable, text, integer, boolean, serial, primaryKey, index, uniqueIndex } from 'drizzle-orm/pg-core'
 
 export const conversations = pgTable('conversations', {
   id: text('id').primaryKey(),
@@ -130,4 +130,9 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
   p256dh: text('p256dh').notNull(),
   auth: text('auth').notNull(),
   created_at: integer('created_at').notNull(),
-})
+}, (t) => [
+  // 与 sqlite DDL 的 UNIQUE(user_id, device_id) 对齐；
+  // 既有 PG 部署需手动补：ALTER TABLE push_subscriptions
+  // ADD CONSTRAINT uq_push_user_device UNIQUE (user_id, device_id)
+  uniqueIndex('uq_push_user_device').on(t.user_id, t.device_id),
+])

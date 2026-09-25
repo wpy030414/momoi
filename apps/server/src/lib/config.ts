@@ -2,6 +2,7 @@ import './env.js'
 import { db, settings, agents, mcpServers, userAgentMemories } from '../db/index.js'
 import { eq, and, desc } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
+import { getWebPush } from './web-push.js'
 import type { AppConfig, Agent, McpServerConfig, UserAgentMemory } from '@momoi/shared/types'
 import {
   DEFAULT_APP_NAME,
@@ -379,8 +380,7 @@ export async function getVapidKeys(): Promise<{ publicKey: string; privateKey: s
   }
 
   // Generate on first use
-  const webPushModule = await import('web-push')
-  const webPush = (webPushModule as any).default ?? webPushModule
+  const webPush = await getWebPush()
   const keys = webPush.generateVAPIDKeys()
   await setSetting('vapid_private_key', keys.privateKey)
   await setSetting('vapid_public_key', keys.publicKey)

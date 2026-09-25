@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const conversations = sqliteTable('conversations', {
   id: text('id').primaryKey(),
@@ -130,4 +130,8 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
   p256dh: text('p256dh').notNull(),
   auth: text('auth').notNull(),
   created_at: integer('created_at').notNull(),
-})
+}, (t) => [
+  // 与 db/ddl.ts 的 UNIQUE(user_id, device_id) 对齐（此前 schema 未声明，
+  // 曾致 endpoint 键控 upsert 撞物理约束 500）
+  uniqueIndex('uq_push_user_device').on(t.user_id, t.device_id),
+])
