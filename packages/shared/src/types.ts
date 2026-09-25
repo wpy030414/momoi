@@ -225,6 +225,11 @@ export type ServerMessage =
   | { type: 'done'; reply: string; suggestions: string[]; agent_id?: string; agent_name?: string; infinite?: boolean }
   | { type: 'ask_user'; question_id: string; tool_call_id: string; questions: AskUserQuestion[]; agent_id?: string; agent_name?: string }
   | { type: 'error'; message: string; agent_id?: string; agent_name?: string }
+  | { type: 'world_turn_start'; turn: number; entities: WorldEntity[] }
+  | { type: 'world_agent_start'; entity_id: string; name: string }
+  | { type: 'world_event'; event: WorldEvent }
+  | { type: 'world_agent_done'; entity_id: string; name: string }
+  | { type: 'world_turn_end'; turn: number }
   | { type: 'voice_segment'; message_id: number; index: number; audio_url: string; text: string; duration_seconds: number }
   | { type: 'voice_done'; message_id: number; total_segments: number }
 
@@ -243,10 +248,69 @@ export type RealtimeEvent =
    * 转入 'ready' 时自行重拉 GET /api/worlds/:id。
    */
   | { type: 'world_status'; conversation_id: string; status: WorldStatus }
+  /**
+   * 世界回合中产生的单条事件。世界事件是**离散**的（不是 token 流），
+   * 故可直接中继，无需聊天流那条有损的 token 批量路径。
+   */
+  | { type: 'world_event'; conversation_id: string; event: WorldEvent }
 
 // ---- 世界模拟（World Simulation）----
 
 export type WorldStatus = 'generating' | 'ready' | 'failed'
+
+/** GET /api/worlds/:conversationId 的完整载荷 */
+export interface WorldSnapshot {
+  world: WorldState
+  entities: WorldEntity[]
+  /** 按 (turn, seq) 升序的最近若干条事件 */
+  events: WorldEvent[]
+  /** 参与成员（含头像，供沙盘名牌使用） */
+  agents: Array<{ id: string; name: string; avatar: string }>
+}
+
+export type WorldEntityKind = 'agent' | 'god'
+export type WorldEntityStatus = 'alive' | 'dead' | 'gone'
+
+/** 世界中的一个存在：Agent，或（Phase 3 起）上帝的 Avatar */
+export interface WorldEntity {
+  id: string
+  conversation_id: string
+  kind: WorldEntityKind
+  /** kind='agent' 时关联 agents.id；kind='god' 为 null */
+  agent_id: string | null
+  name: string
+  /** 归一化坐标，各自 ∈ [−1, 1]；世界中心为 (0, 0) */
+  x: number
+  z: number
+  status: WorldEntityStatus
+  created_at: number
+  updated_at: number
+}
+
+export type WorldActorKind = 'god' | 'agent' | 'world'
+export type WorldEventKind = 'act' | 'speak' | 'move' | 'die' | 'law' | 'narration'
+
+/**
+ * 世界里发生的一件事 —— 世界的「消息」。
+ * 世界不渲染聊天气泡，事件日志就是它的历史与表达。
+ */
+export interface WorldEvent {
+  id: number
+  conversation_id: string
+  /** 回合序号：一次「上帝行动 → Agent 依次行动」为一个回合 */
+  turn: number
+  /** 回合内顺序 */
+  seq: number
+  actor_kind: WorldActorKind
+  /** world_entities.id；'world' 类事件为 null */
+  actor_id: string | null
+  actor_name: string
+  kind: WorldEventKind
+  content: string
+  /** 结构化增量：坐标移动、状态变更等 */
+  payload?: Record<string, unknown> | null
+  created_at: number
+}
 
 /** GET /api/worlds/:conversationId 返回的世界状态；生成中 terrain_spec 为 null */
 export interface WorldState {

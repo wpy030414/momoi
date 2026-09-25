@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, serial, primaryKey, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { pgTable, text, integer, real, boolean, serial, primaryKey, index, uniqueIndex } from 'drizzle-orm/pg-core'
 
 export const conversations = pgTable('conversations', {
   id: text('id').primaryKey(),
@@ -155,4 +155,37 @@ export const worlds = pgTable('worlds', {
   turn: integer('turn').notNull().default(0),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
+})
+
+/**
+ * 世界中的存在：Agent，或（Phase 3 起）上帝的 Avatar。
+ * 坐标**归一化**到 [-1,1]，中心 (0,0) —— 与 @momoi/shared/world 的采样坐标系一致，
+ * 故客户端可直接送进 sampleHeight / sampleBiome，无需任何换算。
+ */
+export const worldEntities = pgTable('world_entities', {
+  id: text('id').primaryKey(),
+  conversation_id: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull().default('agent'),
+  agent_id: text('agent_id'),
+  name: text('name').notNull().default(''),
+  x: real('x').notNull().default(0),
+  z: real('z').notNull().default(0),
+  status: text('status').notNull().default('alive'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+})
+
+/** 世界里发生的一件事 —— 世界的「消息」。按 (turn, seq) 排序即世界史。 */
+export const worldEvents = pgTable('world_events', {
+  id: serial('id').primaryKey(),
+  conversation_id: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  turn: integer('turn').notNull().default(0),
+  seq: integer('seq').notNull().default(0),
+  actor_kind: text('actor_kind').notNull().default('world'),
+  actor_id: text('actor_id'),
+  actor_name: text('actor_name').notNull().default(''),
+  kind: text('kind').notNull().default('act'),
+  content: text('content').notNull().default(''),
+  payload: text('payload'),
+  created_at: integer('created_at').notNull(),
 })

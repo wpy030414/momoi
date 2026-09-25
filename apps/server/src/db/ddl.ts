@@ -157,6 +157,40 @@ export const MIGRATION_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_worlds_status ON worlds(status);
 
+  -- 世界中的存在：Agent，或（Phase 3 起）上帝的 Avatar。
+  -- 坐标是**归一化**的 [-1,1]，中心 (0,0) —— 与 @momoi/shared/world 的采样坐标系一致，
+  -- 故客户端可以直接把它送进 sampleHeight/sampleBiome 而不需要任何换算。
+  CREATE TABLE IF NOT EXISTS world_entities (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL DEFAULT 'agent',
+    agent_id TEXT,
+    name TEXT NOT NULL DEFAULT '',
+    x REAL NOT NULL DEFAULT 0,
+    z REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'alive',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
+  -- 世界里发生的一件事 —— 世界的「消息」。按 (turn, seq) 排序即世界史。
+  CREATE TABLE IF NOT EXISTS world_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    turn INTEGER NOT NULL DEFAULT 0,
+    seq INTEGER NOT NULL DEFAULT 0,
+    actor_kind TEXT NOT NULL DEFAULT 'world',
+    actor_id TEXT,
+    actor_name TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'act',
+    content TEXT NOT NULL DEFAULT '',
+    payload TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_world_entities_conv ON world_entities(conversation_id);
+  CREATE INDEX IF NOT EXISTS idx_world_events_conv ON world_events(conversation_id, turn, seq);
+
   CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
   CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id);
   CREATE INDEX IF NOT EXISTS idx_wechat_bindings_conv ON wechat_bindings(conversation_id);

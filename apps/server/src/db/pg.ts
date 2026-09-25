@@ -174,6 +174,36 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_worlds_status ON worlds(status);
+
+    CREATE TABLE IF NOT EXISTS world_entities (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL DEFAULT 'agent',
+      agent_id TEXT,
+      name TEXT NOT NULL DEFAULT '',
+      x REAL NOT NULL DEFAULT 0,
+      z REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'alive',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS world_events (
+      id SERIAL PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      turn INTEGER NOT NULL DEFAULT 0,
+      seq INTEGER NOT NULL DEFAULT 0,
+      actor_kind TEXT NOT NULL DEFAULT 'world',
+      actor_id TEXT,
+      actor_name TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'act',
+      content TEXT NOT NULL DEFAULT '',
+      payload TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_world_entities_conv ON world_entities(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_world_events_conv ON world_events(conversation_id, turn, seq);
   `)
 
   const db = drizzlePg(pool, { schema }) as any
