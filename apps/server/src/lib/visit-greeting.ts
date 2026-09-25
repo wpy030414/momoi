@@ -3,7 +3,8 @@
 // ============================================================
 // 用户通过 SSE 首次连接时（getActiveDeviceCount === 1），
 // 随机选一个对话过的 Agent，主动发一条招呼消息——每次上线都触发。
-// 同一用户 5 分钟内重复上线（如刷新页面导致 SSE 重连）只问候一次。
+// 不做防抖：把「距上次问候的间隔」注入提示词（内存记录，重启清零），
+// 间隔很短 = 用户在反复刷新，Agent 会自然察觉并假装生气吐槽。
 //
 // 触发点：routes/events.ts（首设备连接后 fire-and-forget）
 // 复用：push-scheduler 的 getConversedAgents / sendWebPush
@@ -39,23 +40,25 @@ async function collectAIResponse(
 
 // ---- Main ----
 
-/** 同一用户两次问候的最小间隔。刷新页面会让 SSE 断开重连、
- *  设备数重新回到 1——若不防抖，每次刷新都会弹一条推送。 */
-const GREETING_DEBOUNCE_MS = 5 * 60 * 1000
-
+/** 每用户上次问候推送的时间戳（内存，不落库、重启清零）。
+ *  不防抖：每次上线都问候；把间隔注入提示词，由 Agent 自己
+ *  察觉「用户在反复刷新」并作出反应。 */
 const lastGreetedAt = new Map<string, number>()
+
+/** 间隔毫秒 → 人类友好的相对时间 */
+function describeSince(ms: number): string {
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s} 秒前`
+  if (s < 3600) return `${Math.round(s / 60)} 分钟前`
+  return `${Math.round(s / 3600)} 小时前`
+}
 
 export async function triggerVisitGreeting(userId: string): Promise<void> {
   try {
-    // 0. 防抖：先占位再生成，并发上线（双标签页同时打开）也只问候一次
-    const last = lastGreetedAt.get(userId) ?? 0
-    if (Date.now() - last < GREETING_DEBOUNCE_MS) {
-      console.log(
-        `[visit-greeting] User ${userId} greeted ${Math.round((Date.now() - last) / 1000)}s ago, skipping (debounce)`,
-      )
-      return
-    }
+    // 0. 读取上次问候时间并立刻占位（并发上线时，至多一个读到旧值）
+    const last = lastGreetedAt.get(userId)
     lastGreetedAt.set(userId, Date.now())
+    const sinceLast = last ? describeSince(Date.now() - last) : null
 
     // 1. 查询对话过的 Agent
     const agentIds = await getConversedAgents(userId)
@@ -75,17 +78,21 @@ export async function triggerVisitGreeting(userId: string): Promise<void> {
     console.log(`[visit-greeting] User ${userId}: agent ${agent.name} greeting...`)
 
     // 3. AI 生成招呼内容
-    // 空 system_prompt 会以 {"role":"system","content":""} 发出，
-    // 上游（DEAP/deepseek）对此返回 550 unknownServerError——
-    // 与 pi-adapter 的 buildSystemPrompt 相同的兜底链，且绝不发送空 system 消息。
     const config = await getConfig()
     const systemPrompt =
       agent.system_prompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
+
+    // 根据距上次问候的间隔拼装不一样的欢迎词。反复刷新（间隔短）
+    // → Agent 察觉用户拿自己刷着玩，假装生气吐槽；间隔长 → 正常欢迎。
+    const refreshHint = sinceLast
+      ? `（说明：用户刚才 ${sinceLast} 也打开过页面，这是短时间内又一次。"你干嘛反复开关页面，拿我刷着玩是吧？"）`
+      : `（说明：用户很久没来了，用活泼欢迎的语气说话。）`
+
     const chatMessages: ChatMessage[] = [
       ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
       {
         role: 'user' as const,
-        content: `用户刚打开页面回来了，主动打个招呼。要求：\n1. 用你的性格和语气自然地表示欢迎，以第一人称\n2. 标题不超过8字，正文不超过50字\n3. 严格按 JSON 格式回复，不要包含其他内容：{"title":"...","body":"..."}`,
+        content: `用户刚打开页面回来了，主动打个招呼。${refreshHint}\n要求：\n1. 用你的性格和语气自然地表示欢迎，以第一人称\n2. 标题不超过8字，正文不超过50字\n3. 严格按 JSON 格式回复，不要包含其他内容：{"title":"...","body":"..."}`,
       },
     ]
 
