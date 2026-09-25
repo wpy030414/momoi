@@ -213,6 +213,7 @@ ${worldContext.terrainSummary}
 - 你的位置、移动与行动必须与地形自洽（不能凭空出现在海中央，也不能穿山而过）。
 - 用工具表达你的行动，并在回复文本里叙述你做了什么；两者必须一致 —— 说「走向山脚」就要真的调用 world_move。
 - 死亡不可逆。一旦死亡或消失，你就再也无法行动。
+- 用与上帝相同的语言说话与叙述。
 `
   }
 
@@ -306,7 +307,11 @@ function jsonSchemaToTypeBox(properties: Record<string, import('@momoi/shared/ty
 }
 
 // ---- ToolModule → Pi AgentTool ----
-async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
+// 导出以便离线校验「给定的上下文到底暴露了哪些工具」—— 与 buildSystemPrompt 同理：
+// 无测试框架时，这是唯一能直观看清「模型手里有什么」的入口。
+// 世界回合的工具白名单（住在沙盘里的生灵不该能读写文件 / 执行 Shell / 发 HTTP）
+// 是一条安全边界，值得有一个确定性的断言盯着它。
+export async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
   // 记忆工具只在「能拥有记忆的 Agent」下暴露：中立 Agent、身份未知、以及显式禁用记忆的
   // 上下文（QQ 群聊等多真人场景）一律剔除——它们的记忆永远不会被注入，允许调用只会写出
   // 死行或把别人的事记到绑定者名下（与 routes/memories.ts 对中立 Agent 返回 403 一致）。

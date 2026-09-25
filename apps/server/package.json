@@ -12,7 +12,8 @@
     "start": "cross-env NODE_ENV=production node dist/index.js",
     "start:standalone": "cross-env NODE_ENV=production node dist/index.js --stand-alone",
     "typecheck": "tsc --noEmit",
-    "world:e2e": "tsx scripts/world-e2e.ts"
+    "world:e2e": "tsx scripts/world-e2e.ts",
+    "world:tools": "tsx scripts/world-tools-check.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.85.1",

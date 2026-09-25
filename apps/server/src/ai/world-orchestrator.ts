@@ -88,7 +88,10 @@ export async function runWorldTurn(opts: WorldTurnOptions): Promise<void> {
         // 世界回合不流式下发 token / 思考 / 工具轨迹：客户端渲染的是事件日志，
         // 不是消息气泡。契约因此保持纯净（只有 world_* 事件）。
         send: () => {},
-        thinkingMode: false,
+        // 思考**开启**：关掉它会让「我先看看四周」这类计划句无处可去，直接漏进
+        // 叙述正文（实测出现过英文计划句 + 中文叙述拼接的割裂）。开启后推理走
+        // reasoning_content 通道，由上面那个空 send 丢弃，正文只剩叙述本身。
+        thinkingMode: true,
         conversationId,
         userId,
         agentId: actor.agent_id ?? undefined,
@@ -146,6 +149,10 @@ function buildBriefing(view: WorldView, actor: WorldEntity, godAction: string): 
     '',
     '轮到你了。请用工具表达你的行动（world_move / world_speak / world_observe / world_act），',
     '并在回复文本里叙述你做了什么 —— 两者必须一致。',
+    // 语言锚定：简报与提示词都是中文，但模型（尤其小参数模型）容易顺着英文系统段
+    // 滑向英文输出。实测出现过上帝用中文行动、Agent 用英文叙述的割裂。
+    '用与【上帝的行动】相同的语言叙述。',
+    '直接输出你的叙述本身 —— 不要输出思考过程、计划或「我准备先……」之类的说明。',
   ]
   return lines.join('\n')
 }

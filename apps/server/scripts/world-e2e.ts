@@ -47,6 +47,41 @@ async function call(method: string, path: string, body?: unknown): Promise<{ sta
   }
 }
 
+/**
+ * 发起一次上帝行动并读完 SSE 流。
+ * 流里每行是 `data: {json}`（event 名恒为 'message'，判别靠 data 里的 type）。
+ */
+async function actStream(
+  convId: string,
+  content: string,
+): Promise<{ status: number; messages: any[] }> {
+  const res = await fetch(`${BASE}/api/worlds/${convId}/act`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => '')
+    return { status: res.status, messages: [], text } as never
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  const messages: any[] = []
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      try { messages.push(JSON.parse(line.slice(6))) } catch { /* 保活注释等 */ }
+    }
+  }
+  return { status: res.status, messages }
+}
+
 // ---- 取一个可用 Agent（排除中立 Agent）----
 const appInfo = await call('GET', '/api/app-name')
 const agent = (appInfo.data?.agents ?? []).find((a: any) => a.id !== 'neutral-agent')
@@ -144,7 +179,75 @@ const missing = '00000000-0000-0000-0000-000000000000'
 check('GET 404', (await call('GET', `/api/worlds/${missing}`)).status === 404)
 check('PATCH 404', (await call('PATCH', `/api/worlds/${missing}`, { laws: 'x' })).status === 404)
 
-console.log('\n【10】软删除后世界不可访问')
+console.log('\n【10】实体播种（Phase 2）')
+const snap1 = await call('GET', `/api/worlds/${convId}`)
+const ents1: any[] = snap1.data?.entities ?? []
+check('实体已播种', ents1.length === 1, JSON.stringify(ents1))
+check('kind=agent 且关联了 agent_id', ents1[0]?.kind === 'agent' && ents1[0]?.agent_id === agent.id)
+check('状态为 alive', ents1[0]?.status === 'alive')
+check('落在世界范围内（±1）', Math.abs(ents1[0]?.x) <= 1 && Math.abs(ents1[0]?.z) <= 1,
+  `(${ents1[0]?.x}, ${ents1[0]?.z})`)
+check('快照含 events 数组', Array.isArray(snap1.data?.events))
+const seededPos = { x: ents1[0]?.x, z: ents1[0]?.z }
+
+console.log('\n【11】上帝行动 → 一个回合')
+const godAction = '我在天空中降下一道雷，劈向东边的山脊。'
+const stream = await actStream(convId, godAction)
+check('SSE 200', stream.status === 200, String(stream.status))
+const types = stream.messages.map((m) => m.type)
+check('有 world_turn_start', types.includes('world_turn_start'))
+check('有 world_agent_start', types.includes('world_agent_start'))
+check('有 world_event', types.includes('world_event'))
+check('有 world_agent_done', types.includes('world_agent_done'))
+check('有 world_turn_end', types.includes('world_turn_end'))
+check('回合序号为 1', stream.messages.find((m) => m.type === 'world_turn_start')?.turn === 1)
+
+const evs: any[] = stream.messages.filter((m) => m.type === 'world_event').map((m) => m.event)
+check('至少产生了事件', evs.length > 0, `events=${evs.length}`)
+check('首条是上帝的行动', evs[0]?.actor_kind === 'god' && evs[0]?.content === godAction,
+  JSON.stringify(evs[0]?.content))
+check('事件按 (turn, seq) 稠密递增', evs.every((e, i) => e.seq === i + 1), JSON.stringify(evs.map((e) => e.seq)))
+check('事件都归属回合 1', evs.every((e) => e.turn === 1))
+check('事件 kind 在词表内', evs.every((e) => ['act', 'speak', 'move', 'die', 'law', 'narration'].includes(e.kind)),
+  JSON.stringify(evs.map((e) => e.kind)))
+console.log('  事件内容：')
+for (const e of evs) console.log(`    · [${e.actor_name}/${e.kind}] ${String(e.content).slice(0, 70)}`)
+
+console.log('\n【12】回合后的世界状态')
+const snap2 = await call('GET', `/api/worlds/${convId}`)
+check('world.turn == 1', snap2.data?.world?.turn === 1, String(snap2.data?.world?.turn))
+// 只数**本回合**的事件：快照里还包含更早的回合（例如改法则产生的 turn 0 事件）
+const turn1Events = (snap2.data?.events ?? []).filter((e: any) => e.turn === 1)
+check('本回合事件已持久化', turn1Events.length === evs.length,
+  `snapshot(turn1)=${turn1Events.length} stream=${evs.length}`)
+check('实体位置在合理范围内', (snap2.data?.entities ?? []).every((e: any) => Math.abs(e.x) <= 1 && Math.abs(e.z) <= 1))
+const moved = (snap2.data?.entities ?? []).some((e: any) => e.x !== seededPos.x || e.z !== seededPos.z)
+console.log(`  实体${moved ? '发生了移动' : '本回合未移动'}（由 Agent 自行决定，两种情况都合法）`)
+
+console.log('\n【13】改法则 → 产生一条 law 事件')
+const lawRes = await call('PATCH', `/api/worlds/${convId}`, { laws: '新增法则：这片大地上的雷声会唤醒沉睡者。' })
+check('PATCH 200', lawRes.status === 200, String(lawRes.status))
+const snap3 = await call('GET', `/api/worlds/${convId}`)
+// 【4】也改过一次法则，故这里会有多条 law 事件 —— 取最后一条断言本次改动
+const lawEvents = (snap3.data?.events ?? []).filter((e: any) => e.kind === 'law')
+check('事件日志里出现 law 事件', lawEvents.length >= 1, `count=${lawEvents.length}`)
+const latestLaw = lawEvents[lawEvents.length - 1]
+check('law 事件由上帝发起', latestLaw?.actor_kind === 'god')
+check('最后一条 law 事件含本次新法则', String(latestLaw?.content ?? '').includes('唤醒沉睡者'),
+  JSON.stringify(latestLaw?.content))
+
+console.log('\n【14】回合并发守卫与边界')
+const [a, b] = await Promise.all([
+  actStream(convId, '我吹起一阵风。'),
+  actStream(convId, '我抖动大地。'),
+])
+const codes = [a.status, b.status].sort()
+check('两个并发回合中恰好一个被拒（409）', codes.includes(200) && codes.includes(409), JSON.stringify(codes))
+check('空行动 → 400', (await call('POST', `/api/worlds/${convId}/act`, { content: '   ' })).status === 400)
+check('不存在世界的行动 → 404',
+  (await call('POST', `/api/worlds/${missing}/act`, { content: 'x' })).status === 404)
+
+console.log('\n【15】软删除后世界不可访问')
 check('删除会话 200', (await call('DELETE', `/api/conversations/${convId}`)).status === 200)
 check('软删后 GET 世界 → 404', (await call('GET', `/api/worlds/${convId}`)).status === 404)
 
