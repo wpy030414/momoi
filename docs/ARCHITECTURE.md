@@ -178,6 +178,15 @@
       → SSE: world_agent_done
   → 持久化实体 → SSE: world_turn_end → releaseWorldTurn()
 
+改造（Phase 3）：Agent 调 world_reshape → 补丁经 WorldSignal 回传 →
+  appendWorldPatches 落库并**就地并入 view.patches**（后续 Agent 看到的世界
+  必须包含前面 Agent 已动过的土）→ 事件的 payload 带补丁本体 → 客户端就地并入，
+  不必为一次改造重拉快照。渲染侧只**重建高度场**，不重建渲染器与相机。
+
+自动演算（Phase 3）：lib/world-ticker.ts 自重新调度 setTimeout（15s）→ 跑一个
+  godAction 为空的回合 → 广播 world_event / world_turn（带 auto_tick）。
+  手动回合在跑时让路；无存活者时自动停止。开关是内存态，随快照与广播同步。
+
 多设备：world_event（单条事件，离散可直接中继）与 world_turn（生命周期）分别广播；
 其它设备据此追加事件日志并禁用输入。⚠️ 客户端按事件 id 去重 —— 该广播不跳过来源设备。
 
@@ -530,6 +539,18 @@ world_entities
 ├── status TEXT                    -- 'alive' | 'dead' | 'gone'
 ├── created_at / updated_at INTEGER
 
+world_patches
+├── id INTEGER/SERIAL PRIMARY KEY  -- 自增
+├── conversation_id TEXT           -- 关联 conversations
+├── seq INTEGER                    -- 全局单调递增 = 折叠顺序
+├── patch TEXT                     -- TerrainPatch JSON
+├── source TEXT                    -- 'agent' | 'god'
+├── agent_id TEXT / actor_name TEXT
+├── turn INTEGER
+└── created_at INTEGER
+  注：**叠加层，永不写回 terrain_spec** —— 「地形规则不可修改」与「Agent 可以
+      改造世界」共存的方式（D49）。网格与逐点采样共用 foldPatches 一份实现。
+
 world_events
 ├── id INTEGER/SERIAL PRIMARY KEY  -- 自增
 ├── conversation_id TEXT           -- 关联 conversations
@@ -641,7 +662,8 @@ CREATE INDEX idx_group_conv_agents_conv ON group_conversation_agents(conversatio
 CREATE INDEX idx_user_agent_memories  ON user_agent_memories(user_id, agent_id)
 CREATE INDEX idx_worlds_status        ON worlds(status)
 CREATE INDEX idx_world_entities_conv  ON world_entities(conversation_id)
-CREATE INDEX idx_world_events_conv    ON world_events(conversation_id, turn, seq);
+CREATE INDEX idx_world_events_conv    ON world_events(conversation_id, turn, seq)
+CREATE INDEX idx_world_patches_conv   ON world_patches(conversation_id, seq);
 ```
 
 ## 前端组件树
@@ -660,6 +682,7 @@ App
 │     ├── WorldFallback（无 WebGL2 时的二维俯视地图，同一 buildTerrain 产物）
 │     ├── WorldEventLog（按回合分组的日志；世界不渲染气泡，它就是世界的表达）
 │     ├── GodActionBar（上帝行动输入条，回合中禁用）
+│     │     · 信息卡另有「放置化身」（点选落点）与「自动演算」两个开关
 │     └── LawsEditor（法则编辑 + 地形规则只读回显）
 ├── NewWorkflowDialog（侧边栏「新工作流」：模式选择 + Agent 选择 + 世界提示词）
 ├── ChatPanel

@@ -6,11 +6,12 @@
 
 核心约束：**地形规则创生后不可修改，世界法则可随时更改**。
 
-**已完成**：
+**三个阶段均已完成**：
 - **Phase 1** —— 创生、地形生成与渲染、相机操作、法则编辑
 - **Phase 2** —— 生灵入场：实体持久化、回合制行动、世界工具、事件日志、专用 SSE 端点
+- **Phase 3** —— 上帝化身（放置 + 邻近感知）、Agent 改造世界（叠加补丁）、自动演算
 
-**后续（Phase 3）**：上帝 Avatar 的放置与邻近互动、Agent 改造世界（地形叠加补丁）、自动演算开关。见 `docs/DECISIONS.md` D47–D51。
+相关决策见 `docs/DECISIONS.md` D47–D52。
 
 ## 涉及文件
 
@@ -20,7 +21,8 @@
 | `packages/shared/src/world.ts` | **协议面**：`TerrainSpec` 与词表、`buildTerrain`、`waterLevel`、`normalizeTerrainSpec`、`defaultTerrainSpec`、`spawnPoints`、`terrainSummary` |
 | `apps/server/src/ai/world-generator.ts` | 提示词 → 结构化地形参数 + 法则原文誊写 |
 | `apps/server/src/ai/world-orchestrator.ts` | **回合引擎**：上帝行动 → 存活 Agent 依次行动一拍 |
-| `apps/server/src/tools/world-tools.ts` | 世界工具（move / speak / observe / act）+ `WorldSignal` 旁路对象 |
+| `apps/server/src/tools/world-tools.ts` | 世界工具（move / speak / observe / act / reshape）+ `WorldSignal` 旁路对象 |
+| `apps/server/src/lib/world-ticker.ts` | 自动演算：自重新调度的计时器 + 内存态开关 |
 | `apps/server/src/lib/world.ts` | 世界状态层：生成任务、自愈清扫、状态读取、法则更新 |
 | `apps/server/src/routes/worlds.ts` | `POST /api/worlds`、`GET /api/worlds/:id`、`PATCH /api/worlds/:id` |
 | `apps/server/src/lib/realtime.ts` | `broadcastWorldStatus` |
@@ -110,6 +112,29 @@ CREATE INDEX IF NOT EXISTS idx_world_events_conv ON world_events(conversation_id
 **这是世界的历史**。世界不传递聊天历史给 Agent —— 每个 Agent 的世界简报直接由这张日志构成。故世界完全不依赖 `messages` 表的任何机制（落库、追问建议、语音合成、无限模式）。
 
 **法则变更也进日志**（`kind='law'`）：既是一份审计轨迹，也让「法则何时被改过」进入后续回合 Agent 可见的历史 —— 否则旧法则下的行动会显得毫无来由。
+
+### `world_patches` 表 —— 改造的叠加层
+
+```sql
+CREATE TABLE IF NOT EXISTS world_patches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,      -- PG: SERIAL
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL DEFAULT 0,            -- 全局单调递增 = 折叠顺序
+  patch TEXT NOT NULL,                       -- TerrainPatch JSON
+  source TEXT NOT NULL DEFAULT 'agent',      -- 'agent' | 'god'
+  agent_id TEXT,
+  actor_name TEXT NOT NULL DEFAULT '',
+  turn INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_world_patches_conv ON world_patches(conversation_id, seq);
+```
+
+⚠️ **这是叠加层，永不写回 `terrain_spec`** —— 那正是「地形规则不可修改」与「Agent 可以改造世界」共存的方式（D49）。`foldPatches(spec, x, z, patches)` 按 `seq` 升序依次折叠。
+
+⚠️ **网格（`buildTerrain`）与逐点采样（`sampleHeight`）必须共用同一份折叠实现**。曾经只有网格侧有，于是 Agent 抬高了地形、而服务端描述地形时仍报基准高度 —— 两边各说各话，且**静默**（不报错、类型检查也看不出）。`terrain:check` 有断言盯着这点。
+
+水位**不随改造漂移**：`waterLevel` 由基准地形的分位数决定。Agent 抬高陆地只会让水变少，不会把海也一起抬高。
 
 ### `conversations.type` 扩为 `'direct' | 'group' | 'world'`
 
@@ -380,7 +405,8 @@ POST /api/worlds/:id/act  { content }        ← 上帝行动，SSE 流式响应
 | `world_move` | `{ x, z }` | 归一化坐标，服务端钳制到 ±1；写 `move` 事件 + 就地改实体坐标；返回目的地地形描述 |
 | `world_speak` | `{ content, to? }` | 说话；`to` 为实体名则标记接收者；写 `speak` 事件 |
 | `world_observe` | `{ radius?, target? }` | **只读**：返回自身位置、附近存在及其所处地形、最近事件。不产生事件（否则噪音淹没有效信息） |
-| `world_act` | `{ action, target?, target_status? }` | 自由行动。`target_status`（`dead`/`gone`）让裁决方声明结局；服务端校验目标存在且活着，再写实体状态 + 追加 `die` 事件 |
+| `world_act` | `{ action, target?, target_status? }` | 自由行动。`target_status`（`dead`/`gone`）让裁决方声明结局；服务端校验目标存在且活着，再写实体状态 + 追加 `die` 事件。**无法作用于上帝**（祂高于世界法则），但可以对祂说话 |
+| `world_reshape` | `{ op, x, z, radius, strength, biome? }` | **永久**改造地貌：`raise`/`lower`/`carve`/`flatten`/`flood`/`paint`。写一条 `world_patches` + 一条 `act` 事件。三道闸：半径 ≤ 0.5、**单回合 ≤ 2 次**、`biome` 必须落在词表内 |
 
 **旁路范式**（照搬 `MentionSignal`）：工具**不直接写库**，而是经 `ToolContext.worldSignal` 上的一个可变对象回传待落库事件与就地修改的实体。**编排器是唯一写入方** —— 它统一负责落库、下发与持久化。
 
@@ -405,6 +431,28 @@ POST /api/worlds/:id/act  { content }        ← 上帝行动，SSE 流式响应
 **多设备**：`RealtimeEvent` 新增两个成员 —— `world_event`（单条事件逐条中继；世界事件是**离散**的，故可直接中继，无需聊天流那条有损的 token 批量路径）与 `world_turn`（回合生命周期，其它设备据此禁用输入并显示「谁正在行动」）。客户端在 `useChat` 的实时 switch 里把它们派发为 `window` CustomEvent，由 `useWorld` 监听。
 
 ⚠️ 客户端**按事件 id 去重**：`broadcastWorldEvent` 不跳过来源设备，故触发本次回合的设备会既从本地 SSE 流收到、又从实时通道收到同一条。
+
+## 上帝化身（Phase 3）
+
+`POST /api/worlds/:id/god  { x, z }` —— 放置或**移动**上帝的化身（按 `kind` 唯一，重复放置是移动而非新增）。
+
+化身的位置**是有意义的**：只有感知半径（`GOD_PERCEIVE_RADIUS = 0.6`）内的存在能在简报里读到祂的确切坐标与所处地形，远处的只能读到「你能感到上帝的存在，却无法确定祂在何处」。这正是「把 Avatar 放在世界的任何位置，与 Agent 互动」的落点 —— 想与某个 Agent 面对面，就把化身放到祂身边。
+
+- 上帝**不受世界法则约束**（那是祂写的），故标记在沙盘上永不被压暗
+- Agent 无法作用于上帝（`world_act` 明确拒绝），但可以 `world_speak` 对祂说话
+- 客户端用**射线拾取**落点：点击地形 → 命中点 → 归一化坐标。放置模式**不**禁用旋转（用户往往先转个视角再落点），靠 pointerdown→pointerup 的 6px 位移阈值区分点击与拖动
+
+## 自动演算（Phase 3）
+
+`POST /api/worlds/:id/auto-tick  { enabled }`
+
+开启后世界自行推进：每个回合**没有上帝行动**（`godAction` 为空），编排器因此不记空洞的上帝事件 —— 否则日志会被一串一模一样的「（时间流逝）」淹掉。
+
+- **自重新调度的 `setTimeout`**（不用 `setInterval`）：一个回合可能跑十几秒，固定间隔会让两回合重叠，而 `turn` 与实体位置都不允许交错写。与本仓库的 push-scheduler / 微信轮询器同一范式
+- 间隔 15 秒，留足时间让用户读完上一拍
+- **手动回合优先**：若已有回合在跑（`claimWorldTurn` 失败），这一拍让路，下次再来
+- **自动停止**：会话被删 / 世界未就绪 / **没有存活的存在**（否则只会不停记空回合）/ 用户关闭
+- **开关是内存态**（与无限演算模式的 `infiniteState` 同一惯例）：重启即关闭是合理且安全的默认，而为此加一个 `worlds` 列要付的代价是 PG 那条**并不存在**的 ALTER 通道（见 `module-database.md`）。故它挂在快照旁（`WorldSnapshot.auto_tick`）而不是塞进 `WorldState`，并随 `world_turn` 广播同步到各设备
 
 ## 鉴权模型
 
@@ -436,6 +484,14 @@ POST /api/worlds/:id/act  { content }        ← 上帝行动，SSE 流式响应
 12. **`target_status` 需有据**：声明目标结局必须同时指定 `target`，且目标必须存在、活着、不是自己 —— 防止「凭空声明某人死亡」
 13. **世界工具零事件**：`world_observe` 只读，不产生事件
 
+### 服务端（Phase 3）
+
+14. **上帝按 kind 唯一**：一个世界只有一个化身；重复放置是移动
+15. **改造三道闸**：半径 ≤ 0.5、单回合 ≤ 2 次、`biome` 必须在词表内
+16. **改造即时生效于同伴**：某一拍产生的补丁**就地并入** `view.patches`，后续 Agent 看到的世界必须包含前面 Agent 已动过的土 —— 否则它们会对着一个不存在的地形行动
+17. **自动演算不抢手动回合**：`claimWorldTurn` 失败即让路
+18. **自动演算在无存活者时停止**
+
 ### 客户端
 
 1. **模式识别**与 `isGroupMode` 在**完全相同的三处赋值点**同步设置（`useGroupChat` 的 effect / `selectConversation` / 草稿重置分支），走同一套世代计数守卫
@@ -461,4 +517,10 @@ POST /api/worlds/:id/act  { content }        ← 上帝行动，SSE 流式响应
 12. **WebGL2 缺失时**：渲染二维地图 + 文本卡片，且 Network 面板**无 `vendor-three` 请求**
 13. `PATCH` 带 `terrain_prompt` → `400`；未认证 → `401`；他人世界 → `404`；软删会话的世界 → `404`
 14. `POST /api/conversations` 带 `type: 'world'` → `400`；`POST /api/chat` 带 `conversation_type: 'world'` → `400`
-15. 自动验收脚本 `pnpm --filter @momoi/server world:e2e` 全绿
+15. 自动验收脚本 `pnpm --filter @momoi/server world:e2e` 全绿（77 项）
+16. 自动验收脚本 `pnpm --filter @momoi/server world:tools` 全绿（44 项，含工具契约）
+17. **放置化身**：点「放置化身」→ 点击沙盘任意处 → 金色 ✦ 标记出现在落点；再点一次是**移动**而非新增；刷新后位置保留
+18. **邻近感知**：化身放在某 Agent 旁边 → 下一回合该 Agent 的简报里出现上帝的确切坐标；放得很远 → 只感到「有什么在看着」
+19. **Agent 改造世界**：Agent 调用 `world_reshape` → 沙盘上那块地形**当场变形**；事件日志出现对应事件；刷新后改造仍在；地形规则（只读区）不变
+20. **自动演算**：点「自动演算」→ 每约 15 秒自行推进一拍，日志持续增长，无上帝事件；再点一次停下；世界无存活者时自行停止
+21. **上帝不可被作用于**：Agent 若试图对上帝动手，工具返回明确拒绝，目标状态不变
