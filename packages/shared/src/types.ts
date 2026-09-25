@@ -253,6 +253,11 @@ export type RealtimeEvent =
    * 故可直接中继，无需聊天流那条有损的 token 批量路径。
    */
   | { type: 'world_event'; conversation_id: string; event: WorldEvent }
+  /**
+   * 世界回合的生命周期（开始 / 结束）。其它设备据此禁用输入并显示「谁正在行动」——
+   * 单靠 world_event 无法判断一轮是否还在跑（最后一个事件与结束之间没有信号）。
+   */
+  | { type: 'world_turn'; conversation_id: string; turn: number; running: boolean }
 
 // ---- 世界模拟（World Simulation）----
 

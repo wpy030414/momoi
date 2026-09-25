@@ -11,7 +11,7 @@
 // 来源设备自跳过：聊天流事件携带发起方 deviceId，源设备自己的事件通道
 // 不重复推送（源设备已通过 POST /api/chat 的 fetch 流直接渲染）。
 
-import type { WorldStatus } from '@momoi/shared/types'
+import type { WorldEvent, WorldStatus } from '@momoi/shared/types'
 
 interface RealtimeSubscriber {
   deviceId: string
@@ -120,6 +120,20 @@ export function broadcastGroupMembers(userId: string, conversationId: string) {
  */
 export function broadcastWorldStatus(userId: string, conversationId: string, status: WorldStatus) {
   publish(userId, undefined, { type: 'world_status', conversation_id: conversationId, status })
+}
+
+/**
+ * 世界回合中产生的单条事件。
+ * 世界事件是**离散**的（一条就是一条），故可直接中继 —— 不需要聊天流那条
+ * 「攒够 80 字符或 200ms 再发」的 token 批量路径，也就没有它那个已知的有损问题。
+ */
+export function broadcastWorldEvent(userId: string, conversationId: string, event: WorldEvent) {
+  publish(userId, undefined, { type: 'world_event', conversation_id: conversationId, event })
+}
+
+/** 世界回合开始 / 结束 —— 其它设备据此禁用输入并显示进行中状态 */
+export function broadcastWorldTurn(userId: string, conversationId: string, turn: number, running: boolean) {
+  publish(userId, undefined, { type: 'world_turn', conversation_id: conversationId, turn, running })
 }
 
 /** 未读计数变更：通知所有设备某会话存在未读消息 */

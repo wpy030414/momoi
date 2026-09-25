@@ -97,6 +97,8 @@ export const WORLD_LIMITS = {
   segmentsMobile: 64,
   segmentsSoftware: 48,
   generationTimeoutMs: 20_000,
+  /** 上帝一步行动的文本上限 */
+  maxGodActionLength: 500,
   /** Agent 落点间的归一化最小间距 */
   spawnSpacing: 0.22,
 } as const
@@ -856,6 +858,11 @@ export function terrainSummary(spec: TerrainSpec): string {
     s += `地标：${spec.marks.map((m) => m.name).join('、')}。`
   }
   return s
+}
+
+/** 群系显示名（服务端描述地形、客户端摘要共用）。词表外的 id 原样返回。 */
+export function biomeName(id: string): string {
+  return BIOME_NAME[id] ?? id
 }
 
 const BIOME_NAME: Record<string, string> = {

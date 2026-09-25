@@ -5,6 +5,7 @@
 import type { ToolDefinition } from '@momoi/shared/types'
 import type { SandboxFS } from './workspace.js'
 import type { MentionSignal } from './group-mention-tool.js'
+import type { WorldSignal } from './world-tools.js'
 
 /** Pi Agent Core 的进度回调类型（避免直接依赖 pi-agent-core） */
 export type ToolUpdateCallback = (partialResult: { content?: Array<{ type: string; text?: string }>; details?: unknown }) => void
@@ -17,6 +18,12 @@ export interface ToolContext {
   signal?: AbortSignal
   /** Group chat: @mention signal shared between orchestrator and at_mention tool */
   mentionSignal?: MentionSignal
+  /**
+   * World simulation: 世界回合的旁路对象。存在时表示本次运行处于世界之中 ——
+   * createToolAdapter 会据此把工具集**收窄到世界工具**（住在沙盘里的生灵不该能
+   * 读写文件 / 执行 Shell / 发 HTTP 请求），并由它回传待落库的事件与实体变更。
+   */
+  worldSignal?: WorldSignal
   /** Current tool call ID (assigned by Pi loop) */
   currentToolCallId?: string
   /** Pi Agent Core 的进度回调，用于 tool_execution_update 事件 */

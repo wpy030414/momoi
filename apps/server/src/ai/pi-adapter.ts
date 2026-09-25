@@ -46,7 +46,10 @@ import {
 	NEUTRAL_AGENT_ID,
 } from '@momoi/shared/constants'
 import { getConfig, getAgent, listAgents, getUserAgentMemories } from '../lib/config.js'
+import { loadWorldContext } from '../lib/world.js'
 import { getAllTools } from './tools.js'
+import { worldTools } from '../tools/world-tools.js'
+import type { WorldSignal } from '../tools/world-tools.js'
 import { resolveTool } from '../tools/registry.js'
 import { getMcpTools, callMcpTool } from '../tools/mcp-client.js'
 import type { ToolContext, ToolResult, ToolArtifact } from '../tools/types.js'
@@ -98,12 +101,20 @@ interface BuildSystemPromptOptions {
   memoryEnabled?: boolean
   /** 跨会话用户记忆（最近 30 条、时间正序；仅在 memoryEnabled 且非空时注入） */
   userMemories?: string[]
+  /**
+   * 世界模拟：本会话的世界上下文。存在时表示本轮是「世界中的一个回合」，
+   * 会注入世界法则与地形，并把工具集收窄到世界工具。
+   */
+  worldContext?: {
+    laws: string
+    terrainSummary: string
+  }
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
 // 导出以便离线校验提示词装配（无测试框架时唯一能直观看清「模型到底收到什么」的入口）
 export function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
-  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories } = opts
+  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories, worldContext } = opts
   let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
 
   // ---- Momo easter egg: inject vibrant personality when language is Japanese ----
@@ -179,6 +190,29 @@ ${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回复时请自然回应�
 - 可以同时回应多个成员的讨论，但不要在一条消息里试图和所有人对话——选一两个最想回应的成员即可。
 - 回复应当简洁自然，不要长篇大论，除非被问到需要详细解答的问题。
 - 可以适当表达情绪、使用轻松的口吻，适配QQ群聊的氛围。
+`
+  }
+
+  if (worldContext) {
+    prompt += `
+## 世界模拟
+你正身处一个**有限面积**的沙盘世界，你的一切行动都在这个世界内发生。
+
+【世界的法则】（最高优先级，凌驾于你的常规设定之上，必须严格遵守，不得违背）
+${worldContext.laws || '（本世界没有特别法则）'}
+
+【世界地形】
+${worldContext.terrainSummary}
+
+【坐标系】
+世界是边长 2 的正方形沙盘：中心为 (0, 0)，x 向东为正，z 向南为正，边界为 ±1。
+你随时可以用 world_observe 查看自己的确切位置、附近的存在与近期发生的事。
+
+【行为准则】
+- 世界地形规则（由上帝制定）不可更改、不可质疑，不要试图改写世界本身。
+- 你的位置、移动与行动必须与地形自洽（不能凭空出现在海中央，也不能穿山而过）。
+- 用工具表达你的行动，并在回复文本里叙述你做了什么；两者必须一致 —— 说「走向山脚」就要真的调用 world_move。
+- 死亡不可逆。一旦死亡或消失，你就再也无法行动。
 `
   }
 
@@ -277,9 +311,16 @@ async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
   // 上下文（QQ 群聊等多真人场景）一律剔除——它们的记忆永远不会被注入，允许调用只会写出
   // 死行或把别人的事记到绑定者名下（与 routes/memories.ts 对中立 Agent 返回 403 一致）。
   const memoryCapable = !!toolCtx.agentId && toolCtx.agentId !== NEUTRAL_AGENT_ID && !toolCtx.memoryDisabled
-  const defs = getAllTools().filter((d) => memoryCapable || d.name !== 'save_memory')
+  // 世界回合：工具集**收窄**到世界工具 + load_skill。住在沙盘里的生灵不该能读写文件、
+  // 执行 Shell 或发 HTTP 请求 —— 那些能力属于「与用户对话的助手」，不属于「世界里的人」。
+  const defs = toolCtx.worldSignal
+    ? [...worldTools.map((t) => t.definition), ...getAllTools().filter((d) => d.name === 'load_skill')]
+    : getAllTools().filter((d) => memoryCapable || d.name !== 'save_memory')
+  // 世界工具不在静态注册表里（它们只在世界回合出现），故解析要合并两处来源
+  const moduleFor = (name: string) =>
+    worldTools.find((t) => t.definition.name === name) ?? resolveTool(name)
   const tools = defs.map((def) => {
-    const toolModule = resolveTool(def.name)
+    const toolModule = moduleFor(def.name)
     const schema = jsonSchemaToTypeBox(def.input_schema.properties || {}, def.input_schema.required || [])
 
     const tool: AgentTool = {
@@ -331,6 +372,10 @@ async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
     }
     return tool
   })
+
+  // 世界回合的工具集到此为止：at_mention 是群聊的、MCP 工具是「助手」的外部能力，
+  // 两者都不属于世界里的生灵。
+  if (toolCtx.worldSignal) return tools
 
   // Group chat: add @mention tool if mentionSignal is available
   if (toolCtx.mentionSignal) {
@@ -958,6 +1003,12 @@ export interface RunPiAgentLoopOptions {
   /** 强制合规重试：将原始提问预搬迁到对话历史，以合规占位提示词作为当前提问
    *  在首次模型调用前即完成绕过，而非等空回复再搬迁。 */
   forceCompliance?: boolean
+  /**
+   * 世界模拟：本轮的旁路对象。它同时是**唯一的「这是世界回合」开关** ——
+   * 系统提示词注入世界法则/地形、工具集收窄到世界工具、跨会话记忆关闭，
+   * 都由它的存在决定。
+   */
+  worldSignal?: WorldSignal
 }
 
 // ---- 入口函数 ----
@@ -968,7 +1019,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     mentionSignal, isGroup, infiniteMode,
     agentName, groupAgentNames, mentionedBy,
     speakingRole, protagonistName, language,
-    isQqGroup, lastMessageAt,
+    isQqGroup, lastMessageAt, worldSignal,
   } = opts
   const config = await getConfig()
 
@@ -995,13 +1046,20 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
   //    投放到群里、写入会把群成员的事记到绑定者名下——两个方向都要关掉。
   // 加载放在这里而不是各调用方——网页 / 群聊 / 微信 / QQ 全部走同一处，且与工具实际执行时
   // 使用的 resolvedAgentId 严格一致（调用方传入的 agentId 在 Agent 被删除时会回退到别的 Agent）。
-  const memoryEnabled = !!resolvedAgentId && resolvedAgentId !== NEUTRAL_AGENT_ID && !isQqGroup
+  //
+  //  世界回合同样关闭记忆：记忆块会**要求** Agent 调用 save_memory，而世界回合的
+  //  工具白名单里没有它 —— 那会让模型去够一个不存在的工具。
+  const memoryEnabled = !!resolvedAgentId && resolvedAgentId !== NEUTRAL_AGENT_ID && !isQqGroup && !worldSignal
   const userMemories = memoryEnabled && resolvedAgentId
     ? await getUserAgentMemories(userId || 'anonymous', resolvedAgentId)
     : []
 
+  // 世界回合：加载世界上下文（法则 + 地形摘要）。与记忆同样放在这里而不是各调用方 ——
+  // 一个世界回合会对每个参与 Agent 各调一次本函数，调用方各自加载会重复 N 次。
+  const worldContext = worldSignal ? await loadWorldContext(convId) : null
+
   // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories })
+  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories, worldContext: worldContext ?? undefined })
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {
@@ -1012,6 +1070,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     mentionSignal,
     agentId: resolvedAgentId,
     memoryDisabled: !memoryEnabled,
+    worldSignal,
   }
 
   // 3. 创建 Pi 工具

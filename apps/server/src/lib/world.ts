@@ -9,12 +9,15 @@
 //   2) 每一次世界读取都必须连带过滤 conversations.deleted_at IS NULL，
 //      否则已删除会话的世界仍可被访问。
 
-import { db, conversations, worlds } from '../db/index.js'
-import { and, eq, isNull } from 'drizzle-orm'
+import { randomUUID } from 'crypto'
+import { db, conversations, worlds, worldEntities, worldEvents, groupConversationAgents, agents as agentsTable } from '../db/index.js'
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
-import type { WorldState, WorldStatus } from '@momoi/shared/types'
+import type {
+  WorldActorKind, WorldEntity, WorldEntityStatus, WorldEvent, WorldEventKind, WorldState, WorldStatus,
+} from '@momoi/shared/types'
 import type { TerrainSpec } from '@momoi/shared/world'
-import { WORLD_LIMITS } from '@momoi/shared/world'
+import { WORLD_LIMITS, spawnPoints, terrainSummary } from '@momoi/shared/world'
 import { getConfig, listAgents } from './config.js'
 import { broadcastWorldStatus } from './realtime.js'
 import { generateWorldTerrain } from '../ai/world-generator.js'
@@ -76,6 +79,10 @@ async function runGeneration(conversationId: string, userId: string): Promise<vo
       })
       .where(eq(worlds.conversation_id, conversationId))
       .run()
+
+    // 地形就绪即可播种实体（幂等）—— 让 Agent 一进来就站在世界上，
+    // 而不是要等第一次回合才出现
+    await ensureWorldEntities(conversationId, spec)
   } catch (err) {
     // generateWorldTerrain 本身永不抛异常，故能走到这里只剩灾难情形（DB 写失败等）
     status = 'failed'
@@ -159,7 +166,230 @@ export async function updateWorldLaws(
     .set({ laws: laws.slice(0, WORLD_LIMITS.maxLawsLength), updated_at: now() })
     .where(eq(worlds.conversation_id, conversationId))
     .run()
+  // 法则变了 → 丢弃系统提示词的缓存，否则最多 10s 内 Agent 仍按旧法则行动，
+  // 而用户正在试新法则时会觉得莫名其妙
+  invalidateWorldContext(conversationId)
   return getWorldState(conversationId, userId)
+}
+
+// ---------------------------------------------------------------
+// 实体（世界中的存在）
+// ---------------------------------------------------------------
+
+/**
+ * 播种世界实体 —— **幂等**：已有实体则不动作。
+ *
+ * 落点用 Phase 1 的 `spawnPoints`（同一 (spec, agentId) 永远得到同一坐标），
+ * 故 Phase 1 的纯函数落点在 Phase 2 升级为持久化实体时语义连续：用户看到的名牌
+ * 位置不会因为「实体表建立」而跳动。
+ */
+export async function ensureWorldEntities(conversationId: string, spec: TerrainSpec): Promise<WorldEntity[]> {
+  const existing = await listWorldEntities(conversationId)
+  if (existing.length > 0) return existing
+
+  const members = await db
+    .select({ agent_id: groupConversationAgents.agent_id, name: agentsTable.name })
+    .from(groupConversationAgents)
+    .innerJoin(agentsTable, eq(groupConversationAgents.agent_id, agentsTable.id))
+    .where(eq(groupConversationAgents.conversation_id, conversationId))
+    .orderBy(groupConversationAgents.sort_order)
+    .all()
+  if (members.length === 0) return []
+
+  const points = spawnPoints(spec, members.map((m: { agent_id: string }) => m.agent_id))
+  const at = now()
+  const rows = members.map((m: { agent_id: string; name: string }) => {
+    const p = points.find((x) => x.id === m.agent_id) ?? { x: 0, z: 0 }
+    return {
+      id: randomUUID(),
+      conversation_id: conversationId,
+      kind: 'agent',
+      agent_id: m.agent_id,
+      name: m.name,
+      x: p.x,
+      z: p.z,
+      status: 'alive',
+      created_at: at,
+      updated_at: at,
+    }
+  })
+  await db.insert(worldEntities).values(rows).run()
+  return listWorldEntities(conversationId)
+}
+
+export async function listWorldEntities(conversationId: string): Promise<WorldEntity[]> {
+  const rows: WorldEntity[] = await db
+    .select()
+    .from(worldEntities)
+    .where(eq(worldEntities.conversation_id, conversationId))
+    .orderBy(asc(worldEntities.created_at), asc(worldEntities.id))
+    .all()
+  return rows
+}
+
+/** 持久化实体位置与状态（编排器在一回合结束时调用一次，N 很小） */
+export async function saveWorldEntities(entities: WorldEntity[]): Promise<void> {
+  const at = now()
+  for (const e of entities) {
+    await db.update(worldEntities)
+      .set({ x: e.x, z: e.z, status: e.status, updated_at: at })
+      .where(eq(worldEntities.id, e.id))
+      .run()
+  }
+}
+
+// ---------------------------------------------------------------
+// 事件（世界的「消息」）
+// ---------------------------------------------------------------
+
+export interface WorldEventInput {
+  actorKind: WorldActorKind
+  actorId: string | null
+  actorName: string
+  kind: WorldEventKind
+  content: string
+  payload?: Record<string, unknown> | null
+}
+
+/** 追加一批事件 —— **编排器是唯一调用方**。seq 在 turn 内单调递增。 */
+export async function appendWorldEvents(
+  conversationId: string,
+  turn: number,
+  inputs: WorldEventInput[],
+): Promise<WorldEvent[]> {
+  if (inputs.length === 0) return []
+  const maxRow = await db
+    .select({ maxSeq: sql<number>`COALESCE(MAX(world_events.seq), 0)` })
+    .from(worldEvents)
+    .where(and(eq(worldEvents.conversation_id, conversationId), eq(worldEvents.turn, turn)))
+    .get()
+  // 本批之前的最大 seq 即本批的起始下标（seq 是 1 起的稠密编号），
+  // 回读后据此切出**新增**的那几条 —— 否则调用方会把整回合的历史重复下发一遍。
+  const before = Number(maxRow?.maxSeq ?? 0)
+  let seq = before
+  const at = now()
+
+  for (const input of inputs) {
+    seq += 1
+    await db.insert(worldEvents).values({
+      conversation_id: conversationId,
+      turn,
+      seq,
+      actor_kind: input.actorKind,
+      actor_id: input.actorId,
+      actor_name: input.actorName,
+      kind: input.kind,
+      content: input.content,
+      payload: input.payload ? JSON.stringify(input.payload) : null,
+      created_at: at,
+    }).run()
+  }
+  // 回读以获得自增 id 与实际 seq（sql.js 适配层不返回插入结果）
+  const rows = await db.select().from(worldEvents)
+    .where(and(eq(worldEvents.conversation_id, conversationId), eq(worldEvents.turn, turn)))
+    .orderBy(asc(worldEvents.seq))
+    .all()
+  return rows.slice(before).map(toWorldEvent)
+}
+
+export async function listWorldEvents(conversationId: string, limit = 200): Promise<WorldEvent[]> {
+  const rows = await db.select().from(worldEvents)
+    .where(eq(worldEvents.conversation_id, conversationId))
+    .orderBy(desc(worldEvents.id))
+    .limit(limit)
+    .all()
+  rows.reverse()
+  return rows.map(toWorldEvent)
+}
+
+function toWorldEvent(row: typeof worldEvents.$inferSelect): WorldEvent {
+  let payload: Record<string, unknown> | null = null
+  if (row.payload) {
+    try { payload = JSON.parse(row.payload) as Record<string, unknown> } catch { payload = null }
+  }
+  return {
+    id: row.id,
+    conversation_id: row.conversation_id,
+    turn: row.turn,
+    seq: row.seq,
+    actor_kind: row.actor_kind as WorldActorKind,
+    actor_id: row.actor_id,
+    actor_name: row.actor_name,
+    kind: row.kind as WorldEventKind,
+    content: row.content,
+    payload,
+    created_at: row.created_at,
+  }
+}
+
+// ---------------------------------------------------------------
+// 系统提示词的世界上下文（带 TTL 缓存）
+// ---------------------------------------------------------------
+
+interface WorldContextEntry {
+  at: number
+  ctx: { laws: string; terrainSummary: string } | null
+}
+
+/**
+ * 一个世界回合会对每个参与 Agent 各调一次 runPiAgentLoop，故这里必须缓存 ——
+ * 否则同一份 spec 会在几十毫秒内被反复解析。
+ * TTL 10 秒（与群聊缺席记忆同款惯例）；法则变更会显式失效，故用户不必等 TTL。
+ */
+const worldContextCache = new Map<string, WorldContextEntry>()
+const WORLD_CONTEXT_TTL_MS = 10_000
+
+export async function loadWorldContext(
+  conversationId: string,
+): Promise<{ laws: string; terrainSummary: string } | null> {
+  const hit = worldContextCache.get(conversationId)
+  if (hit && Date.now() - hit.at < WORLD_CONTEXT_TTL_MS) return hit.ctx
+
+  const row = await db
+    .select({ laws: worlds.laws, terrain_spec: worlds.terrain_spec, status: worlds.status })
+    .from(worlds)
+    .where(eq(worlds.conversation_id, conversationId))
+    .get()
+
+  let ctx: { laws: string; terrainSummary: string } | null = null
+  if (row && row.status === 'ready' && row.terrain_spec) {
+    try {
+      ctx = { laws: row.laws, terrainSummary: terrainSummary(JSON.parse(row.terrain_spec) as TerrainSpec) }
+    } catch {
+      ctx = null
+    }
+  }
+  worldContextCache.set(conversationId, { at: Date.now(), ctx })
+  return ctx
+}
+
+export function invalidateWorldContext(conversationId: string): void {
+  worldContextCache.delete(conversationId)
+}
+
+// ---------------------------------------------------------------
+// 回合并发守卫
+// ---------------------------------------------------------------
+
+/**
+ * 正在跑回合的世界。与 generatingWorlds 同款：同步占位，无竞态。
+ * 一个世界同时只允许一个回合 —— 否则两个回合会交错写 turn 与实体位置。
+ */
+const runningTurns = new Set<string>()
+
+export function isWorldTurnRunning(conversationId: string): boolean {
+  return runningTurns.has(conversationId)
+}
+
+/** 同步占位；返回 false 表示已有回合在跑 */
+export function claimWorldTurn(conversationId: string): boolean {
+  if (runningTurns.has(conversationId)) return false
+  runningTurns.add(conversationId)
+  return true
+}
+
+export function releaseWorldTurn(conversationId: string): void {
+  runningTurns.delete(conversationId)
 }
 
 function toWorldState(row: typeof worlds.$inferSelect): WorldState {
