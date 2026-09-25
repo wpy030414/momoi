@@ -129,7 +129,7 @@ CREATE TABLE conversations (
   user_id TEXT NOT NULL DEFAULT '',       -- 用户名
   title TEXT NOT NULL DEFAULT '新对话',    -- 对话标题
   agent_id TEXT NOT NULL DEFAULT '',      -- 关联的 Agent ID
-  type TEXT NOT NULL DEFAULT 'direct',    -- 对话类型：'direct' 或 'group'
+  type TEXT NOT NULL DEFAULT 'direct',    -- 对话类型：'direct' | 'group' | 'world'
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
   deleted_at INTEGER                     -- 软删除时间戳，null 表示未删除
@@ -160,6 +160,8 @@ CREATE INDEX idx_messages_conv ON messages(conversation_id, created_at);
 4. **默认标题**：Schema 默认为 `新对话`；但 `chat.ts` 与 `conversations.ts` 的创建路径实际写入消息前 40 字符或 `New Chat`（群聊为 `群组对话`）
 5. **排序**：列表按 `updated_at` 降序，消息按 `created_at` 升序
 6. **群聊创建**：`POST /api/conversations` 支持 `type: 'group'` 和 `agent_ids` 参数，创建对话后写入 `group_conversation_agents` 关联表
+7. **世界会话不可经此创建**：`type: 'world'` 被**显式拒绝**（`400`），世界只能经 `POST /api/worlds` 创建（那里会一并写入 `worlds` 行与地形生成任务）。必须显式拒绝而非依赖类型标注 —— 运行时是**未经校验的 JSON**，否则能造出「有 conversations 行、无 worlds 行」的永久损坏侧边栏条目。契约见 `module-world.md`
+8. **`type` 无枚举约束**：Drizzle 定义为无约束的 `TEXT`，`'world'` 的加入**不需要任何 DDL 变更**
 
 ## 验收标准
 

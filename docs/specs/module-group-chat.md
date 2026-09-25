@@ -27,6 +27,7 @@
 `conversations.type` 区分：
 - `'direct'` -- 单 Agent 对话
 - `'group'` -- 群聊对话
+- `'world'` -- 世界模拟（见 `module-world.md`；不走本模块的编排，但**复用下方的成员表**）
 
 ### 群聊 Agent 关联
 
@@ -38,6 +39,11 @@ CREATE TABLE group_conversation_agents (
   PRIMARY KEY (conversation_id, agent_id)
 );
 ```
+
+> ⚠️ **该表现由群聊与世界模拟共享**。世界模拟的参与 Agent 与群聊成员**结构完全同构**
+> （同样的列、同样的排序语义、同样的生命周期），故复用而不新开 `world_agents`。
+> 代价是表名说「group」却服务两种会话类型 —— 改名意味着一次没有迁移器的表迁移，严格更糟。
+> 世界侧的使用见 `module-world.md`；`POST /api/worlds` 插入成员时过滤 `NEUTRAL_AGENT_ID`。
 
 ### 消息追踪
 

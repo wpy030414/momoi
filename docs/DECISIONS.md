@@ -1181,3 +1181,139 @@
 - 弃用：`rehype-highlight`、`@hono/node-ws`（核实零导入）
 - 首次 typecheck：补 DOM lib + `@types/node` + `dotenv` devDep（web 侧），三个包全绿
 - 文档：README/AGENTS/ARCHITECTURE/DECISIONS 同步更新
+
+## D47：世界模拟 — 语义化地形参数 + 客户端确定性生成（拒绝服务端高度图）
+
+**日期**：2026-09-25
+
+**背景**：需要由用户的一段自由文字创生一个有限面积的三维沙盘。核心矛盾是「地形要被两端一致地理解」：服务端要判定 Agent 落点与「此处是什么地形」，客户端要建网格渲染。
+
+**决策**：
+
+1. **LLM 只输出结构化参数**（`TerrainSpec`：种子、噪声八度、水位分位、生物群系规则表、天空预设），**不输出几何**
+2. **地形由客户端确定性生成**：同一份 spec + 同一份噪声实现 ⇒ 任何设备渲染出逐位相同的地形
+3. **协议面放在 `@momoi/shared/src/world.ts`**，服务端与浏览器共用同一份实现。这是「两端一致」唯一可靠的保证方式
+4. **水位取地形自身高度分布的分位数**，而非绝对值
+5. **失败开放**：LLM 超时 / 报错 / 吐不出可解析 JSON → 关键词推导的默认地形，**不发起第二次调用**
+
+**原因**：
+
+- 服务端高度图网格（96² Float32 = 36KB 起）会无界增长，且摧毁「同 spec ⇒ 同世界」这一使纯客户端渲染成立的性质
+- 美术资源方案没有交互性、没有生物群系数据、缩放即糊
+- 客户端直连 LLM 需要在前端放 API key
+- 纯程序化（不经 LLM）无法把「毒水 / 永夜 / 伤害致命」这类语义映射到结构
+- 水位必须是分位数：高度场的实际取值随 style 与 amplitude 剧烈变化（`plains` 实测 ±0.04，`mountains` ±0.7），绝对值水位会被低起伏地貌整个越过 —— 实测表现为「提示词写了湖泊，水面占比 0%」
+
+**备选与权衡**：
+
+- ❌ 服务端预生成高度图入库存 → 见上；且 Phase 3 的地形改造需回写整张网格
+- ❌ 客户端纯随机、提示词只影响法则 → 「山地、丘陵、森林」这类地形规则会失效
+- ❌ 用 `Math.sin` 系哈希做噪声 → 不同 JS 引擎的对数实现有 ulp 级差异，两端地形**静默**不一致（无报错、无堆栈）。必须用整型哈希（`Math.imul`）
+- ❌ 事后对 fBm 结果做脊状化 → 会把高度均值推到接近 1，山地世界长成一片惨白；必须**在八度累加之内**脊化
+
+**影响**：
+
+- 新增 `packages/shared/src/noise.ts`、`packages/shared/src/world.ts`；`exports` 加 `./noise`、`./world`
+- 新增服务端脚本 `terrain:check`（ASCII 等高线 + 确定性断言）与 `genesis:check`（真实 LLM 观测）
+- 词表闭合：`biomes[].id` 必须落在 `TERRAIN_ENUMS.biomeId` 内，别名表负责映射模型自造的 id
+
+## D48：世界会话 — 即时建会 + 异步生成（对新会话草稿态的显式例外）
+
+**日期**：2026-09-25
+
+**背景**：D34 确立了「新会话 / 新群聊只进入草稿态，不落库，首条消息时才由服务端建会」。世界模拟必须**在渲染沙盘之前**就拥有地形，而地形规则是不可变的、不能等首条消息才定。
+
+**决策**：世界**打破 D34 的草稿态约定**，在对话框确认时立即落库：
+
+1. `POST /api/worlds` 建会话 + 世界行 + 成员，**立即返回**（实测 27ms）
+2. 地形**起火异步生成**，就绪后经 `world_status` 实时事件通知，客户端重拉
+3. **被重启打断的生成自动重跑**（生成幂等），不引入「失败 → 手动重试」状态机
+4. `conversations.type` 扩 `'world'`；`POST /api/conversations` **显式拒绝**该值
+
+**原因**：
+
+- 同步等 LLM（10~60s）会把 XHR 挂在代理超时边界上（nginx 默认 `proxy_read_timeout` 60s），钉钉 Android WebView 尤其容易把「长时间无字节流动」的请求判死
+- 异步则生成中刷新页面 / 关标签都能恢复，失败也有持久痕迹（`status_error`）
+- 而且这**本来就是世界的形状**：世界是长生命周期对象（可变法则、回合计数、Phase 3 的补丁日志），生成只是它的第一个 job。选同步方案会在 Phase 2 重新架构创建路径
+
+**备选与权衡**：
+
+- ❌ 在 `POST` 里同步调 LLM + 对话框转圈 → 见上
+- ❌ 草稿态 + 「首次打开时生成」→ 毁掉异步生成赖以成立的可恢复性
+- ❌ 为「确认后放弃」加 TTL 清扫器 → 为罕见情形引入复杂度；用户直接软删会话即可
+- ❌ 复用 `conv_changed` 通知就绪 → 客户端对它的响应是重拉**消息列表**，而世界没有消息；且会把「消息变了」与「世界状态变了」混为一谈（本仓库正是为此才给 `group_members` 单开事件）
+
+**影响**：
+
+- 新增 `worlds` 表（4 处迁移落点）、`routes/worlds.ts`、`lib/world.ts`、`ai/world-generator.ts`
+- `RealtimeEvent` 加 `world_status`；`lib/realtime.ts` 加 `broadcastWorldStatus`
+- `index.ts` 启动时 `await sweepInterruptedWorlds()`
+- 副作用：确认后放弃会留下一个真实的世界行与已生成的地形。这是 D34 约定的**显式例外**，记录于此以免后来者误以为是遗漏
+
+## D49：世界地形规则不可变 / 世界法则可变；改造走叠加补丁序列
+
+**日期**：2026-09-25
+
+**背景**：需求同时要求「地形规则创生后不可修改」「Agent 可以改造世界」「世界法则后续可更改」。三者必须在同一套数据模型下共存。
+
+**决策**：
+
+1. **地形规则（`terrain_prompt`）不可变**，由 `PATCH /api/worlds/:id` **服务端显式拒绝**保证（见到 `terrain_prompt` / `prompt` 即 400），不依赖界面隐藏输入框
+2. **世界法则（`laws`）可变**，自由文本，由叙事型 Agent 的 LLM 依法则裁决
+3. **Phase 3 的世界改造以叠加补丁表达**（`world_patches`：`op` + center + radius + strength + biome），在渲染与采样时 fold 到 base 之上，**永远不写回 `terrain_spec`**
+
+**原因**：
+
+- 地形规则是**编译产物**：几何由它经代码推导而来，改它意味着作废一切派生结果
+- 法则却是**运行期由 LLM 解释的散文**，改它是廉价且安全的
+- 补丁是 **git 式的叠加栈**：`base = buildTerrain(spec)` 永远可重算、是权威；`patches` 是只追加的有序区划变更日志。收益：可回放（丢掉尾巴即撤销）、同步廉价（只传 `seq > lastSeq`）、载荷极小、完全确定
+- 补丁用的词汇与 LLM 已经能可靠产出的词汇同构（4 个标量 + 一个枚举），故 Phase 3 的 Agent 工具几乎白捡
+
+**备选与权衡**：
+
+- ❌ 改写 `terrain_spec` → 正是「规则不可变」所禁止的；用户 authored 的世界不再可恢复
+- ❌ 存储改动后的高度图网格 → 无界增长，且摧毁跨端一致性
+- ❌ 给高度场做 diff/patch → 脆弱且巨大
+
+**影响**：
+
+- Phase 1 **不建** `world_patches` 表（`CREATE TABLE IF NOT EXISTS` 每次启动都跑，Phase 3 再建成本相同；先建等于留一张没人写、却要在 PG/SQLite 两侧保持对齐并写进文档的死表）
+- **但接缝现在就在代码里**：`buildTerrain(spec, { segments, patches })` 从第一天起接受并 fold 叠加层，Phase 1 恒传 `[]`
+- `worlds.turn` 同样只写不读 —— 刻意的 schema 保险（PG 实际上没有 `ALTER` 通道）
+
+## D50：三维渲染选型 — 直接 three + WebGL2 探测 + 二维降级
+
+**日期**：2026-09-25
+
+**背景**：需要在一个静态场景（一块位移网格 + 一片水面 + 若干名牌）里提供旋转与缩放。首要部署目标是钉钉 Android 内置内核。
+
+**决策**：
+
+1. **只用 `three`**，不引 `@react-three/fiber` / `drei`
+2. **`WorldCanvas` 是全仓唯一 import three 的模块**，也是 `React.lazy` 的加载边界
+3. **能力探测只接受 WebGL2**；结果分 `'webgl2' | 'software' | 'none'` 三档
+4. **`none` 时渲染二维俯视地图**（而不是给一个「不支持」的空页），且**不请求 three chunk**
+5. **按需重绘**，不跑常驻 `requestAnimationFrame`
+
+**原因**：
+
+- 场景是**静态**的（建一次、永不变形，只有相机在动），声明式 reconciler 的收益为零
+- `@react-three/fiber` 的 peer 是 `react >=19 <19.4`（本仓 `^19.2.8` 兼容）—— 所以**不是** React 兼容性问题，而是：体积、静态场景零收益、以及 Rolldown 下对「库内部动态导入」的不确定性。上界 `<19.4` 是直接依赖 `three` 所没有的升级绊线
+- ⚠️ **three 自 r163 起移除了 WebGL1**，`WebGLRenderer` 是 WebGL2-only。放行「有 WebGL1」的设备要么抛错要么渲染出垃圾 —— 仅 WebGL1 的设备**等同于** `none`
+- 钉钉 Android 内核可能没有可用的 WebGL2，故二维地图不是退路，**可能是多数用户唯一的渲染路径**，因此先建先验，且它与三维视图消费完全相同的 `buildTerrain` 产物
+- 探测必须在**懒加载模块之外**求值，否则 `none` 设备照样会下载 three
+- 按需重绘的代价是必须 `enableDamping = false`（阻尼需要连续循环收敛）；收益是移动端读法则时没有 60fps 的持续 GPU 唤醒与发热
+
+**备选与权衡**：
+
+- ❌ `@react-three/fiber` + `drei` → 见上；`drei` 尤其是个杂物袋，其 `OrbitControls` 再导出很容易连带拖进远超预期的依赖
+- ❌ 直接接受 WebGL1 → three 已不支持
+- ❌ `none` 设备给「不支持 3D」提示页 → 拒绝一个明明能画地图的设备
+- ❌ 常驻 rAF → 静态场景下纯属浪费
+
+**影响**：
+
+- `apps/web` 增 `three` + `@types/three`；`vite.config.ts` 的 `manualChunks` 增 `vendor-three`
+- 实测：入口 `index` 177KB raw / 49KB gzip，**未**静态引用 `vendor-three`；`vendor-three` 559KB raw / 137KB gzip / 112KB br
+- 新增 `apps/web/src/lib/webgl.ts`、`components/world/{WorldCanvas,WorldFallback}.tsx`
+- `OrbitControls` 的 `touchAction='none'` 是必需项（否则浏览器滚动页面而不喂事件给画布）；`TOUCH.TWO = DOLLY_ROTATE` 使双指既是捏合缩放又是扭转旋转

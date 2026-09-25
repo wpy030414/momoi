@@ -137,6 +137,28 @@ if (fs.existsSync(dbPath)) {
 
 **索引**：`idx_group_conv_agents_conv` ON `(conversation_id)` — 按对话查询群组成员
 
+### worlds — 世界模拟（与 conversations 1:1）
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `conversation_id` | TEXT PRIMARY KEY | 1:1 于 `conversations`（`ON DELETE CASCADE`） |
+| `terrain_prompt` | TEXT | **不可变**：用户原文「世界地形规则」 |
+| `terrain_spec` | TEXT | `TerrainSpec` JSON；生成中为空串 |
+| `laws` | TEXT | **可变**：世界法则 |
+| `status` | TEXT | `'generating'` / `'ready'` / `'failed'` |
+| `status_error` | TEXT | 失败原因（可展示） |
+| `turn` | INTEGER | 回合计数（Phase 2 起使用） |
+| `created_at` / `updated_at` | INTEGER | Unix epoch（秒） |
+
+索引：`idx_worlds_status ON worlds(status)`（启动清扫按它筛选被打断的生成）。
+
+两点必须留意：
+
+- **刻意不存 `user_id`** —— 归属永远以 `conversations.user_id` 为准（单一事实来源）。重复一份会与之漂移，等于开出第二条鉴权路径。
+- **`conversations` 是软删除**，故 `worlds` 行**不会**随会话删除而消失（没有 FK 级联要补）；但**每一次世界读取都必须连带过滤 `conversations.deleted_at IS NULL`**，否则已删除会话的世界仍可被访问。
+
+完整契约（地形参数、生成流程、自愈）见 `module-world.md`。
+
 ### users — 用户账号
 
 | 列名 | 类型 | 约束 | 说明 |
@@ -303,6 +325,25 @@ PostgreSQL 版本（`schema.pg.ts`）与上面对应，差异点：
 2. `pool.query(...)` 执行全部 DDL（12 张表 + 3 个索引 + 增量列迁移），PostgreSQL 原生支持 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
 
 **不提供跨方言兼容**：SQLite 和 PostgreSQL 的 Schema 文件独立维护（`schema.ts` / `schema.pg.ts`），无运行时方言转换。
+
+### 新增一张表的四个落点（实测）
+
+新增表（如 `worlds`）需要**四处**同步编辑，缺一不可：
+
+| 落点 | 作用 |
+|---|---|
+| `db/schema.sqlite.ts` | Drizzle 类型（SQLite 方言） |
+| `db/schema.pg.ts` | Drizzle 类型（PG 方言，逐列一致） |
+| `db/ddl.ts` 的 `MIGRATION_SQL` | SQLite 启动时执行的 DDL |
+| `db/pg.ts` 的 `pool.query` 字面量 | PG 启动时执行的 DDL —— **与上一条是两份手工同步的字面量，最容易漏** |
+
+外加 `db/index.ts` 的解构导出加一行。
+
+⚠️ **`db/sqlite.ts` 对「新增表」无需改动** —— 新表走 `MIGRATION_SQL` 的 `CREATE TABLE IF NOT EXISTS`，完全绕开了列迁移的 `ALTER` 陷阱。**但对「新增列」就必须改**（追加一条 `try { sqlDb.run('ALTER TABLE … ADD COLUMN …') } catch {}`，因为 sql.js 不支持 `ALTER` 的 `IF NOT EXISTS` 语法）。
+
+⚠️ **PG 实际上没有 `ALTER` 通道**：`db/pg.ts` 里只有 `CREATE TABLE IF NOT EXISTS`，没有任何 `ADD COLUMN IF NOT EXISTS` 语句（尽管 PRD 的 F20 如此描述）。因此给既有表**加列**在 PG 上是**手工运维步骤**，而加表不是。选择「新表 + 侧表」而非「给 `conversations` 加列」，这是一个实在的理由（见 `module-world.md`）。
+
+⚠️ **`db.transaction()` 在 sql.js 适配层不可用** —— 多步写入一律顺序 `await ….run()`（`routes/conversations.ts` 有历史注释记录过误用事务导致的 `ReferenceError`）。
 
 **不提供旧库兼容**：无 PRAGMA 预检、无 ALTER TABLE 回填。旧库缺列直接运行时出错，删库重建即可。
 

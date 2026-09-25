@@ -38,7 +38,7 @@
   "_retry": false,
   "thinking_mode": true,
   "attachments": [{ "url": "...", "name": "...", "size": 123, "type": "image/png" }],
-  "conversation_type": "direct | group",
+  "conversation_type": "direct | group | world",
   "agent_ids": ["可选-群聊Agent ID列表"],
   "infinite_mode": false,
   "language": "zh-CN",
@@ -49,6 +49,7 @@
 - `message` 为空或全空白 → `400 { "error": "Empty message" }`
 - `thinking_mode` 判定为 `thinking_mode !== false`，即**省略时默认开启**
 - `conversation_type`：`direct`（默认）为单 Agent 对话，`group` 为群聊模式
+- ⚠️ `conversation_type: "world"` 被**显式拒绝**（`400`）。世界模拟的回合引擎属于后续阶段；放它落进单聊路径只会把消息气泡塞进世界会话，制造语义上自相矛盾的状态。世界的创建走 `POST /api/worlds`（见 `module-world.md`）
 - `agent_ids`：群聊模式下指定参与 Agent 的 ID 列表
 - `infinite_mode`：是否开启无限演算模式（中立 Agent 自动追问）
 - `attachments` 见 `module-file-attachment.md`
@@ -179,6 +180,7 @@ Voice 参数从 Agent 的 `voice_settings` JSON 中读取：`speakerId`（必选
 | `conv_sync` | `{ type: "conv_sync" }` | 会话列表变更信号 → 刷新侧边栏 |
 | `conv_changed` | `{ type: "conv_changed", conversation_id: string }` | 会话内容变更（如回退消息）→ 正在查看的设备重新拉取 |
 | `group_members` | `{ type: "group_members", conversation_id: string }` | 群成员变更 → 刷新成员列表 |
+| `world_status` | `{ type: "world_status", conversation_id: string, status: WorldStatus }` | 世界地形生成状态变更。**只传状态不传 spec**（该事件扇出到本账号每台设备）→ 客户端在 `useChat` 的实时 switch 里派发为 `window` CustomEvent `realtime:world_status`，由 `useWorld` 监听并重拉。刻意不复用 `conv_changed`：那样会触发一次无意义的消息重拉 |
 
 **订阅管理**：
 - 按 `deviceId` 幂等：同设备重连时先移除旧订阅，避免事件双发
@@ -293,6 +295,17 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 4. **发送消息**：`sendGroupMessage` 携带 `agent_ids` 和 `conversation_type: 'group'`
 5. **成员管理**：`addAgentToGroup` / `removeAgentFromGroup` 增删群组成员
 6. **实时群成员同步**：其他设备改动了群成员时，若本设备正在查看该群则刷新成员列表
+
+### 客户端（视图分派：WorldPanel 取代 ChatPanel）
+
+主区按会话类型二选一 —— `useWorldChat().isWorldMode` 为真时渲染 `WorldPanel`（三维沙盘 / 二维降级地图 + 世界信息卡 + 法则编辑器），否则渲染 `ChatPanel`。
+
+- **为何在 `App.tsx` 分派而非在 `ChatPanel` 内分支**：`ChatPanel` 被传入二十余个属性，全是消息列表与输入框的事，在世界模式下**无一有意义**。在内部加分支要么继续传死属性，要么把每个属性改成可选 —— 比独立组件更差的契约。且世界需要自己的 chrome（法则入口、世界信息、后续阶段的上帝交互条），而 `ChatPanel` 的布局是「绝对定位顶栏 + `pt-[76px]` 滚动容器」，塞入一个需要 `touch-action: none` 的画布与吸底交互条是最不该干的活。
+- **`key={chat.activeId}`**：切换会话时重挂载，使画布上下文、相机与几何体随会话重建而非复用。
+- **`isWorldMode` 与 `isGroupMode` 在完全相同的三处赋值点同步设置**（`useGroupChat` 的 `useEffect` / `selectConversation` / 草稿重置分支），走同一套世代计数守卫 —— 防止乱序响应把世界标成群聊（`getConversation` 比 `getWorld` 慢，快速连点会触发）。
+- **`convTypeOf` 的联合类型必须含 `'world'`**：否则世界会话会**静默**回退成 `'direct'`。
+- **`useWorldChat` 的命名纪律**：其返回值经 `{ ...chat, ...群聊成员, ...世界成员 }` 两层展开，同名成员会**静默覆盖**内层实现（`useGroupChat.ts` 的文件注释记录了这条踩过的坑），故世界成员一律用 world 前缀/后缀。
+- 完整契约见 `module-world.md`。
 
 ### 服务端（realtime.ts + routes/events.ts）
 

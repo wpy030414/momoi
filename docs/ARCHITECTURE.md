@@ -7,7 +7,7 @@
 │                         浏览器（React SPA）                                   │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌──────────────┐  ┌──────────┐│
 │  │ Sidebar  │  │ChatPanel │  │AdminScreen│  │LoginScreen   │  │OAuthLogin││
-│  │ 对话列表  │  │ 聊天界面  │  │ 管理面板   │  │ PIN 认证登录  │  │ OAuth登录 ││
+│  │ 对话列表  │  │WorldPanel│  │ 管理面板   │  │ PIN 认证登录  │  │ OAuth登录 ││
 │  └──────────┘  └──────────┘  └───────────┘  └──────────────┘  └──────────┘│
 │        │            │              │                │               │       │
 │        └────────────┴──────────────┴────────────────┴───────────────┘       │
@@ -48,6 +48,10 @@
 │  │  │ Pi Agent Core    │  │ 群聊编排           │  │ 中立 Agent 调度│      │  │
 │  │  │ 适配层           │  │ (串行多Agent对话)  │  │ (追问/建议)    │      │  │
 │  │  └──────────────────┘  └───────────────────┘  └────────────────┘      │  │
+│  │  ┌──────────────────┐  ┌───────────────────┐                          │  │
+│  │  │ai/world-generator│  │   lib/world.ts    │                          │  │
+│  │  │ 世界描述→地形参数 │  │ 世界状态/生成/自愈│                          │  │
+│  │  └──────────────────┘  └───────────────────┘                          │  │
 │  │  ┌──────────────────┐  ┌───────────────┐  ┌────────────────┐          │  │
 │  │  │   tools/         │  │  skills/      │  │   config.ts    │          │  │
 │  │  │  12 个内置工具    │  │  loader.ts    │  │  配置管理       │          │  │
@@ -78,7 +82,7 @@
 │  │  │  db.ts — SQLite (sql.js + Drizzle ORM)                                │    │  │
 │  │  │  PostgreSQL (pg + Drizzle ORM, DATABASE_URL 环境变量切换)       │    │  │
 │  │  │  conversations | messages | settings | agents                 │    │  │
-│  │  │  group_conversation_agents | mcp_servers | users              │    │  │
+│  │  │  group_conversation_agents | worlds | mcp_servers | users     │    │  │
 │  │  │  user_oauth_bindings | wechat_bindings | qq_bindings           │    │  │
 │  │  │  + data/workspaces/{conversationId}/ (工具沙盒)                 │    │  │
 │  │  │  + data/voice/{agentId}/{messageId}/ (TTS 音频缓存)            │    │  │
@@ -125,6 +129,35 @@
       → @mention 拦截：被点名 Agent 立即应答
     → 无限模式（若开启）：generateNeutralFollowUp() → follow_up 事件
     → SSE: group_done
+```
+
+### 世界模拟创建与地形生成流（异步 + 自愈）
+
+```
+用户填「世界描述 + Agent」→ POST /api/worlds
+  → 校验：提示词非空；agent_ids 过滤中立 Agent 后 ≥ 1
+  → 建 conversations（type='world'）→ 写 group_conversation_agents → 建 worlds 行（status='generating'）
+  → broadcastConversationSync（各设备侧边栏立即出现）
+  → 起火异步生成（不 await）；201 立即返回（实测 27ms）
+  → 客户端 selectConversation → 世界视图显示「大地正在成形……」
+
+（后台）resumeWorldGeneration(convId, userId)
+  → generatingWorlds.add(convId)              ← 同步占位，无竞态
+  → generateWorldTerrain()  （ai/world-generator.ts）
+      → LLM 输出 JSON：地形参数 + 法则原文誊写
+      → normalizeTerrainSpec() 钳制修补（永不抛异常）
+      → 失败则 defaultTerrainSpec() 关键词推导兜底（不发起第二次调用）
+  → UPDATE worlds SET terrain_spec, laws, status='ready'
+  → finally: generatingWorlds.delete + broadcastWorldStatus
+      → 各设备收到 realtime:world_status → 客户端 GET /api/worlds/:id 重拉
+
+自愈（生成幂等，故可安全重跑）：
+  · 启动：sweepInterruptedWorlds() 重跑所有仍停在 generating 的世界
+  · 读取：GET /api/worlds/:id 发现 status='generating' 但不在 generatingWorlds 中 → 直接重跑
+  · generatingWorlds 同时是并发守卫与「这次生成还活着吗」的权威判据
+
+⚠️ 世界不走 D34 的「新会话草稿态」—— 地形必须在渲染沙盘前存在，且地形规则不可变、
+   不能等首条消息才定。这是 D48 记录的显式例外。
 ```
 
 ### 微信消息流（轮询器 + 桥接）
@@ -232,6 +265,7 @@ type ServerMessage =
 | { type: 'conv_sync' }
 | { type: 'conv_changed'; conversation_id: string }
 | { type: 'group_members'; conversation_id: string }
+| { type: 'world_status'; conversation_id: string; status: WorldStatus }
 ```
 
 ### 配置数据流
@@ -312,6 +346,21 @@ routes/chat.ts
 routes/group.ts
   ├── db.ts + schema.ts
   └── middleware/userAuth.ts
+
+routes/worlds.ts
+  ├── lib/world.ts（世界状态层：生成任务 / 自愈清扫 / 法则更新）
+  │     ├── ai/world-generator.ts（提示词 → 地形参数，失败开放）
+  │     ├── lib/realtime.ts（broadcastWorldStatus）
+  │     └── db.ts + schema.ts（worlds、conversations、group_conversation_agents）
+  └── middleware/userAuth.ts
+
+ai/world-generator.ts
+  └── @momoi/shared/world（TERRAIN_ENUMS / WORLD_LIMITS / normalizeTerrainSpec / defaultTerrainSpec）
+
+⚠️ 横切事实：packages/shared/src/{noise,world}.ts 被**服务端与 Web 端同时消费** ——
+   服务端用它校验参数与生成地形摘要，浏览器用它把同一份 TerrainSpec 建成网格。
+   两端共用一份实现，才可能对同一份参数得出逐位相同的地形（D47）。
+   因此这两个文件内**绝不允许**出现 document / window / three。
 
 routes/conversations.ts
   ├── db.ts + schema.ts
@@ -416,6 +465,21 @@ messages
 ├── agent_id TEXT                  -- 群聊中发言者的 Agent ID（可选）
 └── created_at INTEGER             -- Unix epoch (秒)
 
+worlds
+├── conversation_id TEXT PRIMARY KEY  -- 1:1 于 conversations
+├── terrain_prompt TEXT            -- 不可变：用户原文「世界地形规则」
+├── terrain_spec TEXT              -- TerrainSpec JSON（生成中为空串）
+├── laws TEXT                      -- 可变：世界法则
+├── status TEXT                    -- 'generating' | 'ready' | 'failed'
+├── status_error TEXT              -- 失败原因
+├── turn INTEGER                   -- 回合计数（Phase 2 起使用）
+├── created_at INTEGER             -- Unix epoch (秒)
+└── updated_at INTEGER             -- Unix epoch (秒)
+  注：刻意不存 user_id —— 归属永远以 conversations.user_id 为准（单一事实来源，
+      重复一份会与之漂移，等于开出第二条鉴权路径）。
+      注意 conversations 是软删除，故 worlds 行不随会话删除消失，
+      **每次读取都必须连带过滤 conversations.deleted_at IS NULL**。
+
 settings
 ├── key TEXT PRIMARY KEY           -- 配置键
 └── value TEXT                     -- 配置值
@@ -509,7 +573,8 @@ user_agent_memories
 CREATE INDEX idx_messages_conv        ON messages(conversation_id, created_at);
 CREATE INDEX idx_conversations_user   ON conversations(user_id, updated_at);
 CREATE INDEX idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
-CREATE INDEX idx_user_agent_memories  ON user_agent_memories(user_id, agent_id);
+CREATE INDEX idx_user_agent_memories  ON user_agent_memories(user_id, agent_id)
+CREATE INDEX idx_worlds_status        ON worlds(status);
 ```
 
 ## 前端组件树
@@ -523,6 +588,11 @@ App
 │     ├── 新建对话 / 新建群聊按钮
 │     ├── 对话列表（直接对话 + 群聊，含 Agent 数量和类型标识）
 │     └── 用户信息/菜单按钮
+├── WorldPanel（conversation.type === 'world' 时取代 ChatPanel）
+│     ├── WorldCanvas（React.lazy；全仓唯一 import three 的模块）
+│     ├── WorldFallback（无 WebGL2 时的二维俯视地图，同一 buildTerrain 产物）
+│     └── LawsEditor（法则编辑 + 地形规则只读回显）
+├── NewWorkflowDialog（侧边栏「新工作流」：模式选择 + Agent 选择 + 世界提示词）
 ├── ChatPanel
 │     ├── MessageList
 │     │     └── MessageBubble[]
