@@ -1317,3 +1317,41 @@
 - 实测：入口 `index` 177KB raw / 49KB gzip，**未**静态引用 `vendor-three`；`vendor-three` 559KB raw / 137KB gzip / 112KB br
 - 新增 `apps/web/src/lib/webgl.ts`、`components/world/{WorldCanvas,WorldFallback}.tsx`
 - `OrbitControls` 的 `touchAction='none'` 是必需项（否则浏览器滚动页面而不喂事件给画布）；`TOUCH.TWO = DOLLY_ROTATE` 使双指既是捏合缩放又是扭转旋转
+
+## D51：世界回合 — 专用 SSE 端点 + 工具白名单 + 事件即历史
+
+**日期**：2026-09-25
+
+**背景**：Phase 2 要让 Agent 进入世界并按回合行动。三处需要定夺：回合的传输通道、Agent 在世界里能用什么工具、以及「历史」是什么。
+
+**决策**：
+
+1. **专用端点 `POST /api/worlds/:id/act`（SSE），不复用 `POST /api/chat`** —— 尽管 Phase 1 的计划写的是复用
+2. **世界回合只开放世界工具 + `load_skill`**，并由两处代码共同维持：`defs` 的白名单选择 + 「世界回合到此为止」的提前返回（跳过 `at_mention` 与 MCP 注入）
+3. **世界的历史是 `world_events`，不是聊天消息** —— 每个 Agent 的世界简报直接由事件日志构成，`runPiAgentLoop` 的 `history` 传空数组
+4. **工具不直接写库**：经 `WorldSignal`（照搬 `MentionSignal` 的旁路范式）回传待落库事件与就地修改的实体，**编排器是唯一写入方**
+5. **世界回合开启思考模式**（与最初设想相反）
+
+**原因**：
+
+- `/api/chat` 的处理函数是 ~600 行围绕**消息**的机制（落库、追问建议、语音合成、无限模式、ask_user、附件、群聊编排），对世界回合一概不适用。逐一加分支会把两者都拖成杂糅；而世界的落库目标（`world_events`）与编排器都是独立的。Phase 1 的「复用」判断在看清那段代码的体量后不成立
+- 住在沙盘里的生灵不该能写文件、执行 Shell 或发 HTTP 请求 —— 那是「与用户对话的助手」的能力，不是「世界里的人」的。这是一条**安全边界**，故有确定性的守卫盯着它（`world:tools`，16 项）
+- 事件日志本身就是世界史。若再传聊天历史，就会出现两套并行的历史，且要处理「哪些消息该进简报」这一无谓问题
+- 工具直接写库会让「谁产生了什么」散落在各处，落库与 SSE 下发也无法保证一致；集中于编排器后，`world_event` 的持久化与下发天然同步
+- 思考模式：关掉它会让「我先看看四周」这类计划句无处可去、直接漏进叙述正文（实测出现过英文计划句 + 中文叙述拼接的割裂）。开启后推理走 `reasoning_content` 通道，正文只剩叙述本身
+
+**备选与权衡**：
+
+- ❌ 复用 `/api/chat` 加 world 分支 → 见上
+- ❌ 世界回合给完整工具集 → 越界且难解释；且 `save_memory` 的记忆块会要求一个世界里不该存在的工具（记忆注入必须在世界回合一并关闭）
+- ❌ 给世界实体加 HP / 数值属性 → 用户已明确选择「叙事型」（D47 的约束表），「致命伤害」由 LLM 依法则裁决
+- ❌ 工具直接写库 → 见上
+- ❌ `target_status` 由服务端按规则计算 → 叙事型下没有可计算的规则；改由**裁决方声明 + 服务端校验**（目标必须存在、活着、不是自己）
+
+**影响**：
+
+- 新增 `world_entities` / `world_events` 两张表、`ai/world-orchestrator.ts`、`tools/world-tools.ts`、`components/world/{WorldEventLog,GodActionBar}.tsx`
+- `ServerMessage` 加五个世界回合事件；`RealtimeEvent` 加 `world_event` 与 `world_turn`
+- `createToolAdapter` 被导出（与 `buildSystemPrompt` 同理，为了离线校验工具集）
+- 客户端必须**按事件 id 去重**：`broadcastWorldEvent` 不跳过来源设备
+- Phase 3 的上帝 Avatar 与地形改造在此结构上都是增量的：`kind='god'` 的实体与 `world_patches` 叠加层

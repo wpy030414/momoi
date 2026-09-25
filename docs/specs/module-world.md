@@ -6,8 +6,11 @@
 
 核心约束：**地形规则创生后不可修改，世界法则可随时更改**。
 
-**当前范围（Phase 1）**：创生、地形生成与渲染、相机操作、法则编辑、Agent 静态入驻。
-**后续阶段**：Phase 2 生灵入场（回合制行动与事件日志）、Phase 3 上帝 Avatar 与 Agent 改造世界。见 `docs/DECISIONS.md` D47–D49。
+**已完成**：
+- **Phase 1** —— 创生、地形生成与渲染、相机操作、法则编辑
+- **Phase 2** —— 生灵入场：实体持久化、回合制行动、世界工具、事件日志、专用 SSE 端点
+
+**后续（Phase 3）**：上帝 Avatar 的放置与邻近互动、Agent 改造世界（地形叠加补丁）、自动演算开关。见 `docs/DECISIONS.md` D47–D51。
 
 ## 涉及文件
 
@@ -16,6 +19,8 @@
 | `packages/shared/src/noise.ts` | 确定性噪声原语：mulberry32 / 整型格点哈希 / 值噪声 / fBm / 脊状 fBm / fnv1a |
 | `packages/shared/src/world.ts` | **协议面**：`TerrainSpec` 与词表、`buildTerrain`、`waterLevel`、`normalizeTerrainSpec`、`defaultTerrainSpec`、`spawnPoints`、`terrainSummary` |
 | `apps/server/src/ai/world-generator.ts` | 提示词 → 结构化地形参数 + 法则原文誊写 |
+| `apps/server/src/ai/world-orchestrator.ts` | **回合引擎**：上帝行动 → 存活 Agent 依次行动一拍 |
+| `apps/server/src/tools/world-tools.ts` | 世界工具（move / speak / observe / act）+ `WorldSignal` 旁路对象 |
 | `apps/server/src/lib/world.ts` | 世界状态层：生成任务、自愈清扫、状态读取、法则更新 |
 | `apps/server/src/routes/worlds.ts` | `POST /api/worlds`、`GET /api/worlds/:id`、`PATCH /api/worlds/:id` |
 | `apps/server/src/lib/realtime.ts` | `broadcastWorldStatus` |
@@ -26,6 +31,8 @@
 | `apps/web/src/components/world/WorldCanvas.tsx` | **全仓唯一 import three 的模块**：网格 / 水面 / 天空 / 相机 / 控制器 / 拆卸 |
 | `apps/web/src/components/world/WorldFallback.tsx` | 二维俯视地图降级 |
 | `apps/web/src/components/world/LawsEditor.tsx` | 法则编辑 + 地形规则只读回显 |
+| `apps/web/src/components/world/WorldEventLog.tsx` | 按回合分组的事件日志（可折叠、自动滚底） |
+| `apps/web/src/components/world/GodActionBar.tsx` | 上帝行动输入条 |
 | `apps/web/src/hooks/useWorld.ts` | `useWorldChat`：世界状态获取 / 缓存 / 轮询 / 实时 / 创生 |
 
 ## 数据模型
@@ -58,6 +65,51 @@ CREATE INDEX IF NOT EXISTS idx_worlds_status ON worlds(status);
 世界的参与 Agent 与群聊成员**结构完全同构**（同样的列、排序语义、生命周期），故复用该表，不新开 `world_agents`。代价是表名说「group」却服务两种会话类型——改名意味着一次没有迁移器的表迁移，严格更糟。本扩张记录于此与 `module-group-chat.md`。
 
 `POST /api/worlds` 插入成员时过滤 `NEUTRAL_AGENT_ID`。
+
+### `world_entities` 表 —— 世界中的存在
+
+```sql
+CREATE TABLE IF NOT EXISTS world_entities (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'agent',        -- 'agent' | 'god'（Phase 3 起用）
+  agent_id TEXT,                             -- kind='agent' 时关联 agents.id
+  name TEXT NOT NULL DEFAULT '',
+  x REAL NOT NULL DEFAULT 0,                 -- 归一化坐标 [-1,1]
+  z REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'alive',      -- 'alive' | 'dead' | 'gone'
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_world_entities_conv ON world_entities(conversation_id);
+```
+
+坐标刻意与 `@momoi/shared/world` 的采样坐标系**同构**（归一化 [-1,1]、中心 (0,0)），故客户端可直接把它送进 `sampleHeight` / `sampleBiome` 而无需任何换算。
+
+**播种时机**：地形**生成完成后**在 `runGeneration` 里播种（`spawnPoints` 需要 spec）。播种是**幂等**的，且落点用 Phase 1 的确定性散列函数 —— 故用户看到的 Agent 位置不会因为「实体持久化了」而跳动。`GET /api/worlds/:id` 也会在发现「已就绪但无实体」时就地补播种（自愈）。
+
+### `world_events` 表 —— 世界的「消息」
+
+```sql
+CREATE TABLE IF NOT EXISTS world_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,      -- PG: SERIAL
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  turn INTEGER NOT NULL DEFAULT 0,           -- 回合序号
+  seq INTEGER NOT NULL DEFAULT 0,            -- 回合内顺序（1 起稠密）
+  actor_kind TEXT NOT NULL DEFAULT 'world',  -- 'god' | 'agent' | 'world'
+  actor_id TEXT,                             -- world_entities.id；'god'/'world' 为 null
+  actor_name TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'act',          -- 'act'|'speak'|'move'|'die'|'law'|'narration'
+  content TEXT NOT NULL DEFAULT '',
+  payload TEXT,                              -- JSON：坐标移动、状态变更等结构化增量
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_world_events_conv ON world_events(conversation_id, turn, seq);
+```
+
+**这是世界的历史**。世界不传递聊天历史给 Agent —— 每个 Agent 的世界简报直接由这张日志构成。故世界完全不依赖 `messages` 表的任何机制（落库、追问建议、语音合成、无限模式）。
+
+**法则变更也进日志**（`kind='law'`）：既是一份审计轨迹，也让「法则何时被改过」进入后续回合 Agent 可见的历史 —— 否则旧法则下的行动会显得毫无来由。
 
 ### `conversations.type` 扩为 `'direct' | 'group' | 'world'`
 
@@ -298,6 +350,62 @@ controls.touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_ROTATE }
 
 并监听 `webglcontextlost`（钉钉 WebView 切后台会丢上下文）：`preventDefault()` 后切换到二维降级视图，而不是留一个冻结的黑屏。
 
+## 回合引擎（`ai/world-orchestrator.ts`）
+
+```
+POST /api/worlds/:id/act  { content }        ← 上帝行动，SSE 流式响应
+  → 校验归属；世界必须 status='ready'；未就绪 → 409
+  → 并发守卫：claimWorldTurn() 同步占位；已有回合在跑 → 409
+  → turn = world.turn + 1；写库
+  → 落库 god 事件（kind='act'）→ SSE: world_turn_start
+  → 按 id 升序（确定性）遍历 status='alive' 的 agent 实体：
+      → SSE: world_agent_start
+      → 构造该 Agent 的世界简报 → runPiAgentLoop（**仅世界工具**）
+      → 工具经 WorldSignal 回传的待定事件落库 → SSE: world_event × N
+      → 持久化实体（每拍都存，中途崩溃不丢前面几拍）
+      → SSE: world_agent_done
+  → SSE: world_turn_end
+```
+
+**每个 Agent 的简报**（作为 `runPiAgentLoop` 的 userMessage）：回合序号、**自身确切坐标与所处地形**、附近有哪些存在（含对方位置与所处地形）、最近 20 条事件（跳过 `move` —— 噪音大信息量低）、上帝这一步做了什么。末尾附工具清单、一致性与语言要求。
+
+**容错**：单个 Agent 失败只记一条 `narration` 事件，其余照常行动（与群聊编排一致）。`runWorldTurn` 自身不抛异常。
+
+**思考模式**：世界回合**开启思考**。关掉它会让「我先看看四周」这类计划句无处可去、直接漏进叙述正文（实测出现过英文计划句 + 中文叙述拼接的割裂）；开启后推理走 `reasoning_content` 通道，正文只剩叙述本身。
+
+## 世界工具（`tools/world-tools.ts`）
+
+| 工具 | 参数 | 行为 |
+|---|---|---|
+| `world_move` | `{ x, z }` | 归一化坐标，服务端钳制到 ±1；写 `move` 事件 + 就地改实体坐标；返回目的地地形描述 |
+| `world_speak` | `{ content, to? }` | 说话；`to` 为实体名则标记接收者；写 `speak` 事件 |
+| `world_observe` | `{ radius?, target? }` | **只读**：返回自身位置、附近存在及其所处地形、最近事件。不产生事件（否则噪音淹没有效信息） |
+| `world_act` | `{ action, target?, target_status? }` | 自由行动。`target_status`（`dead`/`gone`）让裁决方声明结局；服务端校验目标存在且活着，再写实体状态 + 追加 `die` 事件 |
+
+**旁路范式**（照搬 `MentionSignal`）：工具**不直接写库**，而是经 `ToolContext.worldSignal` 上的一个可变对象回传待落库事件与就地修改的实体。**编排器是唯一写入方** —— 它统一负责落库、下发与持久化。
+
+⚠️ **世界回合只开放世界工具 + `load_skill`**。住在沙盘里的生灵不该能读写文件、执行 Shell 或发 HTTP 请求 —— 那些能力属于「与用户对话的助手」，不属于「世界里的人」。这条边界由 `pi-adapter` 两处维持：`defs` 的白名单选择，以及「世界回合到此为止」的提前返回（跳过 `at_mention` 与 MCP 工具的注入）。有确定性守卫盯着它（`pnpm --filter @momoi/server world:tools`）。
+
+⚠️ **世界回合同样关闭跨会话记忆**：记忆块会**要求** Agent 调用 `save_memory`，而世界工具白名单里没有它 —— 那会让模型去够一个不存在的工具。
+
+## 世界回合的 SSE 事件
+
+专用端点 `POST /api/worlds/:id/act`（**不复用 `POST /api/chat`**）。
+
+| 事件 | 数据 | 说明 |
+|---|---|---|
+| `world_turn_start` | `{ turn, entities }` | 回合开始，附带全部实体 |
+| `world_agent_start` | `{ entity_id, name }` | 某个 Agent 开始行动 |
+| `world_event` | `{ event: WorldEvent }` | 一条已落库的事件 |
+| `world_agent_done` | `{ entity_id, name }` | 某个 Agent 行动结束 |
+| `world_turn_end` | `{ turn }` | 回合结束 |
+
+**保活**：每 15 秒 SSE 注释。**写入串行化**：`writeChain` 保证流关闭前尾部事件被 flush（与 `chat.ts` 同款）。**断开中止**：`stream.onAbort` 触发 `AbortController`，编排器在下一个个体前退出。
+
+**多设备**：`RealtimeEvent` 新增两个成员 —— `world_event`（单条事件逐条中继；世界事件是**离散**的，故可直接中继，无需聊天流那条有损的 token 批量路径）与 `world_turn`（回合生命周期，其它设备据此禁用输入并显示「谁正在行动」）。客户端在 `useChat` 的实时 switch 里把它们派发为 `window` CustomEvent，由 `useWorld` 监听。
+
+⚠️ 客户端**按事件 id 去重**：`broadcastWorldEvent` 不跳过来源设备，故触发本次回合的设备会既从本地 SSE 流收到、又从实时通道收到同一条。
+
 ## 鉴权模型
 
 世界与会话同等的用户隔离：
@@ -319,6 +427,14 @@ controls.touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_ROTATE }
 6. **生成幂等**，故被重启打断的世界可安全重跑
 7. **失败开放**：`generateWorldTerrain` 永不抛异常，世界总能创生成功
 8. **法则不被模型改写**：要求逐字誊写用户原文；若与原文不符则记 `repairs` 但仍采用模型版本（改写也好过丢失）
+
+### 服务端（Phase 2）
+
+9. **回合并发守卫**：一个世界同时只允许一个回合，否则两个回合会交错写 `turn` 与实体位置。「已有回合在跑」返回 `409`
+10. **每拍持久化**：每个 Agent 行动完就写一次实体位置，中途崩溃不至于丢掉前面几拍的移动与死亡
+11. **死亡不可逆**：`status` 一旦离开 `'alive'` 就不再进入行动队列
+12. **`target_status` 需有据**：声明目标结局必须同时指定 `target`，且目标必须存在、活着、不是自己 —— 防止「凭空声明某人死亡」
+13. **世界工具零事件**：`world_observe` 只读，不产生事件
 
 ### 客户端
 

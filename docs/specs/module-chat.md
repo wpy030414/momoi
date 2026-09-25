@@ -181,6 +181,8 @@ Voice 参数从 Agent 的 `voice_settings` JSON 中读取：`speakerId`（必选
 | `conv_changed` | `{ type: "conv_changed", conversation_id: string }` | 会话内容变更（如回退消息）→ 正在查看的设备重新拉取 |
 | `group_members` | `{ type: "group_members", conversation_id: string }` | 群成员变更 → 刷新成员列表 |
 | `world_status` | `{ type: "world_status", conversation_id: string, status: WorldStatus }` | 世界地形生成状态变更。**只传状态不传 spec**（该事件扇出到本账号每台设备）→ 客户端在 `useChat` 的实时 switch 里派发为 `window` CustomEvent `realtime:world_status`，由 `useWorld` 监听并重拉。刻意不复用 `conv_changed`：那样会触发一次无意义的消息重拉 |
+| `world_turn` | `{ type: "world_turn", conversation_id: string, turn: number, running: boolean }` | 世界回合开始 / 结束 → 其它设备禁用输入并显示「谁正在行动」。单靠 `world_event` 无法判断一轮是否还在跑（最后一个事件与结束之间没有信号） |
+| `world_event` | `{ type: "world_event", conversation_id: string, event: WorldEvent }` | 回合中产生的单条事件 → 追加到事件日志。世界事件是**离散**的，故可直接中继，无需聊天流那条有损的 token 批量路径。⚠️ 客户端必须**按事件 id 去重**：该广播不跳过来源设备 |
 
 **订阅管理**：
 - 按 `deviceId` 幂等：同设备重连时先移除旧订阅，避免事件双发

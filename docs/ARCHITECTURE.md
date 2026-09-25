@@ -160,6 +160,30 @@
    不能等首条消息才定。这是 D48 记录的显式例外。
 ```
 
+### 世界回合流（上帝行动 → Agent 依次行动一拍）
+
+```
+用户写「上帝行动」→ POST /api/worlds/:id/act（SSE）
+  → 校验归属；world.status 必须 'ready'，否则 409
+  → 并发守卫 claimWorldTurn()（进程内集合，同步占位）→ 已有回合在跑则 409
+  → turn = world.turn + 1 写库
+  → 落库 god 事件（kind='act'）→ SSE: world_turn_start
+  → 按 id 升序遍历 status='alive' 的 agent 实体：
+      → SSE: world_agent_start
+      → prepareGroupHistory 式的世界简报（自身坐标 / 附近存在 / 最近事件 / 上帝行动）
+      → runPiAgentLoop（**仅世界工具 + load_skill**，history 传空 —— 事件日志就是历史）
+          → 工具经 ToolContext.worldSignal 回传待落库事件与就地修改的实体
+      → 编排器统一落库（appendWorldEvents，seq 在 turn 内稠密递增）
+      → SSE: world_event × N → 持久化实体（每拍都存）
+      → SSE: world_agent_done
+  → 持久化实体 → SSE: world_turn_end → releaseWorldTurn()
+
+多设备：world_event（单条事件，离散可直接中继）与 world_turn（生命周期）分别广播；
+其它设备据此追加事件日志并禁用输入。⚠️ 客户端按事件 id 去重 —— 该广播不跳过来源设备。
+
+容错：单个 Agent 失败只记一条 narration 事件，其余照常行动（与群聊编排一致）。
+```
+
 ### 微信消息流（轮询器 + 桥接）
 
 ```
@@ -266,6 +290,8 @@ type ServerMessage =
 | { type: 'conv_changed'; conversation_id: string }
 | { type: 'group_members'; conversation_id: string }
 | { type: 'world_status'; conversation_id: string; status: WorldStatus }
+| { type: 'world_turn'; conversation_id: string; turn: number; running: boolean }
+| { type: 'world_event'; conversation_id: string; event: WorldEvent }
 ```
 
 ### 配置数据流
@@ -356,6 +382,20 @@ routes/worlds.ts
 
 ai/world-generator.ts
   └── @momoi/shared/world（TERRAIN_ENUMS / WORLD_LIMITS / normalizeTerrainSpec / defaultTerrainSpec）
+
+ai/world-orchestrator.ts（世界回合引擎）
+  ├── ai/pi-adapter.ts（runPiAgentLoop，带 worldSignal）
+  ├── tools/world-tools.ts（world_move / speak / observe / act + WorldSignal 旁路）
+  ├── lib/world.ts（appendWorldEvents / saveWorldEntities）
+  └── @momoi/shared/world（describeLocation 用的采样函数）
+
+tools/world-tools.ts
+  └── @momoi/shared/world（sampleHeight / sampleBiome / isWater / biomeName）
+
+⚠️ 工具白名单是一条**安全边界**：世界回合只暴露世界工具 + load_skill（住在沙盘里的
+   生灵不该能读写文件 / 执行 Shell / 发 HTTP）。由 pi-adapter 两处维持：defs 的白名单
+   选择 + 「世界回合到此为止」的提前返回（跳过 at_mention 与 MCP 注入）。
+   守卫：pnpm --filter @momoi/server world:tools
 
 ⚠️ 横切事实：packages/shared/src/{noise,world}.ts 被**服务端与 Web 端同时消费** ——
    服务端用它校验参数与生成地形摘要，浏览器用它把同一份 TerrainSpec 建成网格。
@@ -480,6 +520,31 @@ worlds
       注意 conversations 是软删除，故 worlds 行不随会话删除消失，
       **每次读取都必须连带过滤 conversations.deleted_at IS NULL**。
 
+world_entities
+├── id TEXT PRIMARY KEY            -- UUID
+├── conversation_id TEXT           -- 关联 conversations
+├── kind TEXT                      -- 'agent' | 'god'（Phase 3 起用）
+├── agent_id TEXT                  -- kind='agent' 时关联 agents.id
+├── name TEXT
+├── x REAL / z REAL                -- **归一化坐标 [-1,1]**，与 shared/world 同构
+├── status TEXT                    -- 'alive' | 'dead' | 'gone'
+├── created_at / updated_at INTEGER
+
+world_events
+├── id INTEGER/SERIAL PRIMARY KEY  -- 自增
+├── conversation_id TEXT           -- 关联 conversations
+├── turn INTEGER                   -- 回合序号
+├── seq INTEGER                    -- 回合内顺序（1 起稠密）
+├── actor_kind TEXT                -- 'god' | 'agent' | 'world'
+├── actor_id TEXT                  -- world_entities.id
+├── actor_name TEXT
+├── kind TEXT                      -- 'act'|'speak'|'move'|'die'|'law'|'narration'
+├── content TEXT                   -- 自然语言描述
+├── payload TEXT                   -- JSON：坐标移动、状态变更等结构化增量
+└── created_at INTEGER
+  注：**这是世界的历史** —— 世界不传递聊天历史给 Agent，简报直接由这张日志构成，
+      故世界完全不依赖 messages 表的任何机制。
+
 settings
 ├── key TEXT PRIMARY KEY           -- 配置键
 └── value TEXT                     -- 配置值
@@ -574,7 +639,9 @@ CREATE INDEX idx_messages_conv        ON messages(conversation_id, created_at);
 CREATE INDEX idx_conversations_user   ON conversations(user_id, updated_at);
 CREATE INDEX idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
 CREATE INDEX idx_user_agent_memories  ON user_agent_memories(user_id, agent_id)
-CREATE INDEX idx_worlds_status        ON worlds(status);
+CREATE INDEX idx_worlds_status        ON worlds(status)
+CREATE INDEX idx_world_entities_conv  ON world_entities(conversation_id)
+CREATE INDEX idx_world_events_conv    ON world_events(conversation_id, turn, seq);
 ```
 
 ## 前端组件树
@@ -591,6 +658,8 @@ App
 ├── WorldPanel（conversation.type === 'world' 时取代 ChatPanel）
 │     ├── WorldCanvas（React.lazy；全仓唯一 import three 的模块）
 │     ├── WorldFallback（无 WebGL2 时的二维俯视地图，同一 buildTerrain 产物）
+│     ├── WorldEventLog（按回合分组的日志；世界不渲染气泡，它就是世界的表达）
+│     ├── GodActionBar（上帝行动输入条，回合中禁用）
 │     └── LawsEditor（法则编辑 + 地形规则只读回显）
 ├── NewWorkflowDialog（侧边栏「新工作流」：模式选择 + Agent 选择 + 世界提示词）
 ├── ChatPanel
