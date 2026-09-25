@@ -6,6 +6,12 @@ import { initReactI18next } from 'react-i18next'
 // saving ~47 KB raw (~14 KB gzip) from the initial bundle.
 import zhCN from './zh-CN.json'
 
+// Statically-enumerated lazy loaders (one chunk per locale).
+// import.meta.glob is analyzable by Vite, unlike `import(`./${lng}.json`)`
+// which vite:dynamic-import-vars cannot resolve for the importing file's own
+// directory. zh-CN is excluded — it is already bundled eagerly above.
+const localeLoaders = import.meta.glob(['./*.json', '!./zh-CN.json'])
+
 i18n.use(initReactI18next).init({
   resources: {
     'zh-CN': { translation: zhCN },
@@ -22,8 +28,11 @@ i18n.use(initReactI18next).init({
 export async function ensureLocale(lng: string): Promise<void> {
   if (lng === 'zh-CN') return // already bundled eagerly
   if (!i18n.hasResourceBundle(lng, 'translation')) {
-    const mod = await import(`./${lng}.json`)
-    i18n.addResourceBundle(lng, 'translation', (mod as any).default ?? mod)
+    const loader = localeLoaders[`./${lng}.json`]
+    if (loader) {
+      const mod = (await loader()) as { default?: Record<string, unknown> }
+      i18n.addResourceBundle(lng, 'translation', (mod as any).default ?? mod)
+    }
   }
 }
 
