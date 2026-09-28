@@ -55,6 +55,15 @@ describe('注册表：找得到 / 管得动', () => {
     expect(e.list()[0].source).toBe('override')
   })
 
+  it('override 可用 when: undefined 清除条件（变成恒注入片段）', () => {
+    const e = new PromptEngine()
+      .defineTarget('demo', { layers: ['body'] })
+      .register(frag({ id: 'y', when: () => false }))
+    expect(e.assemble('demo', {}).text).toBe('')
+    expect(e.override('y', { when: undefined })).toBe(true)
+    expect(e.assemble('demo', {}).text).toBe('y')
+  })
+
   it('disable/enable：仍在注册表（找得到）但不参与组装', () => {
     const e = new PromptEngine().defineTarget('demo', { layers: ['body'] }).register(frag({ id: 'x' }))
     expect(e.disable('x')).toBe(true)

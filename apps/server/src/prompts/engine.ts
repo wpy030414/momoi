@@ -123,9 +123,9 @@ export class PromptEngine {
     const entry = this.byId.get(id)
     if (!entry) return false
     const next = { ...entry.fragment, ...patch } as PromptFragment<any>
-    // 只有显式给出 render/when 才替换函数，避免 patch 里 undefined 抹掉原实现
-    if (!('render' in patch)) next.render = entry.fragment.render
-    if (!('when' in patch)) next.when = entry.fragment.when
+    // render 不允许缺失（patch 里显式 undefined 视为「未提供」）；
+    // when 则允许显式置 undefined 以清除条件（变成恒注入片段）
+    if (next.render === undefined) next.render = entry.fragment.render
     if (patch.source === undefined) next.source = 'override'
     entry.fragment = next
     this.noteLayer(next.layer)

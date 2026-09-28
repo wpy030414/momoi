@@ -23,7 +23,7 @@
 | `apps/server/src/prompts/index.ts` | 公共出口（外部一律从此导入） |
 | `apps/server/src/prompts/preview.ts` | 管理端预览的上下文白名单归化 |
 | `apps/server/src/prompts/fragments/core.ts` | 默认人设兜底 + `resolveAgentPersona()` |
-| `apps/server/src/prompts/fragments/chat.ts` | 主对话系统提示词（`chat.system`，14 个片段） |
+| `apps/server/src/prompts/fragments/chat.ts` | 主对话系统提示词（`chat.system`，13 个片段） |
 | `apps/server/src/prompts/fragments/neutral.ts` | 追问 / 建议 / 发言调度（中立 Agent） |
 | `apps/server/src/prompts/fragments/notification.ts` | 访问问候 / 离线推送指令 |
 | `apps/server/src/prompts/fragments/retry.ts` | 敏感词规避链路的注入消息文本 |
@@ -162,3 +162,9 @@ promptEngine.defineTarget('my.custom.task', { layers: ['body'], separator: '\n' 
 2. **文本等价**：黄金快照由迁移前基线生成（旧实现逐字节比对通过），迁移不改变模型实际读到的内容（唯一差异为段间空行的规范化）。
 3. 新增提示词不需要改动任何装配代码：在 `fragments/**` 中定义片段并注册即可。
 4. 管理端可列出全部片段、查看单片段文本、预览任一份配方的完整组装结果与逐段来源。
+5. **真实链路冒烟**（可选，改动提示词后建议执行一次；会真实调用一次上游模型）：
+
+```bash
+pnpm --filter @momoi/server exec tsx scripts/smoke-prompt-e2e.ts
+# → 直接调用 runPiAgentLoop（不经 HTTP/鉴权/落库），验证「组装 → 上游 → 回复」整链
+```

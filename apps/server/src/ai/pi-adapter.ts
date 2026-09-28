@@ -78,23 +78,14 @@ const MAX_EMPTY_RETRIES = 3
 // 恒真保证发言轮次落库/进群聊 turnReplies；作为 assistant 消息回流历史时自身无害
 
 // ---- 系统提示词装配已迁移至提示词规则引擎（apps/server/src/prompts）----
-// 片段、条件、层顺序在那里定义；此处只负责调用（见下方 createToolAdapter 之后的
-// buildChatSystemPrompt 调用点）。文本等价性由 prompts/__tests__/golden.test.ts 锁定。
-
-
-// ---- 构建系统提示词（自 v0.1 起由提示词规则引擎组装，见 ../prompts）----
-
-  // 跨会话记忆规则（写侧约束）——片段定义见 prompts/fragments/chat.ts（chat/memory-rules）
-
-  // 场景框架块（世界模拟 / 群组对话规则 / QQ 群聊规则 / 主角配角 / 无限模式）
-  // ——片段定义见 prompts/fragments/chat.ts，层顺序与互斥条件在那里统一表达。
-  // 关键约束（原在此处的注释，随片段一并迁移）：
-  //   · 世界模拟块替代群组对话规则块：世界回合没有「用户」，user 消息是「来自世界的变动」；
-  //   · QQ 群聊下不注入群组规则（单 Agent 面对多真人，避免把人类成员误认成 AI 同伴）。
-
-  // QQ 群聊规则 / 主角配角 / 无限模式 / 环境信息 / 可用技能：均为引擎片段，
-  // 依次见 prompts/fragments/chat.ts 的 chat/qq-group-rules、
-  // chat/speaking-role-*、chat/infinite-mode、chat/environment、chat/skills。
+// 片段文本、注入条件与层顺序在那里定义；本文件只保留调用点（runPiAgentLoop 内的
+// buildChatSystemPrompt）。原先在此处内联的场景块，其设计约束随文本一并迁移：
+//   · 记忆写侧规则落在人设之后的行为规则区（chat/memory-rules）
+//   · 世界模拟块替代群组对话规则块：世界回合没有「用户」，user 消息是「来自世界的变动」
+//   · QQ 群聊下不注入群组规则（单 Agent 面对多真人，避免把人类成员误认成 AI 同伴）
+//   · 主角/配角、无限模式、环境信息、技能摘要（chat/speaking-role-*、chat/infinite-mode、
+//     chat/environment、chat/skills）
+// 文本等价性由 prompts/__tests__/golden.test.ts（黄金快照）锁定。
 
 // ---- JSON Schema 属性 → TypeBox schema ----
 function schemaPropertyToTypeBox(prop: import('@momoi/shared/types').ToolSchemaProperty): TSchema {
