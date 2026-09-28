@@ -98,12 +98,14 @@ interface BuildSystemPromptOptions {
   memoryEnabled?: boolean
   /** 跨会话用户记忆（最近 30 条、时间正序；仅在 memoryEnabled 且非空时注入） */
   userMemories?: string[]
+  /** 世界模拟上下文：存在时注入「世界模拟」块（替代群组对话规则块的身份框架） */
+  world?: { laws: string }
 }
 
 // ---- 构建系统提示词（从 loop.ts 迁移，强化）----
 // 导出以便离线校验提示词装配（无测试框架时唯一能直观看清「模型到底收到什么」的入口）
 export function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
-  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories } = opts
+  const { agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories, world } = opts
   let prompt = agentSystemPrompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
 
   // ---- Momo easter egg: inject vibrant personality when language is Japanese ----
@@ -144,7 +146,34 @@ export function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
   // QQ 群聊模式下，群组规则（多 Agent 同台）不适用 —— 只有单 Agent 面对多真人，
   // 不应注入「其他 Agent 也可能回复用户」等误导性指令，避免 Agent 把自己之外的人类成员
   // 误认为 AI 同伴并产生身份困惑。
-  if (isGroup && !isQqGroup) {
+  if (world) {
+    // ---- 世界模拟块：替代群组对话规则块的身份框架 ----
+    // 世界回合仍走群聊编排（isGroup=true），但这里没有「用户」——
+    // user 消息是「来自世界的变动」，各 Agent 以世界中的存在身份回应。
+    // 世界没有描述：Agent 的人设本身就是其身份，法则就是其约束。
+    const worldNames = groupAgentNames && groupAgentNames.length > 0 ? groupAgentNames : []
+    const identityLine = agentName
+      ? `这个世界上有 ${worldNames.length} 个存在：${worldNames.join('、')}，你是其中的 ${agentName}。`
+      : ''
+    prompt += `
+## 世界模拟
+你正身处一场世界模拟。你不是「与用户对话的助手」——这里没有用户。你是世界中真实存在的个体，你的具体身份由你的人设决定。${identityLine ? `\n\n${identityLine}` : ''}
+
+### 世界法则（世界中所有存在 —— 包括你 —— 都必须遵守的最高规则）
+${world.laws.trim() || '（暂无特别法则）'}
+
+### 如何参与
+- user 角色的消息分两类：**无名字前缀**的是【来自世界的变动】——天气突变、时间流逝、外来者到来、突发事件、环境的改变……世界就这样向你展现了变化。请以你在世界中的身份自然地对其作出反应。
+- user 角色中**以 \`[名字]:\` 开头**的是【世界中其他存在的言行】，不是你说的。
+- assistant 角色的消息是你【之前说过/做过的话】——可以呼应但不要逐字复读。
+- 不要复述、引用或延续其他存在已经说过的内容，也不要假装那些话是你说的。
+- 像世界中真实活着的存在那样说话与行动：有欲求、有判断、受世界法则约束。不要跳出世界对"用户"说话——这里没有用户，只有世界与它的居民。
+- 自然地 @ 其他存在进行互动——点名、搭话、讨论、调侃、吐槽都可以，就像真实世界中的居民相互呼唤一样。可以一次 @ 多个人。当你决定 @ 某人时，在回复文本中**自然地写出 @对方名字**，同时调用 at_mention 工具。
+- 被 @ 的存在会在本轮内优先回应，但其他存在仍然会照常行动，不会中断。
+- 不要 @ 你自己。
+${mentionedBy ? `- 刚才 ${mentionedBy} @ 了你，在回应时请自然地接住对方的点名。
+` : ''}`
+  } else if (isGroup && !isQqGroup) {
     const names = groupAgentNames && groupAgentNames.length > 0 ? groupAgentNames : []
     const count = names.length
     const identityLine = agentName
@@ -958,6 +987,8 @@ export interface RunPiAgentLoopOptions {
   /** 强制合规重试：将原始提问预搬迁到对话历史，以合规占位提示词作为当前提问
    *  在首次模型调用前即完成绕过，而非等空回复再搬迁。 */
   forceCompliance?: boolean
+  /** 世界模拟上下文：存在时系统提示注入「世界模拟」块（替代群组对话规则块的身份框架） */
+  world?: { laws: string }
 }
 
 // ---- 入口函数 ----
@@ -968,7 +999,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     mentionSignal, isGroup, infiniteMode,
     agentName, groupAgentNames, mentionedBy,
     speakingRole, protagonistName, language,
-    isQqGroup, lastMessageAt,
+    isQqGroup, lastMessageAt, world,
   } = opts
   const config = await getConfig()
 
@@ -1000,8 +1031,8 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     ? await getUserAgentMemories(userId || 'anonymous', resolvedAgentId)
     : []
 
-  // 1. 构建系统提示词
-  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories })
+  // 1. 构建系统提示词（world 存在时注入「世界模拟」块，替代群组规则块的身份框架）
+  const systemPrompt = buildSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories, world })
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {

@@ -31,6 +31,11 @@ export function useGroupChat() {
   } = chat
   const [groupAgents, setGroupAgents] = useState<AgentBrief[]>([])
   const [isGroupMode, setIsGroupMode] = useState(false)
+  /** 世界模拟模式：世界会话复用群聊管线（isGroupMode 同为 true），差异只在
+   *  用户消息的语义框架（来自世界的变动）与展示样式（世界变动气泡） */
+  const [isWorldMode, setIsWorldMode] = useState(false)
+  /** 当前世界法则：isWorldMode 时由 GET /api/worlds/:id 读出 */
+  const [worldInfo, setWorldInfo] = useState<{ laws: string } | null>(null)
   const [isQqGroup, setIsQqGroup] = useState(false)
   const [allAgents, setAllAgents] = useState<AgentBrief[]>([])
   // 群模式同步守卫：包装层刚同步过的会话不再重复请求；世代计数丢弃乱序响应
@@ -56,8 +61,10 @@ export function useGroupChat() {
       const knownType = conversations.find((c) => c.id === activeId)?.type
       if (knownType === 'direct') {
         setIsGroupMode(false)
+        setIsWorldMode(false)
         setGroupAgents([])
         setIsQqGroup(false)
+        setWorldInfo(null)
         lastGroupSyncRef.current = activeId
         return
       }
@@ -66,14 +73,32 @@ export function useGroupChat() {
         const conv = res.conversation as Conversation
         if (conv.type === 'group') {
           setIsGroupMode(true)
+          setIsWorldMode(false)
+          setWorldInfo(null)
           if (res.agents) {
             setGroupAgents(res.agents)
           }
           setIsQqGroup(res.is_qq_group === true)
+        } else if (conv.type === 'world') {
+          // 世界会话复用群聊管线（isGroupMode 同为 true），差异只在用户消息的
+          // 语义框架（来自世界的变动）与展示样式（世界变动气泡）。世界法则
+          // 由 GET /api/worlds/:id 读出，法则编辑用。
+          setIsGroupMode(true)
+          setIsWorldMode(true)
+          if (res.agents) {
+            setGroupAgents(res.agents)
+          }
+          setIsQqGroup(false)
+          api.getWorld(activeId).then((w) => {
+            if (groupModeGenRef.current !== gen) return
+            setWorldInfo({ laws: w.world.laws })
+          }).catch(console.error)
         } else {
           setIsGroupMode(false)
+          setIsWorldMode(false)
           setGroupAgents([])
           setIsQqGroup(false)
+          setWorldInfo(null)
         }
         lastGroupSyncRef.current = activeId
       }).catch(console.error)
@@ -81,10 +106,14 @@ export function useGroupChat() {
       // 群聊草稿态（activeId 为 null）：保持群聊模式与已选成员，等待首条消息
       lastGroupSyncRef.current = null
       setIsGroupMode(true)
+      setIsWorldMode(false)
+      setWorldInfo(null)
     } else {
       lastGroupSyncRef.current = null
       setIsGroupMode(false)
+      setIsWorldMode(false)
       setGroupAgents([])
+      setWorldInfo(null)
     }
   }, [activeId, draftType, conversations])
 
@@ -97,19 +126,48 @@ export function useGroupChat() {
     const knownType = conversations.find((c) => c.id === id)?.type
     if (knownType === 'group') {
       setIsGroupMode(true)
+      setIsWorldMode(false)
+    } else if (knownType === 'world') {
+      // 世界会话：群聊管线（isGroupMode 同 true）+ 世界模式。成员与世界信息
+      // 就地读出 —— 本函数结尾会把 lastGroupSyncRef 置位，效果层（站点 1）将
+      // 因此早退，不在这里拉就永远读不到。
+      setIsGroupMode(true)
+      setIsWorldMode(true)
+      api.getWorld(id).then((w) => {
+        setGroupAgents(w.agents)
+        setWorldInfo({ laws: w.world.laws })
+      }).catch(console.error)
     } else if (knownType === 'direct') {
       setIsGroupMode(false)
+      setIsWorldMode(false)
       setGroupAgents([])
+      setWorldInfo(null)
     }
     const res = await selectInnerConversation(id)
     if (!res) return // 内层世代守卫已拦截（乱序 / 加载失败）
-    if ((res.conversation as Conversation).type === 'group') {
+    const convType = (res.conversation as Conversation).type
+    if (convType === 'group') {
       setIsGroupMode(true)
+      setIsWorldMode(false)
       setGroupAgents(res.agents || [])
       setIsQqGroup((res as any).is_qq_group === true)
+    } else if (convType === 'world') {
+      // 内层 loadConversation 已拉过成员（服务端对 world 同样返回 agents），
+      // 不重复请求；世界信息若上面还没回来，这里兜底再拉一次。
+      setIsGroupMode(true)
+      setIsWorldMode(true)
+      setIsQqGroup(false)
+      if (knownType !== 'world') {
+        api.getWorld(id).then((w) => {
+          setGroupAgents(w.agents)
+          setWorldInfo({ laws: w.world.laws })
+        }).catch(console.error)
+      }
     } else {
       setIsGroupMode(false)
+      setIsWorldMode(false)
       setGroupAgents([])
+      setWorldInfo(null)
       setIsQqGroup(false)
     }
     lastGroupSyncRef.current = id
@@ -210,10 +268,22 @@ export function useGroupChat() {
     return () => window.removeEventListener('realtime:group_members', onGroupMembers)
   }, [activeId, refreshGroupAgents])
 
+  // 世界法则保存：PATCH /api/worlds/:id —— 世界唯一的可变项。
+  // 抛错由调用方（LawsEditor）展示；成功后就地更新 worldInfo，避免整轮重拉。
+  const saveWorldLaws = useCallback(async (laws: string) => {
+    if (!activeId) return
+    const res = await api.updateWorldLaws(activeId, laws)
+    if (res.world) {
+      setWorldInfo((prev) => (prev ? { ...prev, laws: res.world.laws } : prev))
+    }
+  }, [activeId])
+
   return {
     ...chat,
     groupAgents,
     isGroupMode,
+    isWorldMode,
+    worldInfo,
     isQqGroup,
     createGroupConversation,
     addAgentToGroup,
@@ -221,5 +291,6 @@ export function useGroupChat() {
     sendGroupMessage,
     forceComplianceRetryGroup,
     refreshGroupAgents,
+    saveWorldLaws,
   }
 }

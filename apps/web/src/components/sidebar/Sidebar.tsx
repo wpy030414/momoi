@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
 import { MarqueeText } from '../ui/MarqueeText'
-import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen, Brain, Bell, BellOff } from 'lucide-react'
+import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen, Brain, Bell, BellOff, Map, Scale } from 'lucide-react'
 import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation } from '@momoi/shared/types'
@@ -20,6 +20,7 @@ interface SidebarProps {
   onExport: (id: string) => void
   onMerge?: (convId: string) => void
   onManageGroupAgents?: (convId: string) => void
+  onEditWorldLaws?: (convId: string) => void
   onContinueOnIm?: (convId: string, agentId: string) => void
   appName: string
   currentUser: string
@@ -54,7 +55,7 @@ interface MenuState {
 
 // ConversationTitle is now MarqueeText from ../ui/MarqueeText
 
-export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle, unreadCounts }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onEditWorldLaws, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle, unreadCounts }: SidebarProps) {
   const LANGUAGE_OPTIONS = ['zh-CN', 'en', 'ja'] as const
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -218,7 +219,9 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
             >
               {/* IM 绑定指示灯：相对图标容器定位，正下方居中 */}
               <span className="relative flex-shrink-0">
-                {(conv as any).type === 'group' ? (
+                {conv.type === 'world' ? (
+                  <Map className="h-4 w-4" />
+                ) : conv.type === 'group' ? (
                   <MessagesSquare className="h-4 w-4" />
                 ) : (
                   <MessageSquare className="h-4 w-4" />
@@ -290,6 +293,15 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
             left: Math.max(8, menu.anchorRect.right - 160),
           }}
         >
+          {(conversations.find((c) => c.id === menu.convId))?.type === 'world' && onEditWorldLaws && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+              onClick={() => { onEditWorldLaws(menu.convId); closeMenu() }}
+            >
+              <Scale className="h-3.5 w-3.5" />
+              {t('workflow.editLaws')}
+            </button>
+          )}
           {(conversations.find((c) => c.id === menu.convId) as any)?.type === 'direct' && onContinueOnIm && (
             <button
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"

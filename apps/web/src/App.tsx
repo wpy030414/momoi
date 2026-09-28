@@ -6,6 +6,8 @@ import { useAdminPanel } from './hooks/useAdminPanel'
 import { useDocsPanel } from './hooks/useDocsPanel'
 import { useMemoryPanel } from './hooks/useMemoryPanel'
 import { Sidebar } from './components/sidebar/Sidebar'
+import { NewWorkflowDialog, type WorldDraft } from './components/sidebar/NewWorkflowDialog'
+import { LawsEditor } from './components/sidebar/LawsEditor'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
@@ -111,6 +113,9 @@ export function App() {
   const [groupManageOpen, setGroupManageOpen] = useState(false)
   const [groupManageConvId, setGroupManageConvId] = useState<string | null>(null)
   const [infiniteMode, setInfiniteMode] = useState(false)
+  /** 世界法则编辑器：isWorldMode 时顶栏法则按钮打开 */
+  const [lawsEditorOpen, setLawsEditorOpen] = useState(false)
+  const [savingLaws, setSavingLaws] = useState(false)
 
   // Delete confirmation
   const [deleteConvId, setDeleteConvId] = useState<string | null>(null)
@@ -548,6 +553,26 @@ export function App() {
   // 整树卸载 → 白屏，需手动刷新恢复。
   // Stable callbacks for Sidebar (prevent inline arrow re-creation on every render)
   const handleNewGroup = useCallback(() => setGroupDialogOpen(true), [])
+  /** 世界模拟确认：对话框提交 → 创生世界 → 停留在新会话视图（侧边栏不自动收回） */
+  const handleConfirmWorld = useCallback(async (agentIds: string[], draft: WorldDraft) => {
+    const { conversation } = await api.createWorld(draft.laws, agentIds)
+    await chat.refreshConversations()
+    await chat.selectConversation(conversation.id)
+  }, [chat.refreshConversations, chat.selectConversation])
+  /** 世界法则编辑：顶栏法则按钮与 ChatPanel 法则入口共用（防内联箭头每渲染重建） */
+  const handleOpenLawsEditor = useCallback(() => setLawsEditorOpen(true), [])
+  /** 世界法则保存： LawsEditor 提交 → PATCH /api/worlds/:id */
+  const handleSaveLaws = useCallback(async (laws: string) => {
+    setSavingLaws(true)
+    try {
+      await chat.saveWorldLaws(laws)
+      toast({ title: t('workflow.saved'), variant: 'info' })
+    } catch (err) {
+      toast({ title: t('workflow.lawsFailed', { error: (err as Error).message }), variant: 'info' })
+    } finally {
+      setSavingLaws(false)
+    }
+  }, [chat.saveWorldLaws, t, toast])
   const handleChangePin = useCallback(() => setChangePinOpen(true), [])
   const handleChangeUsername = useCallback(() => setChangeUsernameOpen(true), [])
   const handleLinkAccount = useCallback(() => setLinkedAccountsOpen(true), [])
@@ -619,6 +644,7 @@ export function App() {
             onMerge={handleMergeConversation}
             onExport={chat.exportConversation}
             onManageGroupAgents={handleManageGroupAgents}
+            onEditWorldLaws={handleOpenLawsEditor}
             onContinueOnIm={allowImConversations ? handleContinueOnIm : undefined}
             appName={appName}
             currentUser={currentUser}
@@ -708,6 +734,7 @@ export function App() {
               onAgentChange={setSelectedAgentId}
               isGroup={chat.isGroupMode}
               isQqGroup={chat.isQqGroup}
+              isWorld={chat.isWorldMode}
               groupAgents={chat.groupAgents}
               onSendGroup={chat.sendGroupMessage}
               infiniteMode={infiniteMode}
@@ -728,6 +755,15 @@ export function App() {
         open={changePinOpen}
         onOpenChange={setChangePinOpen}
         username={currentUser}
+      />
+
+      {/* 世界法则编辑器：isWorldMode 时顶栏法则按钮打开 */}
+      <LawsEditor
+        open={lawsEditorOpen}
+        onOpenChange={setLawsEditorOpen}
+        laws={chat.worldInfo?.laws ?? ''}
+        saving={savingLaws}
+        onSave={handleSaveLaws}
       />
 
       {/* Change Username Dialog */}
@@ -771,71 +807,21 @@ export function App() {
         />
       </Suspense>
 
-      {/* Group Chat Agent Selection Dialog */}
-      {groupDialogOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card rounded-xl border shadow-lg p-6 w-full max-w-sm mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">{t('chat.selectAgents')}</h3>
-              <button onClick={() => { setGroupDialogOpen(false); setSelectedGroupAgents([]) }} className="hover:bg-muted rounded-md p-1">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="text-sm text-muted-foreground mb-4">{t('chat.minAgentsRequired')}</p>
-            <div className="space-y-2 mb-6 max-h-[60vh] overflow-y-auto">
-              {agents.map((agent) => {
-                const isSelected = selectedGroupAgents.includes(agent.id)
-                return (
-                  <button
-                    key={agent.id}
-                    onClick={() => {
-                      setSelectedGroupAgents((prev) =>
-                        isSelected ? prev.filter((id) => id !== agent.id) : [...prev, agent.id],
-                      )
-                    }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
-                      isSelected ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
-                    }`}
-                  >
-                    {agent.avatar ? (
-                      <img src={agent.avatar} alt={agent.name} className="w-8 h-8 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium">
-                        {agent.name.charAt(0)}
-                      </div>
-                    )}
-                    <span className="flex-1 text-left text-sm font-medium">{agent.name}</span>
-                    {isSelected && <Check className="h-4 w-4 text-primary" />}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => { setGroupDialogOpen(false); setSelectedGroupAgents([]) }}
-              >
-                {t('common.cancel')}
-              </Button>
-              <Button
-                className="flex-1"
-                disabled={selectedGroupAgents.length < 2}
-                onClick={async () => {
-                  if (selectedGroupAgents.length >= 2) {
-                    setGroupDialogOpen(false)
-                    await chat.createGroupConversation(selectedGroupAgents)
-                    setSelectedGroupAgents([])
-                    // 侧边栏不自动收回：选好 Agent 后停留在群聊新会话视图
-                  }
-                }}
-              >
-                {t('common.confirm')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 新工作流：模式选择（群组会话 / 世界模拟）+ Agent 选择 + 世界描述/法则 */}
+      <NewWorkflowDialog
+        open={groupDialogOpen}
+        onOpenChange={(open) => {
+          setGroupDialogOpen(open)
+          if (!open) setSelectedGroupAgents([])
+        }}
+        agents={agents}
+        agentsLoading={agentsLoading}
+        onConfirmGroup={async (agentIds) => {
+          // 侧边栏不自动收回：选好 Agent 后停留在群聊新会话视图
+          await chat.createGroupConversation(agentIds)
+        }}
+        onConfirmWorld={handleConfirmWorld}
+      />
 
       {/* Group Member Management Dialog (same UI as new group agent selection) */}
       {groupManageOpen && groupManageConvId && (

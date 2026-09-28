@@ -32,6 +32,8 @@ interface InputBarProps {
   noAgents?: boolean
   /** Available agents for @mention autocomplete (group chat members only; undefined hides the menu) */
   agents?: AgentBrief[]
+  /** 世界模拟：存在时输入框提示词换成「来自世界的变动」占位（替代普通发言占位） */
+  isWorld?: boolean
   /** Current conversation id; null when no active conversation */
   conversationId?: string | null
   /** Called when upload needs a conversation but none exists yet */
@@ -54,7 +56,7 @@ function detectMention(text: string, cursorPos: number): { query: string; start:
   return null
 }
 
-export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, supportInfiniteMode, noAgents, agents, conversationId, onEnsureConversation }: InputBarProps) {
+export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -312,7 +314,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onInput={handleInput}
-          placeholder={noAgents ? t('settings.agentRequired') : t('chat.inputPlaceholder')}
+          placeholder={noAgents ? t('settings.agentRequired') : isWorld ? t('chat.worldChangePlaceholder') : t('chat.inputPlaceholder')}
           disabled={isInputDisabled}
           rows={3}
           className="w-full resize-none bg-transparent text-sm focus:outline-none disabled:opacity-50 max-h-[200px] leading-relaxed py-1"

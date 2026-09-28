@@ -261,6 +261,12 @@ export const api = {
   addGroupAgent: (convId: string, agentId: string) => request<{ success: boolean }>(`/api/group/${convId}/agents`, { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
   removeGroupAgent: (convId: string, agentId: string) => request<{ success: boolean }>(`/api/group/${convId}/agents/${agentId}`, { method: 'DELETE' }),
 
+  // World Simulation（世界模拟 —— 纯文本群聊的变体）
+  createWorld: (laws: string, agentIds: string[]) =>
+    request<{ conversation: import('@momoi/shared/types').Conversation; world: import('@momoi/shared/types').WorldInfo }>('/api/worlds', { method: 'POST', body: JSON.stringify({ laws, agent_ids: agentIds }) }),
+  getWorld: (convId: string) => request<{ world: import('@momoi/shared/types').WorldInfo; agents: Array<{ id: string; name: string; avatar: string }> }>(`/api/worlds/${convId}`),
+  updateWorldLaws: (convId: string, laws: string) => request<{ world: import('@momoi/shared/types').WorldInfo }>(`/api/worlds/${convId}`, { method: 'PATCH', body: JSON.stringify({ laws }) }),
+
   // Infinite Mode
   setInfiniteMode: (conversationId: string, enabled: boolean) => request<{ success: boolean; enabled: boolean }>('/api/chat/infinite-mode', { method: 'POST', body: JSON.stringify({ conversation_id: conversationId, enabled }) }),
 

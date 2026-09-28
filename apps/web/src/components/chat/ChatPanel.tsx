@@ -49,6 +49,8 @@ interface ChatPanelProps {
   isGroup?: boolean
   /** QQ 群聊标记（服务端判定，替代 client 端 agent 数量猜测） */
   isQqGroup?: boolean
+  /** 世界模拟模式：世界会话复用群聊管线（isGroup 同为 true），差异只在用户消息语义与展示 */
+  isWorld?: boolean
   groupAgents?: AgentBrief[]
   onSendGroup?: (text: string, thinkingMode: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>, infiniteMode?: boolean) => void
   /** Infinite mode */
@@ -74,7 +76,7 @@ const NOOP = () => {}
 export function ChatPanel({
   messages, loading, onSend, onCancel, onRevert, onForceRetry, onForceRetryGroup, backgroundImage, supportAttachments, supportInfiniteMode,
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
-  isGroup, isQqGroup, groupAgents, onSendGroup,
+  isGroup, isQqGroup, isWorld, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
   pendingQuestion, onSendAnswer, onSkipAnswer,
   recommendedQuestions,
@@ -211,7 +213,9 @@ export function ChatPanel({
           <div className="flex items-center justify-center h-full">
             <div className="w-full max-w-3xl">
               <div className="mb-4 px-4">
-                {isGroup ? (
+                {isWorld ? (
+                  <h2 className="text-xl font-semibold">{t('workflow.worldTitle')}</h2>
+                ) : isGroup ? (
                   <h2 className="text-xl font-semibold">{t('chat.groupGreeting')}</h2>
                 ) : agentsLoading ? (
                   <Loading className="py-6" />
@@ -284,6 +288,7 @@ export function ChatPanel({
             agentVoiceMap={agentVoiceMap}
             verbose={verbose}
             isQqGroup={isQqGroupChat}
+            isWorld={isWorld}
           />
         )}
       </div>
@@ -329,6 +334,7 @@ export function ChatPanel({
             supportInfiniteMode={supportInfiniteMode}
             noAgents={noAgents}
             agents={isGroup ? groupAgents : undefined}
+            isWorld={isWorld}
             conversationId={conversationId}
             onEnsureConversation={onEnsureConversation}
           />

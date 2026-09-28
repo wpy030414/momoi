@@ -43,9 +43,11 @@ interface MessageBubbleProps {
   activeAgentId?: string
   /** Show thinking blocks (controlled by parent verbose toggle) */
   verbose?: boolean
+  /** 世界模拟：user 消息是「来自世界的变动」而非用户发言 —— 气泡换世界变动样式 */
+  isWorld?: boolean
 }
 
-export const MessageBubble = React.memo(function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, onForceRetry, agentAvatar, agentName, voiceEnabled, activeAgentId, verbose }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, onForceRetry, agentAvatar, agentName, voiceEnabled, activeAgentId, verbose, isWorld }: MessageBubbleProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const [confirmingRevert, setConfirmingRevert] = useState(false)
@@ -113,7 +115,12 @@ export const MessageBubble = React.memo(function MessageBubble({ message, onSugg
 
           {/* Message content — user messages only (assistant text is rendered via trace or legacy path above) */}
           {isUser && (
-            <div className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-primary/75 text-primary-foreground text-left`}>
+            <div className="mb-1">
+              <div
+                className={`inline-block max-w-full rounded-lg px-4 py-2.5 text-left ${
+                  isWorld ? 'border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-100' : 'bg-primary/75 text-primary-foreground'
+                }`}
+              >
               {message.streaming && !message.content ? (
                 <div className="flex gap-1">
                   <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -123,6 +130,7 @@ export const MessageBubble = React.memo(function MessageBubble({ message, onSugg
               ) : (
                 <MessageContent content={message.content} streaming={message.streaming} isUser={isUser} />
               )}
+              </div>
             </div>
           )}
 

@@ -28,6 +28,9 @@ interface GroupOrchestratorOptions {
   language?: string
   /** 强制合规重试：透传给每个 Agent 的推理循环（原始提问预搬迁至历史绕过审查） */
   forceCompliance?: boolean
+  /** 世界模拟上下文：存在时本轮是世界回合 —— 用户消息是「来自世界的变动」
+   *  而非用户发言，各 Agent 以世界中的存在身份回应（法则注入系统提示） */
+  world?: { laws: string }
   saveMessage: (
     agentId: string,
     agentName: string,
@@ -102,26 +105,29 @@ function toPlainText(content: ChatMessage['content']): string {
  * - 逐行截断：用户消息可能含附件解析正文（可达 MB 级）
  * - 跳过 tool/system 行：工具输出是原始转储，不应进入裁决
  * - 超总量时保留最近部分
+ * - 世界回合：用户消息以「世界变动」标注 —— 裁决视角与世界规则一致
  */
 function formatDecisionContext(
   history: ChatMessage[],
   userMessage: string | ContentPart[],
   agentNameById: Map<string, string>,
+  worldMode = false,
 ): string {
   const lines: string[] = []
+  const userLabel = worldMode ? '【世界变动】' : '用户: '
   for (const msg of history.slice(-CONTEXT_MAX_MESSAGES)) {
     if (msg.role === 'tool' || msg.role === 'system') continue
     const text = toPlainText(msg.content).slice(0, CONTEXT_MAX_LINE_CHARS)
     if (!text.trim()) continue
     if (msg.role === 'user') {
-      lines.push(`用户: ${text}`)
+      lines.push(`${userLabel}${text}`)
     } else {
       const name = msg.agent_id ? agentNameById.get(msg.agent_id) || msg.agent_id : '助手'
       lines.push(`[${name}]: ${text}`)
     }
   }
   const current = toPlainText(userMessage).slice(0, CONTEXT_MAX_USER_CHARS)
-  if (current.trim()) lines.push(`用户: ${current}`)
+  if (current.trim()) lines.push(`${userLabel}${current}`)
 
   const joined = lines.join('\n')
   return joined.length > CONTEXT_MAX_TOTAL_CHARS
@@ -179,7 +185,7 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
             config,
             model,
             {
-              conversationContext: formatDecisionContext(history, userMessage, agentNameById),
+              conversationContext: formatDecisionContext(history, userMessage, agentNameById, options.world !== undefined),
               memberNames: Array.from(agentNameById.values()),
             },
             neutralAgent?.system_prompt?.trim() || undefined,
@@ -344,6 +350,7 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         language,
         lastMessageAt,
         forceCompliance: options.forceCompliance === true,
+        world: options.world,
       })
 
       repliedAgents.add(agentId)

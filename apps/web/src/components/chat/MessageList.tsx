@@ -38,6 +38,8 @@ interface MessageListProps {
   verbose?: boolean
   /** QQ group: single-agent group where users are real humans → show sender labels */
   isQqGroup?: boolean
+  /** 世界模拟：user 消息以「来自世界的变动」气泡展示（替代普通用户气泡样式） */
+  isWorld?: boolean
 }
 
 /** Parse `[senderName]: rest` from user messages in QQ groups. Returns null if no match. */
@@ -47,7 +49,7 @@ function parseQqSender(content: string): { senderName: string; cleanContent: str
   return { senderName: m[1], cleanContent: m[2] }
 }
 
-export const MessageList = React.memo(function MessageList({ messages, onSuggestion, onRevert, onForceRetry, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose, isQqGroup }: MessageListProps) {
+export const MessageList = React.memo(function MessageList({ messages, onSuggestion, onRevert, onForceRetry, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose, isQqGroup, isWorld }: MessageListProps) {
   // Only the last assistant message shows its suggestion chips — older ones
   // were for a past turn and are meaningless as "what to ask next".
   const lastAssistantIdx = [...messages]
@@ -101,7 +103,7 @@ export const MessageList = React.memo(function MessageList({ messages, onSuggest
         msgAgentId,
         showSuggestions: idx === lastAssistantIdxFromEnd,
       }
-    }), [messages, isQqGroup, agents, agentAvatar, agentVoiceEnabled, agentVoiceMap, fallbackAgentName, lastAssistantIdxFromEnd])
+    }), [messages, isQqGroup, isWorld, agents, agentAvatar, agentVoiceEnabled, agentVoiceMap, fallbackAgentName, lastAssistantIdxFromEnd])
 
   return (
     <div className="space-y-2 max-w-3xl mx-auto">
@@ -118,6 +120,7 @@ export const MessageList = React.memo(function MessageList({ messages, onSuggest
           voiceEnabled={msgVoiceEnabled}
           activeAgentId={msgAgentId}
           verbose={verbose}
+          isWorld={isWorld}
         />
       ))}
     </div>

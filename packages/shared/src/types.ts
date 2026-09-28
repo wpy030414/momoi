@@ -16,7 +16,7 @@ export interface Conversation {
   id: string
   title: string
   agent_id: string
-  type: 'direct' | 'group'
+  type: 'direct' | 'group' | 'world'
   agent_count?: number  // 群组内 Agent 数量（不含中立 Agent，不含用户）
   wechat_bound?: number  // 1 if this conversation is bound to WeChat
   qq_bound?: number      // 1 if this conversation is bound to QQ (C2C or group)
@@ -24,6 +24,15 @@ export interface Conversation {
   updated_at: number
   last_read_at?: number
   unread_count?: number
+}
+
+/** 世界模拟的侧表信息（worlds 行）。世界模拟是纯文本群聊的变体：
+ *  只有「法则」（可随时修改）一个文本属性。 */
+export interface WorldInfo {
+  conversation_id: string
+  laws: string         // 世界法则（可随时修改，每轮注入系统提示词）
+  created_at: number
+  updated_at: number
 }
 
 export interface Message {

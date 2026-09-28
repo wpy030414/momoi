@@ -43,4 +43,5 @@ export const {
   qqGroupConversations,
   userAgentMemories,
   pushSubscriptions,
+  worlds,
 } = result.schema

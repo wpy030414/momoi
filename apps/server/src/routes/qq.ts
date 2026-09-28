@@ -82,6 +82,9 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
     if (!conv) {
       return c.json({ error: 'Conversation not found' }, 404)
     }
+    if (conv.type === 'group' || conv.type === 'world') {
+      return c.json({ error: 'Group and world conversations cannot be bound to QQ' }, 400)
+    }
   }
 
   const appId = (body.app_id || '').trim()

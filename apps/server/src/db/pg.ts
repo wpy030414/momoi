@@ -160,6 +160,13 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       created_at INTEGER NOT NULL,
       UNIQUE(user_id, device_id)
     );
+
+    CREATE TABLE IF NOT EXISTS worlds (
+      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+      laws TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `)
 
   const db = drizzlePg(pool, { schema }) as any

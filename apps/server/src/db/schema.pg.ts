@@ -136,3 +136,11 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
   // ADD CONSTRAINT uq_push_user_device UNIQUE (user_id, device_id)
   uniqueIndex('uq_push_user_device').on(t.user_id, t.device_id),
 ])
+
+// 世界模拟侧表：与 conversations 1:1。法则可随时修改。
+export const worlds = pgTable('worlds', {
+  conversation_id: text('conversation_id').primaryKey().references(() => conversations.id, { onDelete: 'cascade' }),
+  laws: text('laws').notNull().default(''),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+})

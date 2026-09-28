@@ -173,7 +173,7 @@ export function useChat() {
   /** 远程流（他设备）最近事件时间戳，TTL 内视为流进行中 */
   const remoteLastAtRef = useRef<Map<string, number>>(new Map())
   /** 会话类型缓存（direct / group），供远程流事件判组 */
-  const convTypesRef = useRef<Map<string, 'direct' | 'group'>>(new Map())
+  const convTypesRef = useRef<Map<string, 'direct' | 'group' | 'world'>>(new Map())
 
   useEffect(() => {
     conversationsRef.current = conversations
@@ -224,12 +224,12 @@ export function useChat() {
   }, [])
 
   /** 会话类型：草稿视为单聊；缓存 → 会话列表 → direct 兜底 */
-  const convTypeOf = useCallback((key: string): 'direct' | 'group' => {
+  const convTypeOf = useCallback((key: string): 'direct' | 'group' | 'world' => {
     if (isDraftKey(key)) return 'direct'
     const cached = convTypesRef.current.get(key)
     if (cached) return cached
     const conv = conversationsRef.current.find((c) => c.id === key)
-    return ((conv?.type as 'direct' | 'group') || 'direct')
+    return ((conv?.type as 'direct' | 'group' | 'world') || 'direct')
   }, [])
 
   /** 分区是否有活动流：本地流注册表中存在，或远程流 TTL 窗口内 */
@@ -369,7 +369,7 @@ export function useChat() {
       // 均不标记，避免后台拉取误清侧边栏红点。
       const res = await api.getConversation(id, true)
       if (loadGenRef.current !== gen) return null
-      const type = ((res.conversation as Conversation).type as 'direct' | 'group') || 'direct'
+      const type = ((res.conversation as Conversation).type as 'direct' | 'group' | 'world') || 'direct'
       convTypesRef.current.set(id, type)
       applySnapshot(id, res.messages.map(mapServerMessage))
       clearUnreadFor(id)
@@ -414,7 +414,7 @@ export function useChat() {
   const refetchConversation = useCallback(async (id: string) => {
     const res = await api.getConversation(id).catch(() => null)
     if (!res) return
-    const type = ((res.conversation as Conversation).type as 'direct' | 'group') || 'direct'
+    const type = ((res.conversation as Conversation).type as 'direct' | 'group' | 'world') || 'direct'
     convTypesRef.current.set(id, type)
     if (messagesByConvRef.current[id] !== undefined) {
       // conv_changed = 他端改动 DB（回退等）：DB 权威对账，绝不复活已删消息
@@ -492,7 +492,9 @@ export function useChat() {
             _force_compliance: _forceCompliance || undefined,
             thinking_mode: thinkingMode,
             attachments: attachments || undefined,
-            conversation_type: groupMode ? 'group' : undefined,
+            // 世界模拟走群聊编排 —— conversation_type 以会话真实类型为准（'world' 会话在
+            // 载入时已写入 convTypesRef），服务端据此注入「世界模拟」块而非群组规则块
+            conversation_type: groupMode ? (convTypeOf(streamKey) === 'world' ? 'world' : 'group') : undefined,
             agent_ids: groupMode && groupAgentIds ? groupAgentIds : undefined,
             infinite_mode: infiniteMode || undefined,
             language: i18n.language,

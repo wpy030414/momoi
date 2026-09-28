@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import path from 'path'
 import fs from 'fs'
-import { db, conversations, messages, groupConversationAgents } from '../db/index.js'
+import { db, conversations, messages, groupConversationAgents, worlds } from '../db/index.js'
 import { eq, and, count, sql, desc } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
@@ -100,7 +100,7 @@ chatRoute.post('/', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string }>()
+  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string }>()
   const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id } = body
   const requestedAgentId = body.agent_id
   // 本轮实际采用的 Agent：新建会话取请求 agent_id；已有单聊会话锚定到
@@ -183,7 +183,19 @@ chatRoute.post('/', async (c) => {
       // --- Create or get conversation ---
       let convId = conversation_id
       const isGroup = conversation_type === 'group'
-      const groupAgentIds = (isGroup && agent_ids && agent_ids.length > 0) ? agent_ids : []
+      // 世界模拟：纯文本群聊的变体 —— 编排、落库、SSE 全部复用群聊路径，
+      // 差异只有两处：成员以 DB 为准（worlds 侧表随会话创建），以及
+      // 用户消息在系统提示里被框架为「来自世界的变动」而非用户发言。
+      const isWorld = conversation_type === 'world'
+      /** 世界信息（法则）：isWorld 时由 DB 读出，传给编排器注入系统提示 */
+      let worldInfo: { laws: string } | undefined
+      let groupAgentIds = ((isGroup || isWorld) && agent_ids && agent_ids.length > 0) ? agent_ids : []
+
+      if (isWorld && !convId) {
+        // 世界会话必须经 POST /api/worlds 创建（那里会一并写入 worlds 行）
+        send({ type: 'error', message: 'World conversations must be created via POST /api/worlds' })
+        return
+      }
 
       if (!convId) {
         convId = randomUUID()
@@ -229,6 +241,26 @@ chatRoute.post('/', async (c) => {
             await db.update(conversations).set({ agent_id: agentId }).where(eq(conversations.id, convId)).run()
           }
         }
+        // 世界模拟：成员以 DB 为准（不信任请求携带的 agent_ids —— 客户端状态
+        // 可能滞后于群成员管理）。世界信息（描述 + 法则）随成员一并读出，
+        // 供编排器注入系统提示词。
+        if (isWorld) {
+          if (conv.type !== 'world') {
+            send({ type: 'error', message: 'Conversation is not a world' })
+            return
+          }
+          const memberRows = await db.select({ agent_id: groupConversationAgents.agent_id })
+            .from(groupConversationAgents)
+            .where(eq(groupConversationAgents.conversation_id, convId))
+            .orderBy(groupConversationAgents.sort_order)
+            .all()
+          groupAgentIds = memberRows.map((r: { agent_id: string }) => r.agent_id)
+          worldInfo = (await db.select().from(worlds).where(eq(worlds.conversation_id, convId)).get()) ?? undefined
+        }
+      }
+      if (isWorld && groupAgentIds.length === 0) {
+        send({ type: 'error', message: 'World has no members' })
+        return
       }
 
       // --- Save user message (skip on retry to avoid duplicates) ---
@@ -581,7 +613,7 @@ chatRoute.post('/', async (c) => {
       let currentPrompt: string | ContentPart[] = userMessage
 
       // First iteration always runs (even without infinite mode)
-      if (isGroup && groupAgentIds.length > 0) {
+      if ((isGroup || isWorld) && groupAgentIds.length > 0) {
         await orchestrateGroupChat({
           userMessage: currentPrompt,
           history: currentHistory,
@@ -593,6 +625,7 @@ chatRoute.post('/', async (c) => {
           agentIds: groupAgentIds,
           language,
           forceCompliance: _force_compliance === true,
+          world: worldInfo,
           saveMessage: async (agentId, agentName, reply, thinking, suggestions, artifacts, trace) => {
             await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId, trace)
           },
@@ -635,7 +668,7 @@ chatRoute.post('/', async (c) => {
         currentHistory = await reloadHistory()
         currentPrompt = followUp
 
-        if (isGroup && groupAgentIds.length > 0) {
+        if ((isGroup || isWorld) && groupAgentIds.length > 0) {
           await orchestrateGroupChat({
             userMessage: currentPrompt,
             history: currentHistory,
@@ -647,6 +680,7 @@ chatRoute.post('/', async (c) => {
             agentIds: groupAgentIds,
             language,
             forceCompliance: false,
+            world: worldInfo,
             saveMessage: async (agentId, agentName, reply, thinking, suggestions, artifacts, trace) => {
               await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId, trace)
             },
