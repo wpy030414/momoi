@@ -416,7 +416,7 @@ prompts/
 运行时入口（管理员鉴权）：GET /api/admin/prompts（目录）· GET /api/admin/prompts/fragment（单片段）
                         · POST /api/admin/prompts/preview（组装预览 + 逐段来源）
 
-文本锁定：prompts/__tests__/golden/prompts.golden.json 保存全部配方的最终文本（由迁移前
+文本锁定：test/golden/prompts.golden.json 保存全部配方的最终文本（由迁移前
         基线生成，经旧实现逐字节比对）；提示词变更必须在快照中显形（UPDATE_PROMPTS_GOLDEN=1）。
 ```
 

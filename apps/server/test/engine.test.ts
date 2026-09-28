@@ -3,8 +3,8 @@
 // ============================================================
 
 import { describe, it, expect } from 'vitest'
-import { PromptEngine } from '../engine.js'
-import type { PromptFragment } from '../types.js'
+import { PromptEngine } from '../src/prompts/engine.js'
+import type { PromptFragment } from '../src/prompts/types.js'
 
 function frag(over: Partial<PromptFragment<any>> & { id: string }): PromptFragment<any> {
   return {

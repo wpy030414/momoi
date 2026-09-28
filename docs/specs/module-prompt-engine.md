@@ -29,7 +29,7 @@
 | `apps/server/src/prompts/fragments/retry.ts` | 敏感词规避链路的注入消息文本 |
 | `apps/server/src/prompts/fragments/tools.ts` | 工具描述目录（`tool/<name>`） |
 | `apps/server/src/routes/prompts.ts` | 管理端目录与预览 API |
-| `apps/server/src/prompts/__tests__/**` | 引擎单测 + 黄金快照（全文锁定） |
+| `apps/server/test/**` | 引擎单测 + 黄金快照（全文锁定） |
 
 ## 片段契约
 

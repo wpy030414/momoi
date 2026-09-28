@@ -85,7 +85,7 @@ const MAX_EMPTY_RETRIES = 3
 //   · QQ 群聊下不注入群组规则（单 Agent 面对多真人，避免把人类成员误认成 AI 同伴）
 //   · 主角/配角、无限模式、环境信息、技能摘要（chat/speaking-role-*、chat/infinite-mode、
 //     chat/environment、chat/skills）
-// 文本等价性由 prompts/__tests__/golden.test.ts（黄金快照）锁定。
+// 文本等价性由 test/golden.test.ts（黄金快照）锁定。
 
 // ---- JSON Schema 属性 → TypeBox schema ----
 function schemaPropertyToTypeBox(prop: import('@momoi/shared/types').ToolSchemaProperty): TSchema {

@@ -1,0 +1,5 @@
+steps:
+  - name: Build
+    run: pnpm build
+  - name: Run
+    run: pm2 restart momoi

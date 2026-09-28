@@ -29,8 +29,8 @@ import {
   getRetryPlaceholder,
   resolveToolDescription,
   type ChatPromptContext,
-} from '../index.js'
-import { getToolDefinitions } from '../../tools/registry.js'
+} from '../src/prompts/index.js'
+import { getToolDefinitions } from '../src/tools/registry.js'
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const GOLDEN_PATH = path.join(DIR, 'golden', 'prompts.golden.json')

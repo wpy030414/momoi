@@ -1195,7 +1195,7 @@
 3. **提示词文本只应存在于 `prompts/fragments/**`**；装配代码（pi-adapter / neutral-agent / 通知模块）不再内联指令文本，原设计注释随文本一并迁移。
 4. **工具描述纳入目录**（`tool/<name>`）：注入路径不变（工具 schema 的 description），解析经 `resolveToolDescription`，可被 `override()` 覆盖；MCP 工具描述来自远端，不进入目录。
 5. **段间空行规范化**：旧实现中 `\n` 与 `\n\n` 混用（同一份提示词里两种分隔并存），引擎统一为 `\n\n`。迁移时以「迁移前基线」逐字节比对确认：去掉换行后**内容完全一致**，唯一差异是段间空行。
-6. **变更留痕**：黄金快照（`prompts/__tests__/golden/prompts.golden.json`）锁定全部配方的最终文本；提示词改动必须在快照中显形（`UPDATE_PROMPTS_GOLDEN=1` 重新生成）。测试框架选定 vitest（`pnpm test`）。
+6. **变更留痕**：黄金快照（`test/golden/prompts.golden.json`）锁定全部配方的最终文本；提示词改动必须在快照中显形（`UPDATE_PROMPTS_GOLDEN=1` 重新生成）。测试框架选定 vitest（`pnpm test`）。
 
 **原因**：
 

@@ -3,8 +3,8 @@
 // ============================================================
 
 import { describe, it, expect } from 'vitest'
-import { normalizePreviewContext } from '../preview.js'
-import { promptsRoute } from '../../routes/prompts.js'
+import { normalizePreviewContext } from '../src/prompts/preview.js'
+import { promptsRoute } from '../src/routes/prompts.js'
 
 describe('预览上下文归化（白名单）', () => {
   it('chat.system：合法键保留，非法键与非法类型丢弃', () => {
