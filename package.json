@@ -9,6 +9,7 @@
     "build": "pnpm --filter @momoi/server build && pnpm --filter @momoi/web build",
     "start": "pnpm --filter @momoi/server start",
     "start:standalone": "pnpm --filter @momoi/server start:standalone",
+    "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
