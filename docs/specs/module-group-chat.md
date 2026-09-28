@@ -167,7 +167,7 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
 
 ## 系统提示词（群组规则）
 
-`buildSystemPrompt`（`pi-adapter.ts`）在 `isGroup=true` 时追加以下规则：
+`chat/group-rules` 片段（`chat.system` 配方，`prompts/fragments/chat.ts`）在 `isGroup=true`（且非 QQ 群聊、非世界模拟）时追加以下规则：
 
 ```
 ## 群组对话规则
@@ -237,7 +237,7 @@ const infiniteState = new Map<string, { enabled: boolean; messageCount: number }
 
 ### 无限演算模式下的系统提示词
 
-`buildSystemPrompt` 在 `infiniteMode=true` 时：
+`chat/infinite-mode` 片段在 `infiniteMode=true` 时：
 - 不注入 suggestions 相关指令（普通 Agent 的提示词已彻底不含建议生成要求，任何模式下均由中立 Agent 单独负责）
 - 追加对话规则：自然回复、允许括号动作描述、保持流畅
 

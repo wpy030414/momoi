@@ -100,7 +100,7 @@
   → 解析附件
   → runPiAgentLoop()
     → 加载跨会话用户记忆（最近 30 条；中立 Agent / 身份未知 / QQ 群聊时跳过）
-    → buildSystemPrompt()（注入 Agent 提示词 + 用户记忆 + 跨会话记忆规则 + 技能摘要 + 硬性规则）
+    → buildChatSystemPrompt()（提示词规则引擎组装：人设 + 用户记忆 + 记忆规则 + 场景块 + 环境信息 + 技能摘要）
     → createToolAdapter()（12 个 ToolModule → Pi AgentTool；中立 Agent / QQ 群聊剔除 save_memory）
     → createStreamFn()（provider.ts → Pi StreamFn）
     → runAgentLoop()（Pi 原生循环，并行工具执行）
@@ -291,6 +291,7 @@ TTS 配置（存储在 settings 表）：
 ```
 routes/chat.ts
   ├── ai/pi-adapter.ts（Pi Agent Core 适配层）
+  │     ├── prompts/（提示词规则引擎 —— 片段注册表 + 分层组装；全部提示词文本所在）
   │     ├── @earendil-works/pi-agent-core（runAgentLoop）
   │     ├── @earendil-works/pi-ai（createAssistantMessageEventStream）
   │     ├── @sinclair/typebox（工具参数 schema）
@@ -320,6 +321,7 @@ routes/conversations.ts
 routes/admin.ts
   ├── auth.ts（JWT 认证）
   ├── config.ts（配置 + Agent CRUD + MCP Server CRUD + TTS 配置）
+  ├── prompts/（提示词规则引擎，见 routes/prompts.ts —— 目录 / 单片段 / 预览）
   └── skills/loader.ts（技能注册表）
 
 routes/app.ts → config.ts
@@ -388,6 +390,34 @@ qq/chat.ts（QQ 消息→AI 桥接 + 流式回发）
 
 realtime.ts（进程内事件总线）
   └── 纯内存态（Map<userId, Set<RealtimeSubscriber>>），无外部依赖
+```
+
+## 提示词规则引擎
+
+提示词是服务端最核心的可变行为资产，统一由 `apps/server/src/prompts/` 托管（完整契约见 `docs/specs/module-prompt-engine.md`）：
+
+```
+prompts/
+  types.ts      片段（规则）/ 配方（目标）/ 组装结果的类型契约
+  engine.ts     PromptEngine：注册表 + 条件过滤 + 分层排序 + 拼接 + 逐段溯源（纯内存，无 IO）
+  instance.ts   全局单例（独立模块以打断循环依赖）
+  registry.ts   内置片段的注册与配方定义（导入即生效）
+  preview.ts    管理端预览的上下文白名单归化
+  fragments/    全部提示词文本：core（兜底人设）/ chat（主对话）/ neutral（中立 Agent）
+                / notification（问候·推送）/ retry（重试消息）/ tools（工具描述目录）
+
+组装流水线：目标匹配 → when 过滤 → 层顺序·优先级排序 → 渲染归一化 → separator 拼接
+每个片段的贡献记录在 AssembledPart[]（id / layer / priority / source / content），供逐段溯源。
+
+内置配方：chat.system（主对话）、neutral.followup / neutral.suggestions / neutral.orchestration
+        （中立 Agent）、notification.greeting / notification.push（主动通知）、persona.fallback、
+        retry.message、tool.description（工具描述目录，按工具名单独渲染）
+
+运行时入口（管理员鉴权）：GET /api/admin/prompts（目录）· GET /api/admin/prompts/fragment（单片段）
+                        · POST /api/admin/prompts/preview（组装预览 + 逐段来源）
+
+文本锁定：prompts/__tests__/golden/prompts.golden.json 保存全部配方的最终文本（由迁移前
+        基线生成，经旧实现逐字节比对）；提示词变更必须在快照中显形（UPDATE_PROMPTS_GOLDEN=1）。
 ```
 
 ## 数据库 Schema

@@ -11,7 +11,7 @@
 | 文件 | 职责 |
 |---|---|
 | `apps/server/src/skills/loader.ts` | 加载技能文件 + 解析前置元数据（支持折叠/字面块标量）+ 注册表 |
-| `apps/server/src/ai/pi-adapter.ts` | `buildSystemPrompt()` 中注入技能摘要 |
+| `apps/server/src/prompts/fragments/chat.ts` | `chat/skills` 片段注入技能摘要（原 `pi-adapter.buildSystemPrompt`） |
 | `apps/server/src/tools/skill-tools.ts` | `load_skill` / `list_skill_files` 工具实现 |
 | `apps/server/src/routes/admin.ts` | 管理员上传/卸载技能 |
 
@@ -84,7 +84,7 @@ description: |
 
 ### 注入系统提示词（摘要模式）
 
-在 `pi-adapter.ts:buildSystemPrompt()` 中，**仅注入名称和描述**：
+在提示词规则引擎（`prompts/fragments/chat.ts` 的 `chat/skills` 片段）中，**仅注入名称和描述**：
 
 ```
 {agent.system_prompt}

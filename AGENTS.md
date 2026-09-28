@@ -55,6 +55,7 @@ pnpm monorepo：应用 (`apps/`) 与可复用包 (`packages/`)，纯 workspace �
 |---|---|
 | `apps/server/src/` | Hono 后端（入口：`index.ts`） |
 | `apps/server/src/ai/` | Pi Agent Core 适配层 + 群聊编排 + 中立 Agent + TTS |
+| `apps/server/src/prompts/` | 提示词规则引擎（全部提示词文本所在：片段 / 配方 / 分层组装） |
 | `apps/server/src/tools/` | 内置工具系统 + MCP 客户端 |
 | `apps/server/src/skills/` | 技能加载和注册 |
 | `apps/server/src/middleware/` | 用户 JWT 认证中间件 + IP 速率限制 |
@@ -74,6 +75,7 @@ pnpm monorepo：应用 (`apps/`) 与可复用包 (`packages/`)，纯 workspace �
 pnpm dev          # 同时运行 Vite（5173）+ Hono（11408），tsx watch 热重载
 pnpm build        # 先构建 server（tsup），再 web（Vite）——server 的 tsup --clean 会清掉旧的 client/
 pnpm start        # 运行生产构建（node apps/server/dist/index.js 从仓库根运行）
+pnpm test         # 运行各包测试（server：vitest —— 提示词规则引擎单测 + 黄金快照）
 ```
 
 ## 代码规范

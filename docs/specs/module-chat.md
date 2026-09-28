@@ -223,7 +223,7 @@ Voice 参数从 Agent 的 `voice_settings` JSON 中读取：`speakerId`（必选
 Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 Agent 循环框架。
 
 1. **Agent 选择**：`agent_id` 参数 → `getAgent()`；Agent 记录不存在（含已被后台删除）则回退到第一个非中立 Agent——避免残留 ID 把模型钉死在占位值 `gpt-4o` 上
-2. **系统提示词构建**（`buildSystemPrompt`）：
+2. **系统提示词构建**（提示词规则引擎的 `chat.system` 配方，片段见 `prompts/fragments/chat.ts`）：
    - 基础内容 = Agent 的 `system_prompt`
    - 若存在技能，追加 `## Available Skills` + 每个技能的名称和描述摘要
    - 思考模式关闭时追加 `/no_think` 指令

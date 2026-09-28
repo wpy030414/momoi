@@ -1181,3 +1181,40 @@
 - 弃用：`rehype-highlight`、`@hono/node-ws`（核实零导入）
 - 首次 typecheck：补 DOM lib + `@types/node` + `dotenv` devDep（web 侧），三个包全绿
 - 文档：README/AGENTS/ARCHITECTURE/DECISIONS 同步更新
+
+## D47：提示词规则引擎——片段化注册表 + 分层组装
+
+**日期**：2026-09-28
+
+**背景**：提示词分散在服务端各处的代码里——`pi-adapter.ts` 的 `buildSystemPrompt()` 约 180 行条件拼接、`neutral-agent.ts` 的 6 段提示词常量、`visit-greeting.ts` / `push-scheduler.ts` 的内联指令、12 个工具模块的描述文本；人设兜底串在 3 个文件里各写一遍。后果：任何提示词改动都要在代码里「考古」；无法集中检视「模型到底收到什么」；扩展（技能追加规则、按 Agent 定制）没有入口。
+
+**决策**：
+
+1. **引入 `apps/server/src/prompts/`**：片段（`PromptFragment` = 文本 + 条件 + 位置）注册进单一注册表；配方（`PromptTarget`）按层顺序组装。装配方只保留调用点。
+2. **组装语义**：目标匹配 → `when(ctx)` 过滤 → 层顺序/同层 priority 降序/注册顺序排序 → 渲染归一化（裁剪首尾空白、空产出丢弃）→ 按配方 separator 拼接（默认 `\n\n`）。
+3. **提示词文本只应存在于 `prompts/fragments/**`**；装配代码（pi-adapter / neutral-agent / 通知模块）不再内联指令文本，原设计注释随文本一并迁移。
+4. **工具描述纳入目录**（`tool/<name>`）：注入路径不变（工具 schema 的 description），解析经 `resolveToolDescription`，可被 `override()` 覆盖；MCP 工具描述来自远端，不进入目录。
+5. **段间空行规范化**：旧实现中 `\n` 与 `\n\n` 混用（同一份提示词里两种分隔并存），引擎统一为 `\n\n`。迁移时以「迁移前基线」逐字节比对确认：去掉换行后**内容完全一致**，唯一差异是段间空行。
+6. **变更留痕**：黄金快照（`prompts/__tests__/golden/prompts.golden.json`）锁定全部配方的最终文本；提示词改动必须在快照中显形（`UPDATE_PROMPTS_GOLDEN=1` 重新生成）。测试框架选定 vitest（`pnpm test`）。
+
+**原因**：
+
+- 片段函数即模板（`render: (ctx) => string`）：类型安全、可单测、无模板语法解析成本；插值只发生在有 `ctx` 的地方，条件与文本天然同处一室
+- 层（layer）+ 优先级（priority）把「为什么这段在这个位置」变成声明式数据；此前它散落在代码顺序与注释里（例如「写侧规则必须落在人设之后的行为规则区」）
+- 引擎纯内存、无 IO、无网络：可测试性与可推理性是扩展性的前提；单个片段 `when/render` 抛错只跳过自身并记日志，一条坏规则不能弄瘫整条提示词
+- 溯源（`AssembledPart[]`）让「这段文字从哪来」可回答，管理端预览直接消费
+
+**备选与权衡**：
+
+- ❌ 单一 `prompts.ts` 常量文件：文本收敛了，但条件仍在调用侧，扩展性不变
+- ❌ 模板引擎（mustache/handlebars 等依赖）：引入依赖换取插值语法，收益低于成本（模板即函数）
+- ❌ 提示词存 DB + 管理 UI 热改：自然的演进方向，但需要持久化、校验、回滚与鉴权设计——本版以引擎 API（register/override/disable/defineTarget）预留入口，持久化留待后续迭代
+- ⚠️ 段间空行规范化是**刻意的行为变更**（对模型语义中性）：换来的是「分隔符由配方统一定义」，片段作者不必再关心自己前面是谁
+
+**影响**：
+
+- 新增：`prompts/`（types / engine / instance / registry / index / preview / fragments×6）、`routes/prompts.ts`（管理端目录与预览）、`specs/module-prompt-engine.md`、vitest 接入
+- 迁移：`pi-adapter.ts`（-180 行，改为调用 `buildChatSystemPrompt`，工具描述经 `resolveToolDescription`）、`neutral-agent.ts`（提示词外迁，解析逻辑保留）、`visit-greeting.ts` / `push-scheduler.ts`（指令与兜底人设外迁，兜底链收敛为 `resolveAgentPersona` 单一入口）
+- 新增接口：`GET /api/admin/prompts`、`GET /api/admin/prompts/fragment?id=`、`POST /api/admin/prompts/preview`（均走管理员鉴权）
+- 测试：62 → 70 项（引擎单测 / 黄金快照 / 预览归化与路由）
+- 既有文档中 `buildSystemPrompt()` 的引用指向 `prompts/`（见 `specs/module-prompt-engine.md`）
