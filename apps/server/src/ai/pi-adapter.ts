@@ -691,6 +691,8 @@ interface SSEState {
   trace: TraceEntry[]
   emptyRetryCount: number
   needsRetry: boolean
+  /** 上游网络/连接错误——不做空回复重试，直接告知用户 */
+  upstreamError: boolean
 }
 
 function createEventEmitter(state: SSEState, conversationId: string): (event: AgentEvent) => Promise<void> {
@@ -814,6 +816,20 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
             .filter((c): c is TextContent => c.type === 'text')
             .map((c) => c.text)
             .join('')
+        }
+
+        // 上游网络/连接错误：AssistantMessage stopReason === 'error'
+        // 且 content 为空时，是 streamChatCompletion 抛出的连接层错误
+        // ——不做空回复重试，直接告知用户
+        const lastAssistantMsg = assistantMsgs.length > 0
+          ? assistantMsgs[assistantMsgs.length - 1] as AssistantMessage
+          : null
+        if (lastAssistantMsg?.stopReason === 'error'
+            && (!lastAssistantMsg.content || lastAssistantMsg.content.length === 0)
+            && !state.upstreamError) {
+          state.upstreamError = true
+          state.send({ type: 'error', message: '无法连接到上游，请联系网络管理员。' })
+          break
         }
 
         const { reply, suggestions } = parseSuggestions(replyText || state.fullText)
@@ -1112,6 +1128,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     toolCallCount: 0,
     trace: [],
     emptyRetryCount: 0,
+    upstreamError: false,
     needsRetry: false,
   }
 
@@ -1169,7 +1186,9 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
       )
     }
   } catch (err) {
-    send({ type: 'error', message: err instanceof Error ? err.message : 'Unknown error' })
+    if (!sseState.upstreamError) {
+      send({ type: 'error', message: err instanceof Error ? err.message : 'Unknown error' })
+    }
     return { reply: '', suggestions: [], thinking: sseState.fullThinking, agentId: resolvedAgentId, trace: sseState.trace.length > 0 ? sseState.trace : undefined }
   }
 
@@ -1177,7 +1196,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
   const { reply, suggestions } = parseSuggestions(sseState.fullText)
 
   return {
-    reply: reply || sseState.fullText || FABRICATED_ASSISTANT_REPLY,
+    reply: sseState.upstreamError ? '' : (reply || sseState.fullText || FABRICATED_ASSISTANT_REPLY),
     suggestions,
     thinking: sseState.fullThinking,
     artifacts: sseState.producedArtifacts.length > 0 ? sseState.producedArtifacts : undefined,
