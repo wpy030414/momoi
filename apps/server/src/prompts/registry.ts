@@ -21,7 +21,7 @@ import {
 } from './fragments/neutral.js'
 import { notificationFragments, GREETING_TARGET, PUSH_TARGET } from './fragments/notification.js'
 import { retryFragments } from './fragments/retry.js'
-import { syncToolDescriptions, TOOL_DESCRIPTION_TARGET } from './fragments/tools.js'
+import { TOOL_DESCRIPTION_TARGET } from './fragments/tools.js'
 
 // ---- 配方定义（层顺序 = 最终提示词中的先后位置） ----
 
@@ -87,7 +87,8 @@ promptEngine.registerAll([
   ...retryFragments,
 ])
 
-// 工具描述目录（幂等；不覆盖运行时 override）
-syncToolDescriptions()
+// 工具描述目录（tool.description）不在此处播种：prompts 库不依赖工具系统，
+// 由调用方按需注册 —— pi-adapter 经 resolveToolDescription(def) 逐个登记，
+// 管理端经 seedToolDescriptions(getAllTools()) 批量播种（见 routes/prompts.ts）。
 
 export { promptEngine }

@@ -116,7 +116,8 @@ memory → persona → rules → scene → environment → capabilities
 
 - **注入路径不变**：仍是工具定义的 `description` 字段；`resolveToolDescription(def)` 解析「实际使用哪段描述」。
 - **可覆盖**：`promptEngine.override('tool/read_file', { render: () => '…' })`。
-- **同步策略**：`syncToolDescriptions()` 幂等注册（已存在的不重复注册，避免抹掉覆盖）；MCP 工具来自远端、随连接变化，不进入目录（回退远程描述）。
+- **注册策略**：`resolveToolDescription(def)` / `ensureToolDescription(def)` 按需登记（幂等：已存在的条目——包括运行时覆盖——不重注册）；管理端由 `seedToolDescriptions(getAllTools())` 批量播种。
+- **分层约束（刻意）**：`prompts/` 库**不 import 工具系统**——描述源由调用方注入（pi-adapter 手里的 `ToolDefinition` 就够了），避免把 DB（sql.js）与文档解析库拖进任何引用 `prompts/index.js` 的地方。MCP 工具描述来自远端、随连接变化，不进入目录（回退远程描述）。
 
 ## 管理端接口
 

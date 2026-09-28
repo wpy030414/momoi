@@ -61,7 +61,8 @@ export {
 // ---- 工具描述目录 ----
 export {
   resolveToolDescription,
-  syncToolDescriptions,
+  ensureToolDescription,
+  seedToolDescriptions,
   toolDescriptionId,
   TOOL_DESCRIPTION_TARGET,
 } from './fragments/tools.js'

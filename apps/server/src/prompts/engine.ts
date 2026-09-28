@@ -39,6 +39,8 @@ interface Entry {
   /** 注册序号：稳定排序的最终兜底；覆盖注册不改变序号 */
   order: number
   disabled: boolean
+  /** 临时片段（随本次组装注入，不在注册表里）——来源默认标记为 runtime */
+  runtime?: boolean
 }
 
 const DEFAULT_SEPARATOR = '\n\n'
@@ -196,6 +198,7 @@ export class PromptEngine {
       fragment: f as PromptFragment<any>,
       order: this.seq + 1 + i,
       disabled: false,
+      runtime: true,
     }))
 
     const parts: AssembledPart[] = []
@@ -207,7 +210,7 @@ export class PromptEngine {
         layer: entry.fragment.layer,
         priority: entry.fragment.priority ?? 0,
         description: entry.fragment.description,
-        source: entry.fragment.source ?? (ephemeral.includes(entry) ? 'runtime' : 'builtin'),
+        source: entry.fragment.source ?? (entry.runtime ? 'runtime' : 'builtin'),
         content,
       })
     }

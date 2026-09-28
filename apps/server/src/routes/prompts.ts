@@ -12,7 +12,11 @@
 // ============================================================
 
 import { Hono } from 'hono'
-import { promptEngine, normalizePreviewContext } from '../prompts/index.js'
+import { promptEngine, normalizePreviewContext, seedToolDescriptions } from '../prompts/index.js'
+import { getAllTools } from '../ai/tools.js'
+
+// 工具描述目录播种：管理端要能列出/预览工具描述（幂等；服务端本就在启动期加载工具系统）
+seedToolDescriptions(getAllTools())
 
 export const promptsRoute = new Hono()
 

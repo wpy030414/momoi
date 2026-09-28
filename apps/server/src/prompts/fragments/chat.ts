@@ -61,7 +61,9 @@ export interface ChatPromptContext {
 
 /** 组装主对话系统提示词（唯一入口 —— pi-adapter 与各调试入口共用） */
 export function buildChatSystemPrompt(ctx: ChatPromptContext): string {
-  return promptEngine.assemble(CHAT_SYSTEM_TARGET, ctx).text
+  // 技能清单在此解析一次：when 与 render 共用同一份快照，避免双重枚举注册表
+  const skills = ctx.skills ?? snapshotSkills()
+  return promptEngine.assemble(CHAT_SYSTEM_TARGET, { ...ctx, skills }).text
 }
 
 export const chatFragments: PromptFragment<ChatPromptContext>[] = [
@@ -278,9 +280,9 @@ ${lastLine}`
     targets: CHAT_SYSTEM_TARGET,
     layer: 'capabilities',
     description: '可用技能摘要块（名称 + 描述，正文按需经 load_skill 加载）',
-    when: (ctx) => resolveSkills(ctx).length > 0,
+    when: (ctx) => (ctx.skills ?? snapshotSkills()).length > 0,
     render: (ctx) => {
-      const skills = resolveSkills(ctx)
+      const skills = ctx.skills ?? snapshotSkills()
       const header = `## 可用技能
 以下是已安装的技能摘要。技能库可能不完整：如果用户的请求没有与某个技能描述明显匹配，请直接如实告知用户当前技能库中是否有可用技能，不要强行加载技能试探。如需查看某个技能的完整内容，请调用 load_skill 工具。`
       const bullets = skills.map((s) => `- **${s.name}**: ${s.description}`).join('\n')
@@ -289,8 +291,7 @@ ${lastLine}`
   },
 ]
 
-/** 技能清单解析：显式注入优先（测试/预览用），否则读取技能注册表 */
-function resolveSkills(ctx: ChatPromptContext): Array<{ name: string; description: string }> {
-  if (ctx.skills) return ctx.skills
+/** 技能清单快照：读取技能注册表并映射为 {name, description} */
+function snapshotSkills(): Array<{ name: string; description: string }> {
   return skillRegistry.getAll().map((s) => ({ name: s.manifest.name, description: s.manifest.description }))
 }
