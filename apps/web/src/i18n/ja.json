@@ -81,6 +81,8 @@
     "delete": "削除",
     "deleteConfirm": "会話「{{name}}」を削除しますか？この操作は元に戻せません。",
     "groupMembers": "メンバー",
+    "worldMembers": "世界メンバー",
+    "worldMembersHint": "世界シミュレーションに参加するエージェントを選択",
     "continueOnIm": "IM で続ける",
     "mergeGroupChat": "グループチャットを統合",
     "mergeSelectTarget": "統合するグループチャットを選択。新しい会話が作成され、全メッセージが時系列で表示されます。",

@@ -644,6 +644,7 @@ export function App() {
             onMerge={handleMergeConversation}
             onExport={chat.exportConversation}
             onManageGroupAgents={handleManageGroupAgents}
+            onManageWorldMembers={handleManageGroupAgents}
             onEditWorldLaws={handleOpenLawsEditor}
             onContinueOnIm={allowImConversations ? handleContinueOnIm : undefined}
             appName={appName}
@@ -828,12 +829,22 @@ export function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-card rounded-xl border shadow-lg p-6 w-full max-w-sm mx-4">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">{t('sidebar.groupMembers')}</h3>
+              <h3 className="text-lg font-semibold">
+                {(() => {
+                  const conv = chat.conversations.find(c => c.id === groupManageConvId)
+                  return conv?.type === 'world' ? t('sidebar.worldMembers') : t('sidebar.groupMembers')
+                })()}
+              </h3>
               <button onClick={() => { setGroupManageOpen(false); setGroupManageConvId(null); setSelectedGroupAgents([]) }} className="hover:bg-muted rounded-md p-1">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <p className="text-sm text-muted-foreground mb-4">{t('chat.minAgentsRequired')}</p>
+            <p className="text-sm text-muted-foreground mb-4">
+              {(() => {
+                const conv = chat.conversations.find(c => c.id === groupManageConvId)
+                return conv?.type === 'world' ? t('sidebar.worldMembersHint') : t('chat.minAgentsRequired')
+              })()}
+            </p>
             <div className="space-y-2 mb-6 max-h-[60vh] overflow-y-auto">
               {agents.map((agent) => {
                 const isSelected = selectedGroupAgents.includes(agent.id)
@@ -872,9 +883,15 @@ export function App() {
               </Button>
               <Button
                 className="flex-1"
-                disabled={selectedGroupAgents.length < 2}
+                disabled={(() => {
+                  const conv = chat.conversations.find(c => c.id === groupManageConvId)
+                  const min = conv?.type === 'world' ? 1 : 2
+                  return selectedGroupAgents.length < min
+                })()}
                 onClick={async () => {
-                  if (selectedGroupAgents.length < 2) return
+                  const conv = chat.conversations.find(c => c.id === groupManageConvId)
+                  const min = conv?.type === 'world' ? 1 : 2
+                  if (selectedGroupAgents.length < min) return
                   const currentIds = chat.groupAgents.map((a: { id: string }) => a.id)
                   const toAdd = selectedGroupAgents.filter((id) => !currentIds.includes(id))
                   const toRemove = currentIds.filter((id: string) => !selectedGroupAgents.includes(id))

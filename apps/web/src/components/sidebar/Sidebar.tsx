@@ -20,6 +20,7 @@ interface SidebarProps {
   onExport: (id: string) => void
   onMerge?: (convId: string) => void
   onManageGroupAgents?: (convId: string) => void
+  onManageWorldMembers?: (convId: string) => void
   onEditWorldLaws?: (convId: string) => void
   onContinueOnIm?: (convId: string, agentId: string) => void
   appName: string
@@ -55,7 +56,7 @@ interface MenuState {
 
 // ConversationTitle is now MarqueeText from ../ui/MarqueeText
 
-export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onEditWorldLaws, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle, unreadCounts }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ conversations, activeId, onSelect, onNew, onNewGroup, onRename, onDelete, onExport, onMerge, onManageGroupAgents, onManageWorldMembers, onEditWorldLaws, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle, unreadCounts }: SidebarProps) {
   const LANGUAGE_OPTIONS = ['zh-CN', 'en', 'ja'] as const
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -293,6 +294,7 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
             left: Math.max(8, menu.anchorRect.right - 160),
           }}
         >
+          {/* 世界：世界法则、世界成员 开头 */}
           {(conversations.find((c) => c.id === menu.convId))?.type === 'world' && onEditWorldLaws && (
             <button
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
@@ -302,6 +304,16 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
               {t('workflow.editLaws')}
             </button>
           )}
+          {(conversations.find((c) => c.id === menu.convId))?.type === 'world' && onManageWorldMembers && (
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+              onClick={() => { onManageWorldMembers(menu.convId); closeMenu() }}
+            >
+              <Users className="h-3.5 w-3.5" />
+              {t('sidebar.worldMembers')}
+            </button>
+          )}
+          {/* 私聊：在 IM 上继续 开头 */}
           {(conversations.find((c) => c.id === menu.convId) as any)?.type === 'direct' && onContinueOnIm && (
             <button
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
@@ -311,16 +323,7 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
               {t('sidebar.continueOnIm')}
             </button>
           )}
-          <button
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
-            onClick={() => {
-              const conv = conversations.find((c) => c.id === menu.convId)
-              if (conv) startRename(conv)
-            }}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            {t('sidebar.rename')}
-          </button>
+          {/* 群聊：群成员、合并群聊 开头 */}
           {(conversations.find((c) => c.id === menu.convId) as any)?.type === 'group' && !(conversations.find((c) => c.id === menu.convId) as any)?.qq_bound && onManageGroupAgents && (
             <button
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
@@ -339,6 +342,17 @@ export const Sidebar = React.memo(function Sidebar({ conversations, activeId, on
               {t('sidebar.mergeGroupChat')}
             </button>
           )}
+          {/* 三者通用：重命名、另存为 Markdown、删除 始终排在最后 */}
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+            onClick={() => {
+              const conv = conversations.find((c) => c.id === menu.convId)
+              if (conv) startRename(conv)
+            }}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {t('sidebar.rename')}
+          </button>
           <button
             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
             onClick={() => { onExport(menu.convId); closeMenu() }}

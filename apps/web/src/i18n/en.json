@@ -81,6 +81,8 @@
     "delete": "Delete",
     "deleteConfirm": "Delete conversation \"{{name}}\"? This action cannot be undone.",
     "groupMembers": "Members",
+    "worldMembers": "World Members",
+    "worldMembersHint": "Select agents for world simulation",
     "continueOnIm": "Continue on IM",
     "mergeGroupChat": "Merge Group Chats",
     "mergeSelectTarget": "Select group chats to merge. A new conversation will be created with all messages in chronological order.",
