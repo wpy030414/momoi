@@ -12,6 +12,7 @@ import { db, conversations, messages, users, userOauthBindings, agents, wechatBi
 import { skillRegistry } from '../skills/loader.js'
 import AdmZip from 'adm-zip'
 import { stopBotForUser, stopAllBotsForUser } from '../im/qq/manager.js'
+import { promptsRoute } from './prompts.js'
 
 import { repoRoot } from '../lib/paths.js'
 
@@ -37,6 +38,11 @@ adminRoute.use('/tts', adminAuthMiddleware)
 adminRoute.use('/tts/*', adminAuthMiddleware)
 adminRoute.use('/direct-registration', adminAuthMiddleware)
 adminRoute.use('/oauth-registration', adminAuthMiddleware)
+adminRoute.use('/prompts', adminAuthMiddleware)
+adminRoute.use('/prompts/*', adminAuthMiddleware)
+
+// 提示词目录与预览（提示词规则引擎的运行时入口，见 routes/prompts.ts）
+adminRoute.route('/prompts', promptsRoute)
 
 // Get current config
 adminRoute.get('/config', async (c) => {
