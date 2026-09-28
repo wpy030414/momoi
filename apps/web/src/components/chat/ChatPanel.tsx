@@ -92,8 +92,14 @@ export function ChatPanel({
   // (by that point scrollHeight has grown but scrollTop hasn't, so computing
   // "atBottom" inside the effect is always wrong).
   const atBottomRef = useRef(true)
+  const expandedByUserRef = useRef(false)
+  const programmaticScrollRef = useRef(false)
+  const scrollAccRef = useRef(0)
+  const prevScrollTopRef = useRef(0)
   const [revertedText, setRevertedText] = useState<string>('')
   const [thinkingMode, setThinkingMode] = useState<boolean>(true)
+  const [inputCollapsed, setInputCollapsed] = useState(false)
+  const inputCollapsedRef = useRef(false)
 
   const hasMessages = messages.length > 0
   const hasAgents = agents && agents.length > 0
@@ -136,8 +142,29 @@ export function ChatPanel({
   const handleScroll = useCallback(() => {
     const el = containerRef.current
     if (!el) return
+    // Always track the scroll position so delta calculation stays accurate
+    // even when the current event is programmatic.
+    const delta = Math.abs(el.scrollTop - prevScrollTopRef.current)
+    prevScrollTopRef.current = el.scrollTop
+    // Ignore programmatic scrolls (e.g. auto-scroll-to-bottom on new message)
+    if (programmaticScrollRef.current) {
+      programmaticScrollRef.current = false
+      return
+    }
     const threshold = el.clientHeight * 0.1
     atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold
+    // expandedByUserRef is a short-lived guard set on expand-click — ignore
+    // layout-shift scrolls during the transition; once it clears, next user
+    // scroll collapses normally.
+    if (expandedByUserRef.current) return
+    // Accumulate scroll distance — collapse only after 33vh of travel
+    scrollAccRef.current += delta
+    const minScroll = el.clientHeight * 0.33
+    if (scrollAccRef.current >= minScroll && !inputCollapsedRef.current) {
+      scrollAccRef.current = 0
+      inputCollapsedRef.current = true
+      setInputCollapsed(true)
+    }
   }, [])
 
   // Pin to bottom instantly. Two cases:
@@ -154,7 +181,13 @@ export function ChatPanel({
     prevFirstIdRef.current = firstId
 
     if (isSwitch || atBottomRef.current) {
+      programmaticScrollRef.current = true
       el.scrollTop = el.scrollHeight
+    }
+    // Reset scroll accumulator on conversation switch
+    if (isSwitch) {
+      scrollAccRef.current = 0
+      prevScrollTopRef.current = 0
     }
   }, [messages])
 
@@ -254,6 +287,8 @@ export function ChatPanel({
                 agents={isGroup ? groupAgents : undefined}
                 conversationId={conversationId}
                 onEnsureConversation={onEnsureConversation}
+                collapsed={false}
+                onExpand={NOOP}
               />
 
               {/* Recommended questions */}
@@ -337,6 +372,15 @@ export function ChatPanel({
             isWorld={isWorld}
             conversationId={conversationId}
             onEnsureConversation={onEnsureConversation}
+            collapsed={inputCollapsed}
+            onExpand={() => {
+              inputCollapsedRef.current = false
+              setInputCollapsed(false)
+              expandedByUserRef.current = true
+              scrollAccRef.current = 0
+              // Release the guard after the expand animation completes
+              setTimeout(() => { expandedByUserRef.current = false }, 350)
+            }}
           />
         </div>
       )}

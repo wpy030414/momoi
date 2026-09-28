@@ -38,6 +38,10 @@ interface InputBarProps {
   conversationId?: string | null
   /** Called when upload needs a conversation but none exists yet */
   onEnsureConversation?: () => Promise<string>
+  /** Collapse the input bar to a single truncated line (user scrolled away) */
+  collapsed?: boolean
+  /** Called when user clicks the collapsed bar to restore it */
+  onExpand?: () => void
 }
 
 /** Scan backwards from cursorPos to find the last active @mention trigger */
@@ -56,7 +60,7 @@ function detectMention(text: string, cursorPos: number): { query: string; start:
   return null
 }
 
-export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation }: InputBarProps) {
+export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation, collapsed = false, onExpand }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -105,6 +109,15 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
       })
     }
   }, [externalValue, onExternalValueConsumed])
+
+  // Auto-focus textarea when expanding from collapsed state (skip initial mount)
+  const wasCollapsedRef = useRef(collapsed)
+  useEffect(() => {
+    if (!collapsed && wasCollapsedRef.current && textareaRef.current) {
+      textareaRef.current.focus()
+    }
+    wasCollapsedRef.current = collapsed
+  }, [collapsed])
 
   const selectMention = useCallback((agent: AgentBrief) => {
     const cursorPos = textareaRef.current?.selectionStart ?? text.length
@@ -283,91 +296,117 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
 
   return (
     <div ref={containerRef} className="max-w-3xl mx-auto w-full px-4 pb-4">
-      <div className="rounded-xl border bg-background/[.66] px-4 py-3 focus-within:ring-2 focus-within:ring-ring transition-shadow">
-        {/* Attachment chips */}
-        {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {attachments.map((att, idx) => (
-              <div key={idx} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted text-xs max-w-[200px]">
-                <Paperclip className="h-3 w-3 flex-shrink-0" />
-                <span className="truncate">{att.name}</span>
-                <button onClick={() => removeAttachment(idx)} className="ml-0.5 hover:text-destructive flex-shrink-0">
+      <div className={`rounded-xl border bg-background/[.66] overflow-hidden ${collapsed ? '' : 'focus-within:ring-2 focus-within:ring-ring transition-shadow'}`}>
+        <div
+          className="grid transition-[grid-template-rows] duration-300 ease-out"
+          style={{ gridTemplateRows: collapsed ? '1fr 0fr' : '0fr 1fr' }}
+        >
+          {/* Collapsed row: single truncated line */}
+          <div className="overflow-hidden min-h-0">
+            <button
+              onClick={onExpand}
+              className="w-full text-left text-sm text-muted-foreground truncate leading-relaxed px-4 py-3 bg-transparent focus:outline-none cursor-text"
+              tabIndex={collapsed ? 0 : -1}
+              title={text || (noAgents ? t('settings.agentRequired') : isWorld ? t('chat.worldChangePlaceholder') : t('chat.inputPlaceholder'))}
+            >
+              {text || (
+                <span className="text-muted-foreground/60">
+                  {noAgents ? t('settings.agentRequired') : isWorld ? t('chat.worldChangePlaceholder') : t('chat.inputPlaceholder')}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Expanded content row */}
+          <div className="overflow-hidden min-h-0">
+            <div className="px-4 py-3">
+            {/* Attachment chips */}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {attachments.map((att, idx) => (
+                  <div key={idx} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted text-xs max-w-[200px]">
+                    <Paperclip className="h-3 w-3 flex-shrink-0" />
+                    <span className="truncate">{att.name}</span>
+                    <button onClick={() => removeAttachment(idx)} className="ml-0.5 hover:text-destructive flex-shrink-0">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {uploadError && (
+              <div className="flex items-start gap-1.5 mb-2 px-2 py-1.5 rounded-md bg-destructive/10 text-destructive text-xs">
+                <span className="flex-1 break-words">{t('chat.uploadFailed', { message: uploadError })}</span>
+                <button onClick={() => setUploadError('')} className="hover:text-destructive/70 flex-shrink-0 mt-0.5">
                   <X className="h-3 w-3" />
                 </button>
               </div>
-            ))}
-          </div>
-        )}
-
-        {uploadError && (
-          <div className="flex items-start gap-1.5 mb-2 px-2 py-1.5 rounded-md bg-destructive/10 text-destructive text-xs">
-            <span className="flex-1 break-words">{t('chat.uploadFailed', { message: uploadError })}</span>
-            <button onClick={() => setUploadError('')} className="hover:text-destructive/70 flex-shrink-0 mt-0.5">
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        )}
-
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onInput={handleInput}
-          placeholder={noAgents ? t('settings.agentRequired') : isWorld ? t('chat.worldChangePlaceholder') : t('chat.inputPlaceholder')}
-          disabled={isInputDisabled}
-          rows={3}
-          className="w-full resize-none bg-transparent text-sm focus:outline-none disabled:opacity-50 max-h-[200px] leading-relaxed py-1"
-        />
-        <div className="flex items-center justify-between pt-2">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => onThinkingModeChange(!thinkingMode)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-                thinkingMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-              }`}
-              title={t('chat.deepThinking')}
-            >
-              <Brain className="h-3.5 w-3.5" />
-              <span>{t('chat.deepThinking')}</span>
-            </button>
-            {supportInfiniteMode !== false && (
-            <button
-              onClick={() => onInfiniteModeChange(!infiniteMode)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-                infiniteMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-              }`}
-              title={t('chat.infiniteMode')}
-            >
-              <Infinity className="h-3.5 w-3.5" />
-              <span>{t('chat.infiniteMode')}</span>
-            </button>
             )}
+
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              onInput={handleInput}
+              placeholder={noAgents ? t('settings.agentRequired') : isWorld ? t('chat.worldChangePlaceholder') : t('chat.inputPlaceholder')}
+              disabled={isInputDisabled}
+              rows={3}
+              className="w-full resize-none bg-transparent text-sm focus:outline-none disabled:opacity-50 max-h-[200px] leading-relaxed py-1"
+            />
+            <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => onThinkingModeChange(!thinkingMode)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                    thinkingMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                  title={t('chat.deepThinking')}
+                >
+                  <Brain className="h-3.5 w-3.5" />
+                  <span>{t('chat.deepThinking')}</span>
+                </button>
+                {supportInfiniteMode !== false && (
+                <button
+                  onClick={() => onInfiniteModeChange(!infiniteMode)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                    infiniteMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                  title={t('chat.infiniteMode')}
+                >
+                  <Infinity className="h-3.5 w-3.5" />
+                  <span>{t('chat.infiniteMode')}</span>
+                </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {supportAttachments !== false && (
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isInputDisabled || uploading}
+                    className="inline-flex items-center justify-center h-9 w-9 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    title={t('chat.addAttachment')}
+                  >
+                    {uploading ? <Upload className="h-4 w-4 animate-pulse" /> : <Paperclip className="h-4 w-4" />}
+                  </button>
+                )}
+                <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
+                <button
+                  onClick={handleSend}
+                  disabled={cannotSend || !hasContent}
+                  className="inline-flex items-center justify-center p-1.5 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all h-9 w-9"
+                  title={t('chat.send')}
+                >
+                  {disabled ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowUp className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {supportAttachments !== false && (
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isInputDisabled || uploading}
-                className="inline-flex items-center justify-center h-9 w-9 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title={t('chat.addAttachment')}
-              >
-                {uploading ? <Upload className="h-4 w-4 animate-pulse" /> : <Paperclip className="h-4 w-4" />}
-              </button>
-            )}
-            <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
-            <button
-              onClick={handleSend}
-              disabled={cannotSend || !hasContent}
-              className="inline-flex items-center justify-center p-1.5 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all h-9 w-9"
-              title={t('chat.send')}
-            >
-              {disabled ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <ArrowUp className="h-4 w-4" />
-              )}
-            </button>
           </div>
         </div>
       </div>
