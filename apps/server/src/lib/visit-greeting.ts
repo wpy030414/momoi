@@ -15,7 +15,7 @@ import { streamChatCompletion } from '../ai/provider.js'
 import { describeNetworkError } from '../ai/provider.js'
 import { getConfig } from '../lib/config.js'
 import { getConversedAgents, sendWebPush } from '../lib/push-scheduler.js'
-import { DEFAULT_SYSTEM_PROMPT } from '@momoi/shared/constants'
+import { resolveAgentPersona, buildGreetingInstruction } from '../prompts/index.js'
 import type { ChatMessage } from '../ai/provider.js'
 
 // ---- Helpers ----
@@ -79,20 +79,15 @@ export async function triggerVisitGreeting(userId: string): Promise<void> {
 
     // 3. AI 生成招呼内容
     const config = await getConfig()
-    const systemPrompt =
-      agent.system_prompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
+    const systemPrompt = resolveAgentPersona(agent.system_prompt)
 
-    // 根据距上次问候的间隔拼装不一样的欢迎词。反复刷新（间隔短）
-    // → Agent 察觉用户拿自己刷着玩，假装生气吐槽；间隔长 → 正常欢迎。
-    const refreshHint = sinceLast
-      ? `（说明：用户刚才 ${sinceLast} 也打开过页面，这是短时间内又一次。"你干嘛反复开关页面，拿我刷着玩是吧？"）`
-      : `（说明：用户很久没来了，用活泼欢迎的语气说话。）`
-
+    // 招呼指令由提示词规则引擎组装（prompts/fragments/notification.ts）：
+    // 间隔短（用户在反复刷新）→ Agent 假装生气吐槽；间隔长 → 正常欢迎。
     const chatMessages: ChatMessage[] = [
       ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
       {
         role: 'user' as const,
-        content: `用户刚打开页面回来了，主动打个招呼。${refreshHint}\n要求：\n1. 用你的性格和语气自然地表示欢迎，以第一人称\n2. 标题不超过8字，正文不超过50字\n3. 严格按 JSON 格式回复，不要包含其他内容：{"title":"...","body":"..."}`,
+        content: buildGreetingInstruction({ sinceLast }),
       },
     ]
 

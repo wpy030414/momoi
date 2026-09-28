@@ -13,7 +13,7 @@
 import { db, conversations, messages, pushSubscriptions } from '../db/index.js'
 import { and, eq } from 'drizzle-orm'
 import { getAgent, getVapidKeys } from '../lib/config.js'
-import { DEFAULT_SYSTEM_PROMPT } from '@momoi/shared/constants'
+import { resolveAgentPersona, buildPushInstruction } from '../prompts/index.js'
 import { getWebPush, VAPID_SUBJECT } from '../lib/web-push.js'
 import { streamChatCompletion } from '../ai/provider.js'
 import { describeNetworkError } from '../ai/provider.js'
@@ -199,14 +199,14 @@ async function tick(userId: string): Promise<void> {
     // 上游（DEAP/deepseek）对此返回 550——用与 pi-adapter 相同的兜底链，
     // 且绝不发送空 system 消息。
     const config = await getConfig()
-    const systemPrompt =
-      agent.system_prompt || DEFAULT_SYSTEM_PROMPT || '你是 Momoi，一个由**杏仁鹿**缔造的 Agent，最擅长与用户玩角色扮演的游戏。'
+    const systemPrompt = resolveAgentPersona(agent.system_prompt)
 
     const aiMessages: ChatMessage[] = [
       ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
       {
         role: 'user' as const,
-        content: `给用户发一条简短的提醒消息，催促用户回来看看。要求：\n1. 用你的性格和语气自然地说话，以第一人称\n2. 标题不超过8字，正文不超过50字\n3. 严格按 JSON 格式回复，不要包含其他内容：{"title":"...","body":"..."}`,
+        // 指令由提示词规则引擎组装（prompts/fragments/notification.ts）
+        content: buildPushInstruction(),
       },
     ]
 

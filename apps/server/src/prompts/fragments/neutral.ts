@@ -91,6 +91,10 @@ export function buildOrchestrationUserMessage(ctx: { members: string[]; context:
 // ---- 片段定义 ----
 
 export const neutralFragments: PromptFragment<any>[] = [
+  // 身份锚定：中立 Agent 在 follow-up / suggestions 中是「用户的代笔」。
+  // 不能写成「中立观察者」——观察者身份会让模型在读完强人设的 Agent 台词后
+  // 滑向模仿最后发言的 Agent（角色腔、口癖、甚至替 Agent 编台词）。
+  // 必须显式声明：你的唯一身份是用户本人，并给出禁止性铁律。
   {
     id: 'neutral/followup-system',
     targets: FOLLOWUP_TARGETS.system,

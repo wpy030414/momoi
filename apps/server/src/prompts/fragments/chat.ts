@@ -100,6 +100,9 @@ ${memoriesBlock}`
   },
 
   // ---- 行为规则区 ----
+  // 记忆规则放在人设之后的「行为规则区」：这一段是操作规范而不是背景设定，
+  // 放在人设之前会被模型当成叙述性资料吞掉。框架与人设同向（记忆 = 身份连续性），
+  // 不靠位置压人设，只保证它作为「规则」被读到。
   {
     id: 'chat/thinking-off',
     targets: CHAT_SYSTEM_TARGET,
@@ -127,6 +130,9 @@ ${memoriesBlock}`
   },
 
   // ---- 场景框架区 ----
+  // 世界模拟块替代群组对话规则块的身份框架：世界回合仍走群聊编排（isGroup=true），
+  // 但这里没有「用户」——user 消息是「来自世界的变动」，各 Agent 以世界中的存在身份回应。
+  // 世界没有描述：Agent 的人设本身就是其身份，法则就是其约束。
   {
     id: 'chat/world-scene',
     targets: CHAT_SYSTEM_TARGET,
@@ -185,6 +191,9 @@ ${ctx.mentionedBy ? `- 刚才 ${ctx.mentionedBy} @ 了你，在回应时请自�
 ${ctx.mentionedBy ? `- 刚才 ${ctx.mentionedBy} @ 了你，在回复时请自然回应对方的点名，但不必为此改变你的回复优先级或内容。` : ''}`
     },
   },
+  // QQ 群聊模式下，群组规则（多 Agent 同台）不适用 —— 只有单 Agent 面对多真人，
+  // 不应注入「其他 Agent 也可能回复用户」等误导性指令，避免 Agent 把自己之外的人类成员
+  // 误认为 AI 同伴并产生身份困惑。（故 chat/group-rules 的 when 排除 isQqGroup）
   {
     id: 'chat/qq-group-rules',
     targets: CHAT_SYSTEM_TARGET,
