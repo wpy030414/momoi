@@ -348,7 +348,8 @@ function validateAgents(v: unknown, ctx: ValidateContext, errors: ImportIssue[],
         }
         // 与现值一致 → 不进 bundle（name 永不通过导入修改）
       }
-      if (entry.avatar !== undefined) {
+      // 非空 avatar 才提示忽略；空串（导出文件自带）静默跳过，避免噪音
+      if (entry.avatar !== undefined && entry.avatar !== '') {
         warnings.push({ path: `agents[${i}].avatar`, message: MSG.neutralAvatarIgnored })
       }
       if (entry.model !== undefined) {

@@ -317,6 +317,11 @@ describe('validateImportBundle — agents', () => {
       // avatar 被忽略——不进 bundle
       expect(withAvatar.bundle?.agents?.[0]?.avatar).toBeUndefined()
     }
+
+    // 空串 avatar（导出文件自带）不产生 warning 噪音
+    const emptyAvatar = validateYAML(`agents:\n  - role: neutral\n    avatar: ""`)
+    expect(emptyAvatar.parseFailed).toBe(false)
+    if (!emptyAvatar.parseFailed) expect(emptyAvatar.warnings).toEqual([])
   })
 
   it('普通 Agent：id 非 UUID 拒绝；省略 id 通过（新建）', () => {
