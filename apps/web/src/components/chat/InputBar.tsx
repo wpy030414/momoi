@@ -119,6 +119,71 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
     wasCollapsedRef.current = collapsed
   }, [collapsed])
 
+  // --- Collapse via measured px height transition ---
+  // 不用 grid-template-rows 的 0fr/1fr 过渡：fr 轨道在 iOS Safari（WebKit）
+  // 的静态解析与过渡终态均不可靠——收缩后残留高度、展开时两行同屏，
+  // 表现为「输入框有两个」。height 的 px 过渡是所有浏览器的基本功。
+  // 动画期间两行锁 px；稳态展开回 auto（textarea 自动长高需要弹性高度）。
+  const collapsedRowRef = useRef<HTMLDivElement>(null)
+  const expandedRowRef = useRef<HTMLDivElement>(null)
+  const rafRef = useRef<number | null>(null)
+  const collapsedRef = useRef(collapsed)
+  // 'none' = 稳态；'collapse' / 'expand' = 过渡在途（两行均可见）
+  const [animPhase, setAnimPhase] = useState<'none' | 'collapse' | 'expand'>('none')
+  const [collapsedRowH, setCollapsedRowH] = useState<number | 'auto'>(collapsed ? 'auto' : 0)
+  const [expandedRowH, setExpandedRowH] = useState<number | 'auto'>(collapsed ? 0 : 'auto')
+
+  const finishAnim = useCallback(() => {
+    if (!collapsedRef.current) {
+      // 展开完成：回 auto，让内容（textarea 长高 / 附件增删）自由撑高
+      setExpandedRowH('auto')
+    }
+    setAnimPhase('none')
+  }, [])
+
+  useEffect(() => {
+    if (collapsedRef.current === collapsed) return
+    collapsedRef.current = collapsed
+    // iOS 会为 focused 表单控件维持可见性（键盘定位），收缩前先放弃焦点
+    if (collapsed) textareaRef.current?.blur()
+
+    // 锁定两行当前实际 px（auto↔px 无法直接过渡；动画中途反向时
+    // offsetHeight 是中间值，从中间值自然衔接）
+    setCollapsedRowH(collapsedRowRef.current?.offsetHeight ?? 0)
+    setExpandedRowH(expandedRowRef.current?.offsetHeight ?? 0)
+    setAnimPhase(collapsed ? 'collapse' : 'expand')
+
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+    // 双 rAF：先让锁定高度完成一次样式计算（确立过渡起点），再设目标
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = requestAnimationFrame(() => {
+        if (collapsedRef.current) {
+          setExpandedRowH(0)
+          setCollapsedRowH(collapsedRowRef.current?.scrollHeight ?? 0)
+        } else {
+          setCollapsedRowH(0)
+          setExpandedRowH(expandedRowRef.current?.scrollHeight ?? 0)
+        }
+      })
+    })
+  }, [collapsed])
+
+  // 超时兜底收尾（后台标签页收不到 transitionend）
+  useEffect(() => {
+    if (animPhase === 'none') return
+    const t = window.setTimeout(finishAnim, 340)
+    return () => clearTimeout(t)
+  }, [animPhase, finishAnim])
+
+  useEffect(() => () => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+  }, [])
+
+  const handleRowTransitionEnd = (e: React.TransitionEvent<HTMLDivElement>) => {
+    if (e.propertyName !== 'height') return
+    finishAnim()
+  }
+
   const selectMention = useCallback((agent: AgentBrief) => {
     const cursorPos = textareaRef.current?.selectionStart ?? text.length
     const detection = detectMention(text, cursorPos)
@@ -297,16 +362,17 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
   return (
     <div ref={containerRef} className="max-w-3xl mx-auto w-full px-4 pb-4">
       <div className={`rounded-xl border bg-background/[.66] overflow-hidden ${collapsed ? '' : 'focus-within:ring-2 focus-within:ring-ring transition-shadow'}`}>
-        <div
-          className="grid transition-[grid-template-rows] duration-300 ease-out"
-          style={{ gridTemplateRows: collapsed ? '1fr 0fr' : '0fr 1fr' }}
-        >
-          {/* Collapsed row: single truncated line */}
-          <div className="overflow-hidden min-h-0">
-            <button
-              onClick={onExpand}
-              className="w-full text-left text-sm text-muted-foreground truncate leading-relaxed px-4 py-3 bg-transparent focus:outline-none cursor-text"
-              tabIndex={collapsed ? 0 : -1}
+      {/* Collapsed row: single truncated line（稳态展开时 invisible，动画期间保持可见参与交叉过渡） */}
+      <div
+        ref={collapsedRowRef}
+        className={`overflow-hidden transition-[height] duration-300 ease-out ${animPhase === 'none' && !collapsed ? 'invisible' : ''}`}
+        style={{ height: typeof collapsedRowH === 'number' ? `${collapsedRowH}px` : collapsedRowH }}
+        aria-hidden={!collapsed}
+      >
+        <button
+          onClick={onExpand}
+          className="w-full text-left text-sm text-muted-foreground truncate leading-relaxed px-4 py-3 bg-transparent focus:outline-none cursor-text"
+          tabIndex={collapsed ? 0 : -1}
               title={text || (noAgents ? t('settings.agentRequired') : isWorld ? t('chat.worldChangePlaceholder') : t('chat.inputPlaceholder'))}
             >
               {text || (
@@ -317,9 +383,15 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
             </button>
           </div>
 
-          {/* Expanded content row */}
-          <div className="overflow-hidden min-h-0">
-            <div className="px-4 py-3">
+      {/* Expanded content row（稳态收缩时 invisible；展开过渡结束回 auto） */}
+      <div
+        ref={expandedRowRef}
+        className={`overflow-hidden transition-[height] duration-300 ease-out ${animPhase === 'none' && collapsed ? 'invisible' : ''}`}
+        style={{ height: typeof expandedRowH === 'number' ? `${expandedRowH}px` : expandedRowH }}
+        aria-hidden={collapsed}
+        onTransitionEnd={handleRowTransitionEnd}
+      >
+        <div className="px-4 py-3">
             {/* Attachment chips */}
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-3">
@@ -406,7 +478,6 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
                 </button>
               </div>
             </div>
-          </div>
           </div>
         </div>
       </div>

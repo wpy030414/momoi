@@ -1259,12 +1259,19 @@ export function useChat() {
   const messages = (activeKey != null ? messagesByConv[activeKey] : undefined) || []
   const loading = !!(activeKey != null && loadingByConv[activeKey])
   const pendingQuestion = (activeKey != null ? pendingByConv[activeKey] : undefined) ?? null
+  // 视图加载中：activeId 已切换但该会话快照尚未落分区（首次打开该会话）。
+  // 分区一旦存在（含空数组 = 真·零条会话）即视为已加载。纯派生量：世代过期
+  // 的旧加载在守卫处直接 return、不触碰分区，无需清理路径，天然免疫竞态。
+  // 区别于 loading（发送流串行锁）：这里只服务「切换会话时显示加载态而非
+  // 误判新会话空态」的 UI 语义。
+  const viewLoading = activeId != null && messagesByConv[activeId] === undefined
 
   return {
     conversations,
     activeId,
     messages,
     loading,
+    viewLoading,
     draftType,
     startGroupDraft,
     sendMessage,

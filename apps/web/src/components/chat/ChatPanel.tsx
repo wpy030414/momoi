@@ -29,6 +29,9 @@ interface ChatMessage {
 interface ChatPanelProps {
   messages: ChatMessage[]
   loading: boolean
+  /** 会话视图加载中（切换会话后快照未落分区）：显示加载态而非「新会话」空态。
+   *  与 loading（发送流进行中）语义不同。 */
+  viewLoading?: boolean
   onSend: (text: string, thinkingMode?: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean) => void | Promise<void>
   onCancel: () => void
   onRevert: (index: number) => Promise<string | null>
@@ -74,7 +77,7 @@ interface ChatPanelProps {
 const NOOP = () => {}
 
 export function ChatPanel({
-  messages, loading, onSend, onCancel, onRevert, onForceRetry, onForceRetryGroup, backgroundImage, supportAttachments, supportInfiniteMode,
+  messages, loading, viewLoading, onSend, onCancel, onRevert, onForceRetry, onForceRetryGroup, backgroundImage, supportAttachments, supportInfiniteMode,
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
   isGroup, isQqGroup, isWorld, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
@@ -242,7 +245,10 @@ export function ChatPanel({
 
       {/* Messages area */}
       <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 pb-4 pt-[76px] relative z-10">
-        {!hasMessages ? (
+        {!hasMessages && viewLoading ? (
+          // 会话切换中：快照未落分区——显示加载态，而非误触发「新会话」空态
+          <Loading className="h-full" size="lg" />
+        ) : !hasMessages ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-full max-w-3xl">
               <div className="mb-4 px-4">

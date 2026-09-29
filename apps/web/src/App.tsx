@@ -697,7 +697,7 @@ export function App() {
               >
                 <PanelLeft className="h-4 w-4" />
               </Button>
-              {chat.messages.length > 0 && (
+              {(chat.messages.length > 0 || chat.viewLoading) && (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -719,6 +719,7 @@ export function App() {
             <ChatPanel
               messages={chat.messages}
               loading={chat.loading}
+              viewLoading={chat.viewLoading}
               onSend={chat.sendMessage}
               onCancel={chat.cancel}
               onRevert={chat.revertMessage}
