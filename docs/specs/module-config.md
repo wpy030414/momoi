@@ -8,13 +8,15 @@
 
 | 文件 | 职责 |
 |---|---|
-| `apps/server/src/config.ts` | 环境变量读取 + DB 配置读写（`getConfig` / `updateConfig`） |
+| `apps/server/src/lib/config.ts` | 环境变量读取 + DB 配置读写（`getConfig` / `updateConfig`） |
+| `apps/server/src/lib/config-transfer.ts` | 配置导入导出（bundle 构建 / YAML 序列化 / 白名单校验 / upsert 应用） |
 | `packages/shared/src/constants.ts` | 默认值常量 |
-| `apps/server/src/routes/admin.ts` | 管理员 API 端点（`GET/PUT /api/admin/config`） |
+| `apps/server/src/routes/admin.ts` | 管理员 API 端点（`GET/PUT /api/admin/config`、`GET /config/export`、`POST /config/import`） |
 | `apps/server/src/routes/app.ts` | 公开端点（`GET /api/app-name`，对外暴露品牌信息与 Agent 列表） |
-| `apps/web/src/components/settings/AgentManager.tsx` | 管理面板中的 Agent 管理界面 |
-| `apps/web/src/components/settings/GatewaySettings.tsx` | 管理面板中的网关配置界面 |
+| `apps/web/src/components/admin/tabs/AgentManager.tsx` | 管理面板中的 Agent 管理界面 |
+| `apps/web/src/components/admin/tabs/GatewaySettings.tsx` | 管理面板中的网关配置界面 |
 | `apps/web/src/components/admin/tabs/ExperienceSettings.tsx` | 体验配置界面（应用外观 + 首页推荐问题 + 聊天常用追问） |
+| `apps/web/src/components/admin/tabs/ConfigTransfer.tsx` | 配置导入导出界面（导出按钮 + 预检/确认导入对话框） |
 
 ## 配置层级
 
@@ -244,7 +246,94 @@ api.getAppName().then((r) => {
 
 `AdminScreen` 复用登录用户的 JWT（`lib/api.ts` 请求层自动附加 `Authorization`），服务端由 `adminAuthMiddleware` 校验 `ADMIN` 名单后放行。
 
-## ⚠️ 已知缺陷
+## 配置导入导出（Config Transfer）
+
+后台「配置」页（网关下方）提供有限设置数据的 YAML 导出/导入，用于跨实例迁移与备份。核心逻辑在 `lib/config-transfer.ts`（校验规则的事实来源，含 36 项单测 `test/config-transfer.test.ts`）。
+
+### 导出范围
+
+| 段 | 内容 | 说明 |
+|---|---|---|
+| `experience` | `app_name`、`app_favicon`、`app_background`、`show_github`、`recommended_questions`、`followup_questions` | 与体验页一致；图片为 base64 data URL 或 http(s) 链接 |
+| `agents` | `id`、`role`、`name`、`model`、`system_prompt`、`avatar` | **不含** voice 三字段与 `created_at` |
+| `users` | `direct_registration_open`、`oauth_registration_open`、`oauth_providers` | 含 `client_secret` 明文 |
+
+**绝不导出**：`api_endpoint`、`api_key`、JWT 密钥、VAPID、TTS 等运行时敏感配置（bundle 由 `buildExportBundle` 手工挑白名单字段构建，绝不整体序列化 `AppConfig`）。
+
+### YAML 结构（version 1）
+
+```yaml
+version: 1
+exported_at: "2026-09-29T12:00:00.000Z"
+experience:
+  app_name: Momoi
+  app_favicon: ""          # 空串 | data:image/* | http(s) URL
+  app_background: ""
+  show_github: true
+  recommended_questions: ["你好"]
+  followup_questions: []
+agents:
+  - id: neutral-agent       # 中立 Agent 固定 ID
+    role: neutral
+    name: 中立 Agent
+    model: gpt-4o
+    system_prompt: ""
+    avatar: ""
+  - id: 3f2c1b8e-9a7d-4c1e-8f2a-1b2c3d4e5f60
+    role: default
+    name: Momoi
+    model: gpt-4o
+    system_prompt: |
+      多行提示词
+    avatar: ""
+users:
+  direct_registration_open: true
+  oauth_registration_open: true
+  oauth_providers:
+    - { id: github, name: GitHub, client_id: "...", client_secret: "...",
+        authorize_url: https://..., token_url: https://..., userinfo_url: https://..., scopes: "read:user" }
+```
+
+### 导入语义
+
+- **字段级可选**：任何段、任何键都可省略——省略 = 不更新该键（绝非置空），手写只含目标字段的最小文件即可导入；`version` 缺省视为 1
+- **Agent 按 id upsert**：带 id（UUID 格式校验）→ 存在则更新（只更新文件中出现的字段）、不存在则按原 id 新建；**省略 id → 一律视为新增**（生成新 UUID，重复导入同一文件会产生副本，dry-run 摘要提示）；本地已有但文件中不存在的 Agent **一律保留**（保护 `conversations`/`messages` 等表的 agent_id 引用）
+- **OAuth 供应商按 id 合并**：同 id 字段级覆盖（省略字段保留原值）、新 id 追加、本地多余保留
+- **中立 Agent**：`name` 与库中现值不同 → **整包拒绝**；`avatar` → warning 并忽略；仅 `model`/`system_prompt` 可更新
+
+### 校验规则（白名单 + 报错拒绝）
+
+- 顶层键 ∈ {version, exported_at, experience, agents, users}；三段至少一段存在；文本 ≤ 10MB
+- YAML 解析：`maxAliasCount: 100`（防锚点引用爆炸）+ `merge: false`（禁 merge key 绕过白名单）
+- `app_name` trim 后 1-50 字符；图片字段仅允许 空串 / `data:image/*` / `http(s)://`（拒 `javascript:` 注入）
+- 推荐问题 ≤3 条、追问 ≤5 条、每条 trim 后 1-20 字符；Agent ≤50 个、名称 1-30 字符、`system_prompt` ≤100000 字符
+- OAuth 供应商 ≤10 个；`id` 须匹配 `^[A-Za-z0-9_-]{1,64}$`（会进入 URL 路径与 cookie）；三个 URL 非空时必须 http(s)
+- 校验错误结构化为 `{path, message}`（如 `agents[2].name`）；`message` 为英文整句，经前端 `st()` 以 `serverSide.admin.configImport.*` 反向映射翻译
+
+### 接口契约
+
+| 端点 | 说明 |
+|---|---|
+| `GET /api/admin/config/export` | 返回 YAML 文本，`Content-Disposition: attachment; filename="config-output-${Date.now()}.yml"` |
+| `POST /api/admin/config/import?dry_run=1` | 只校验，返回 `{ok, errors, warnings, summary}`（变更摘要） |
+| `POST /api/admin/config/import` | 校验 → 重跑校验（并发窗口）→ 应用，返回 `{ok, applied}` |
+
+**校验失败也返回 HTTP 200**（携带完整错误列表）——客户端通用错误路径会把非 2xx 折叠成单条消息。正式导入前重跑完整校验：dry-run 与确认之间服务端状态可能被并发修改（如中立 Agent 已被改名），fail-fast 而非应用过期数据。
+
+### 应用顺序与副作用
+
+`experience → users → agents`（无事务，fail-fast）。外部图床开启时，导入的 base64 图片（favicon/background/avatar）先转 CDN 再落库，CDN 失败保留原值（与 `PUT /config` 行为一致）。导入成功无需手动刷新——管理面板关闭时 `useAdminPanel` 自动重拉 `getAppName`。
+
+### 已知限制
+
+- `apply` 无事务（sql.js 各语句独立提交）；中途 DB 异常会留下部分应用（概率极低，双重校验缓解）
+- 超大 background 可能使导出文件超过 10MB 导入上限（导出文案提示）
+- 导出文件等同凭证（含 client_secret 明文），UI 有黄色警示
+- 跨实例导入时 CDN URL 指向原实例图床，目标实例需可访问
+- DB 中历史遗留的超长（>20 字符）推荐/追问问题导出后再导入会被拒，需先在体验页修复
+- standAlone 模式下「配置」页不隐藏；users 段照常导入导出（注册开关在该模式不生效）
+
+
 
 ### API Key 未脱敏
 
