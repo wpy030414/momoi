@@ -119,13 +119,14 @@ export async function* streamChatCompletion(
   messages: ChatMessage[],
   tools: ToolDefinition[],
   thinkingMode = true,
+  timeoutMs = 120_000,
 ): AsyncGenerator<StreamEvent> {
   const endpoint = config.api_endpoint.replace(/\/$/, '')
   const url = `${endpoint}/chat/completions`
   const includeThinkingParams = !endpointsWithoutThinkingParams.has(endpoint)
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 120_000)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   const post = async (includeParams: boolean): Promise<Response> => {
     try {
@@ -278,4 +279,42 @@ export async function* streamChatCompletion(
       }
     }
   }
+}
+
+/**
+ * 上游连通性探针：另起一个最小对话——无系统提示词、无历史、无工具，
+ * 仅发送 "1"。收到任何回复即判网关可达；探针失败或空手而归则真的连不上。
+ *
+ * 用途：甄别 streamChatCompletion 抛错（AssistantMessage stopReason === 'error'）
+ * 的两种同构形态——「网关不可达」（fetch failed / API error / 超时）与
+ * 「网关可达但掐断本请求」（内容审查/封禁，连接层同样表现为错误）。
+ * 错误形态无法区分二者，只能实测。
+ */
+export async function probeUpstream(
+  config: AppConfig,
+  model: string,
+  timeoutMs = 15_000,
+): Promise<{ reachable: boolean; detail?: string }> {
+  let failDetail: string | undefined
+  try {
+    // thinkingMode=true：reasoning_content 也算「有回复」——探针判定的是网关
+    // 连通性，任何字节（正文或思考）回流都证明网关活着
+    for await (const ev of streamChatCompletion(
+      config,
+      model,
+      [{ role: 'user', content: '1' }],
+      [],
+      true,
+      timeoutMs,
+    )) {
+      if ((ev.type === 'token' || ev.type === 'thinking') && ev.text) {
+        // 首 token 即判定：探针延迟 = 时间到首 token（for-await 的 return
+        // 会触发生成器 return()，执行其 finally 释放超时句柄）
+        return { reachable: true }
+      }
+    }
+  } catch (err) {
+    failDetail = describeNetworkError(err)
+  }
+  return { reachable: false, detail: failDetail || '上游连接成功但未返回任何内容' }
 }

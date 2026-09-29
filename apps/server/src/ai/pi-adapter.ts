@@ -59,7 +59,7 @@ import {
   getRetryPlaceholder,
   resolveToolDescription,
 } from '../prompts/index.js'
-import { streamChatCompletion } from './provider.js'
+import { streamChatCompletion, probeUpstream } from './provider.js'
 import type { ChatMessage, ContentPart } from './provider.js'
 
 type SendFn = (msg: ServerMessage) => void
@@ -518,8 +518,10 @@ interface SSEState {
   trace: TraceEntry[]
   emptyRetryCount: number
   needsRetry: boolean
-  /** 上游网络/连接错误——不做空回复重试，直接告知用户 */
+  /** 探针实测确认网关不可达——不做空回复重试，直接告知用户 */
   upstreamError: boolean
+  /** 上游连通性探针（另起最小对话只发 "1"），由 runPiAgentLoop 注入 */
+  probe: () => Promise<{ reachable: boolean; detail?: string }>
 }
 
 function createEventEmitter(state: SSEState, conversationId: string): (event: AgentEvent) => Promise<void> {
@@ -645,18 +647,31 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
             .join('')
         }
 
-        // 上游网络/连接错误：AssistantMessage stopReason === 'error'
-        // 且 content 为空时，是 streamChatCompletion 抛出的连接层错误
-        // ——不做空回复重试，直接告知用户
+        // 上游错误甄别：AssistantMessage stopReason === 'error' 且 content 为空，
+        // 是 streamChatCompletion 抛出的连接层错误——但「网关不可达」与「网关可达
+        // 却掐断本请求（内容审查/封禁）」在这一层完全同构，错误形态区分不了。
+        // 只能实测：探针另起最小对话（无提示词、无历史、无工具）只发 "1"——
+        //   · 探针有回复 → 网关活着，此前失败是本请求被掐断，与敏感词空回复
+        //     同路处理（落入下方搬迁重试分支）；
+        //   · 探针也失败 → 真的连不上，不做重试，直接告知用户。
         const lastAssistantMsg = assistantMsgs.length > 0
           ? assistantMsgs[assistantMsgs.length - 1] as AssistantMessage
           : null
         if (lastAssistantMsg?.stopReason === 'error'
             && (!lastAssistantMsg.content || lastAssistantMsg.content.length === 0)
             && !state.upstreamError) {
-          state.upstreamError = true
-          state.send({ type: 'error', message: '无法连接到上游，请联系网络管理员。' })
-          break
+          const probe = await state.probe()
+          if (!probe.reachable) {
+            state.upstreamError = true
+            state.send({
+              type: 'error',
+              message: probe.detail
+                ? `无法连接到上游，请联系网络管理员。（探针：${probe.detail}）`
+                : '无法连接到上游，请联系网络管理员。',
+            })
+            break
+          }
+          // 网关可达 → 本请求被掐断：不 break，落入下方空回复搬迁重试分支
         }
 
         const { reply, suggestions } = parseSuggestions(replyText || state.fullText)
@@ -957,6 +972,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     emptyRetryCount: 0,
     upstreamError: false,
     needsRetry: false,
+    probe: () => probeUpstream(config, agentModel),
   }
 
   // 9. 事件发射器
