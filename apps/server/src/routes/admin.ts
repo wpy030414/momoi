@@ -23,6 +23,9 @@ const MAX_UPLOAD_SIZE = 50 * 1024 * 1024 // 50MB
 // All admin endpoints authenticate with the ordinary user JWT; the middleware
 // additionally requires the username to be in the ADMIN env list (401/403).
 adminRoute.use('/config', adminAuthMiddleware)
+// Hono 的 use('/config') 是精确匹配，不覆盖子路径——补通配形式保护
+// /config/env-gateway（返回 OPENAI_API_KEY）及后续 /config/* 端点。
+adminRoute.use('/config/*', adminAuthMiddleware)
 adminRoute.use('/agents', adminAuthMiddleware)
 adminRoute.use('/agents/*', adminAuthMiddleware)
 adminRoute.use('/skills/*', adminAuthMiddleware)
