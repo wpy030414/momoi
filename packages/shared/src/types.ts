@@ -119,6 +119,77 @@ export interface Agent {
   voice_settings: string  // JSON: VoiceSettings
 }
 
+// ---- Config transfer（配置导入导出） ----
+
+/** 导入文件中的 Agent 条目：字段级可选——省略 = 保持该 Agent 原值（导出时始终写全） */
+export interface ConfigTransferAgent {
+  id?: string
+  role?: 'default' | 'neutral'
+  name?: string
+  model?: string
+  system_prompt?: string
+  avatar?: string
+}
+
+/**
+ * 配置导出/导入包（version 1）。所有段与字段均可选：
+ * 省略 = 不更新该键（绝非置空），支持手写只含目标字段的最小文件。
+ * 绝不包含网关密钥（api_endpoint/api_key）与声线（voice_*）字段。
+ */
+export interface ConfigExportBundle {
+  version: number
+  exported_at?: string
+  experience?: {
+    app_name?: string
+    app_favicon?: string
+    app_background?: string
+    show_github?: boolean
+    recommended_questions?: string[]
+    followup_questions?: string[]
+  }
+  agents?: ConfigTransferAgent[]
+  users?: {
+    direct_registration_open?: boolean
+    oauth_registration_open?: boolean
+    /** 条目字段可省略：同 id 覆盖时省略字段保留原值，新建时缺省为空串 */
+    oauth_providers?: Partial<OAuth2Provider>[]
+  }
+}
+
+/** 结构化导入问题：path 定位（如 agents[2].name），message 为可被 st() 反向翻译的英文句 */
+export interface ImportIssue {
+  path: string
+  message: string
+}
+
+/** dry-run / 正式导入共用的变更摘要 */
+export interface ImportSummary {
+  experience: { changed: string[]; unchanged: string[] } | null
+  agents: {
+    update: Array<{ id: string; name: string; neutral: boolean }>
+    create: Array<{ id: string | null; name: string }>
+    skip: Array<{ id: string; name: string; reason: string }>
+  } | null
+  users: {
+    direct_registration_open: { from: boolean; to: boolean } | null
+    oauth_registration_open: { from: boolean; to: boolean } | null
+    providers_update: number
+    providers_create: number
+    providers_skip: number
+  } | null
+}
+
+/** POST /api/admin/config/import 响应（校验失败也返回 HTTP 200 以携带完整错误列表） */
+export interface ImportResponse {
+  ok: boolean
+  errors: ImportIssue[]
+  warnings: ImportIssue[]
+  /** dry_run=1 且校验通过时存在 */
+  summary?: ImportSummary
+  /** 正式导入成功时存在 */
+  applied?: ImportSummary
+}
+
 // ---- MCP Server Config ----
 
 export interface McpServerConfig {

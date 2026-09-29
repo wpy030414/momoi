@@ -170,8 +170,10 @@ export async function getAgent(id: string): Promise<Agent | null> {
   }
 }
 
-export async function createAgent(name: string, model: string, systemPrompt: string, avatar = '', role: Agent['role'] = 'default', voiceEnabled = false, voiceSampleUrl = '', voiceSettings = '{}'): Promise<Agent> {
-  const id = role === 'neutral' ? NEUTRAL_AGENT_ID : randomUUID()
+export async function createAgent(name: string, model: string, systemPrompt: string, avatar = '', role: Agent['role'] = 'default', voiceEnabled = false, voiceSampleUrl = '', voiceSettings = '{}', idOverride?: string): Promise<Agent> {
+  // 中立 Agent 恒为固定 ID；idOverride 供配置导入按原 ID 重建普通 Agent，
+  // 保持跨实例的 agent_id 引用（会话、绑定等）一致。
+  const id = role === 'neutral' ? NEUTRAL_AGENT_ID : (idOverride || randomUUID())
   const now = Math.floor(Date.now() / 1000)
   await db.insert(agents).values({
     id,

@@ -7,9 +7,10 @@ import { base64ToBuffer, uploadToCdn } from '../lib/cdn.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '@momoi/shared/constants'
 import fs from 'fs'
 import path from 'path'
-import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
+import { NEUTRAL_AGENT_ID, NEUTRAL_AGENT_NAME } from '@momoi/shared/constants'
 import { db, conversations, messages, users, userOauthBindings, agents, wechatBindings, qqBindings, qqGroupConversations, userAgentMemories } from '../db/index.js'
 import { skillRegistry } from '../skills/loader.js'
+import { buildExportBundle, stringifyExportYAML, parseImportYAML, validateImportBundle, summarizeImport, applyImportBundle } from '../lib/config-transfer.js'
 import AdmZip from 'adm-zip'
 import { stopBotForUser, stopAllBotsForUser } from '../im/qq/manager.js'
 import { promptsRoute } from './prompts.js'
@@ -100,6 +101,64 @@ adminRoute.get('/config/env-gateway', async (c) => {
     api_key: envVars['OPENAI_API_KEY'] || process.env.OPENAI_API_KEY || '',
     model: envVars['OPENAI_MODEL'] || process.env.OPENAI_MODEL || DEFAULT_MODEL,
   })
+})
+
+// ---- Config transfer（配置导入导出，见 lib/config-transfer.ts） ----
+
+// Export the limited settings bundle as a downloadable YAML file.
+adminRoute.get('/config/export', async (c) => {
+  const bundle = await buildExportBundle()
+  const yamlText = stringifyExportYAML(bundle)
+  return c.body(yamlText, 200, {
+    'Content-Type': 'application/x-yaml; charset=utf-8',
+    'Content-Disposition': `attachment; filename="config-output-${Date.now()}.yml"`,
+  })
+})
+
+// Import (validate + apply). `?dry_run=1` only validates and returns the
+// change summary. Validation failures also return HTTP 200 with the full
+// structured error list — the client's generic error path would collapse
+// them into a single message.
+adminRoute.post('/config/import', async (c) => {
+  const body = await c.req.json<{ content?: unknown }>().catch(() => null)
+  if (!body || typeof body.content !== 'string' || body.content.trim() === '') {
+    return c.json({ error: 'content is required' }, 400)
+  }
+  const dryRun = c.req.query('dry_run') === '1'
+
+  const parsed = parseImportYAML(body.content)
+  if (!parsed.ok) {
+    return c.json({ ok: false, errors: [parsed.error], warnings: [] })
+  }
+
+  // 校验上下文：当前中立 Agent 名 + 既有 agent id 集（区分新建/更新）
+  const validateWith = async () => {
+    const all = await listAgents()
+    const neutral = all.find((a) => a.id === NEUTRAL_AGENT_ID)
+    return validateImportBundle(parsed.data, {
+      currentNeutralAgentName: neutral?.name ?? NEUTRAL_AGENT_NAME,
+      existingAgentIds: new Set(all.map((a) => a.id)),
+    })
+  }
+
+  const validation = await validateWith()
+  if (!validation.ok || !validation.bundle) {
+    return c.json({ ok: false, errors: validation.errors, warnings: validation.warnings })
+  }
+
+  if (dryRun) {
+    const summary = await summarizeImport(validation.bundle)
+    return c.json({ ok: true, errors: [], warnings: validation.warnings, summary })
+  }
+
+  // 正式导入前重跑完整校验：dry-run 与确认之间服务端状态可能被并发修改
+  //（如中立 Agent 已被改名），fail-fast 而不是应用过期数据。
+  const revalidation = await validateWith()
+  if (!revalidation.ok || !revalidation.bundle) {
+    return c.json({ ok: false, errors: revalidation.errors, warnings: validation.warnings })
+  }
+  const applied = await applyImportBundle(revalidation.bundle)
+  return c.json({ ok: true, errors: [], warnings: revalidation.warnings, applied })
 })
 
 // ---- Agent CRUD ----

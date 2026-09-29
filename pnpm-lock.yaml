@@ -83,6 +83,9 @@ importers:
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
     devDependencies:
       '@types/adm-zip':
         specifier: ^0.5.8
