@@ -38,6 +38,8 @@ import { Type } from '@sinclair/typebox'
 import type { TSchema } from '@sinclair/typebox'
 
 import type { AppConfig, Agent, ServerMessage, ToolDefinition, TraceEntry } from '@momoi/shared/types'
+import { ErrCode } from '@momoi/shared/errors'
+import { ApiError } from '../lib/apiError.js'
 import {
   SUGGESTIONS_FENCE,
   THINKING_SEGMENT_OPEN,
@@ -663,12 +665,9 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
           const probe = await state.probe()
           if (!probe.reachable) {
             state.upstreamError = true
-            state.send({
-              type: 'error',
-              message: probe.detail
-                ? `无法连接到上游，请联系网络管理员。（探针：${probe.detail}）`
-                : '无法连接到上游，请联系网络管理员。',
-            })
+            // 探针细节只进日志，不上 wire
+            console.error('[ai] upstream unreachable — probe:', probe.detail ?? '(no detail)')
+            state.send({ type: 'error', code: ErrCode.AI_UPSTREAM_UNREACHABLE })
             break
           }
           // 网关可达 → 本请求被掐断：不 break，落入下方空回复搬迁重试分支
@@ -1030,7 +1029,14 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     }
   } catch (err) {
     if (!sseState.upstreamError) {
-      send({ type: 'error', message: err instanceof Error ? err.message : 'Unknown error' })
+      // ApiError（上游/业务错误）：结构化 code + params 上 wire；
+      // 其余异常只进日志，客户端收到统一的 INTERNAL 兜底码。
+      if (err instanceof ApiError) {
+        send({ type: 'error', code: err.code, ...(err.params ? { params: err.params } : {}) })
+      } else {
+        console.error('[ai] stream error:', err)
+        send({ type: 'error', code: ErrCode.CHAT_INTERNAL_ERROR })
+      }
     }
     return { reply: '', suggestions: [], thinking: sseState.fullThinking, agentId: resolvedAgentId, trace: sseState.trace.length > 0 ? sseState.trace : undefined }
   }

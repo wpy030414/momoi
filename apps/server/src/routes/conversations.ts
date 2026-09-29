@@ -4,6 +4,8 @@ import { eq, and, desc, gte, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
+import { ErrCode } from '@momoi/shared/errors'
+import { ApiError } from '../lib/apiError.js'
 import { broadcastConversationSync, broadcastConversationChanged, broadcastUnreadUpdate } from '../lib/realtime.js'
 import { stopBotForUser } from '../im/qq/manager.js'
 import { trackUserActivity } from './user.js'
@@ -72,7 +74,7 @@ async function advanceLastRead(userId: string, id: string): Promise<number> {
 // List user's conversations
 conversationsRoute.get('/', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   // NOTE: 子查询里的列必须写「表.列」全限定文本。drizzle 的 sql`` 模板在
   // SELECT 字段上下文把 ${table.column} 渲染成裸列名（WHERE 上下文才会带
@@ -100,11 +102,11 @@ conversationsRoute.get('/', async (c) => {
 // Get one conversation with messages (paginated to avoid O(n) payloads)
 conversationsRoute.get('/:id', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const id = c.req.param('id')
   const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
-  if (!conv) return c.json({ error: 'Not found' }, 404)
+  if (!conv) throw new ApiError(ErrCode.CONV_NOT_FOUND)
 
   // Mark as read ONLY on explicit request (?mark_read=1) — i.e. the user is
   // actively opening this conversation. Background reconciliation fetches
@@ -178,11 +180,11 @@ conversationsRoute.get('/:id', async (c) => {
 // safe to call repeatedly during group-chat bursts.
 conversationsRoute.post('/:id/read', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const id = c.req.param('id')
   const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
-  if (!conv) return c.json({ error: 'Not found' }, 404)
+  if (!conv) throw new ApiError(ErrCode.CONV_NOT_FOUND)
 
   await advanceLastRead(userId, id)
   return c.json({ success: true })
@@ -191,14 +193,14 @@ conversationsRoute.post('/:id/read', async (c) => {
 // Create a new conversation
 conversationsRoute.post('/', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const body = await c.req.json<{ title?: string; agent_id?: string; type?: 'direct' | 'group' | 'world'; agent_ids?: string[] }>()
   // 世界会话必须经 POST /api/worlds 创建（那里会一并写入 worlds 行）。
   // 必须显式拒绝，而不是靠上面的类型标注 —— 运行时这是**未经校验的 JSON**，
   // 否则能造出「有 conversations 行、无 worlds 行」的永久损坏侧边栏条目。
   if ((body as { type?: string }).type === 'world') {
-    return c.json({ error: 'World conversations must be created via POST /api/worlds' }, 400)
+    throw new ApiError(ErrCode.CONV_WORLD_CREATE_ONLY)
   }
   const id = randomUUID()
   const now = Math.floor(Date.now() / 1000)
@@ -237,7 +239,7 @@ conversationsRoute.post('/', async (c) => {
 // Delete a conversation (soft delete — mark deleted_at, preserve workspace)
 conversationsRoute.delete('/:id', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const id = c.req.param('id')
   const now = Math.floor(Date.now() / 1000)
@@ -261,7 +263,7 @@ conversationsRoute.delete('/:id', async (c) => {
 // Rename a conversation
 conversationsRoute.patch('/:id', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const id = c.req.param('id')
   const body = await c.req.json<{ title: string }>()
@@ -270,7 +272,7 @@ conversationsRoute.patch('/:id', async (c) => {
   await db.update(conversations).set({ title: body.title, updated_at: now }).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).run()
 
   const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
-  if (!conv) return c.json({ error: 'Not found' }, 404)
+  if (!conv) throw new ApiError(ErrCode.CONV_NOT_FOUND)
 
   broadcastConversationSync(userId)
 
@@ -282,12 +284,12 @@ conversationsRoute.patch('/:id', async (c) => {
 // (preserving created_at for chronological order), merge agent members, soft-delete sources.
 conversationsRoute.post('/merge', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const body = await c.req.json<{ source_ids: string[] }>()
   const sourceIds = body.source_ids
   if (!sourceIds || sourceIds.length < 2) {
-    return c.json({ error: '至少需要 2 个会话才能合并' }, 400)
+    throw new ApiError(ErrCode.CONV_MERGE_MIN_TWO)
   }
 
   // 1. Verify all source conversations exist, belong to user, are group type, not deleted
@@ -304,8 +306,8 @@ conversationsRoute.post('/merge', async (c) => {
     const s = await db.select().from(conversations)
       .where(and(eq(conversations.id, sid), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
       .get()
-    if (!s) return c.json({ error: `会话 ${sid} 不存在` }, 404)
-    if ((s as any).type !== 'group') return c.json({ error: `会话 ${sid} 不是群聊` }, 400)
+    if (!s) throw new ApiError(ErrCode.CONV_MERGE_SOURCE_NOT_FOUND, { id: sid })
+    if ((s as any).type !== 'group') throw new ApiError(ErrCode.CONV_MERGE_SOURCE_NOT_GROUP, { id: sid })
     sources.push(s)
     if (!isQqSource.has(sid)) isQqSource.set(sid, false)
   }
@@ -314,7 +316,7 @@ conversationsRoute.post('/merge', async (c) => {
   const hasQq = [...isQqSource.values()].some(v => v)
   const hasNonQq = [...isQqSource.values()].some(v => !v)
   if (hasQq && hasNonQq) {
-    return c.json({ error: '不能混合 QQ 群聊和普通群聊' }, 400)
+    throw new ApiError(ErrCode.CONV_MERGE_MIXED_TYPES)
   }
 
   // Perform merge: all steps run without a transaction. Drizzle's sql.js
@@ -406,18 +408,18 @@ conversationsRoute.post('/merge', async (c) => {
 // Revert from a specific message — delete this message and all subsequent ones
 conversationsRoute.delete('/:id/messages/:messageId', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const convId = c.req.param('id')
   const messageId = Number(c.req.param('messageId'))
 
   // Verify conversation ownership
   const conv = await db.select().from(conversations).where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
-  if (!conv) return c.json({ error: 'Not found' }, 404)
+  if (!conv) throw new ApiError(ErrCode.CONV_NOT_FOUND)
 
   // Verify message belongs to this conversation
   const msg = await db.select().from(messages).where(and(eq(messages.id, messageId), eq(messages.conversation_id, convId))).get()
-  if (!msg) return c.json({ error: 'Message not found' }, 404)
+  if (!msg) throw new ApiError(ErrCode.CONV_MESSAGE_NOT_FOUND)
 
   // Delete this message and all messages created after it (same or later timestamp)
   await db.delete(messages)

@@ -2,6 +2,8 @@
 // Momoi — Shared Types
 // ============================================================
 
+import type { ErrCode, ErrParams } from './errors.js'
+
 // ---- Conversation & Messages ----
 
 export interface Attachment {
@@ -298,7 +300,7 @@ export type ServerMessage =
   | { type: 'infinite_mode_off' }
   | { type: 'done'; reply: string; suggestions: string[]; agent_id?: string; agent_name?: string; infinite?: boolean }
   | { type: 'ask_user'; question_id: string; tool_call_id: string; questions: AskUserQuestion[]; agent_id?: string; agent_name?: string }
-  | { type: 'error'; message: string; agent_id?: string; agent_name?: string }
+  | { type: 'error'; code: string; params?: ErrParams; agent_id?: string; agent_name?: string }
   | { type: 'voice_segment'; message_id: number; index: number; audio_url: string; text: string; duration_seconds: number }
   | { type: 'voice_done'; message_id: number; total_segments: number }
 

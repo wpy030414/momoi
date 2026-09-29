@@ -5,6 +5,7 @@
 import { runPiAgentLoop } from './pi-adapter.js'
 import type { ChatMessage, ContentPart } from './provider.js'
 import type { ServerMessage, Agent, TraceEntry } from '@momoi/shared/types'
+import { ApiError } from '../lib/apiError.js'
 import type { ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
 import { getAgent, getConfig } from '../lib/config.js'
@@ -404,13 +405,21 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         }
       }
     } catch (err) {
-      console.error(`Group chat: agent ${agent.name} (${agentId}) failed:`, (err as Error).message)
+      // ApiError 的 message 是 code 字符串（或 log），不是人类可读文本——
+      // 完整 err 进日志，气泡不内嵌错误细节
+      if (err instanceof ApiError) {
+        console.error(`Group chat: agent ${agent.name} (${agentId}) failed:`, err)
+      } else {
+        console.error(`Group chat: agent ${agent.name} (${agentId}) failed:`, (err as Error).message)
+      }
       repliedAgents.add(agentId)
       send({
         type: 'agent_done',
         agent_id: agentId,
         agent_name: agent.name,
-        reply: `（${agent.name} 回复失败：${(err as Error).message}）`,
+        reply: err instanceof ApiError
+          ? `（${agent.name} 回复失败）`
+          : `（${agent.name} 回复失败：${(err as Error).message}）`,
         suggestions: [],
       })
       // Continue with next agent

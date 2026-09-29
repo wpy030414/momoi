@@ -12,6 +12,8 @@ import type { ServerMessage, Attachment, TraceEntry } from '@momoi/shared/types'
 import { randomUUID } from 'crypto'
 import { getConfig, listAgents, getAgent } from '../lib/config.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
+import { ErrCode } from '@momoi/shared/errors'
+import { ApiError } from '../lib/apiError.js'
 import { resolveQuestion, getPendingQuestion } from '../tools/ask-user-tool.js'
 import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
@@ -65,17 +67,17 @@ chatRoute.use('*', userAuthMiddleware)
  */
 chatRoute.post('/infinite-mode', async (c) => {
   const userId = (c as any).get('userId') as string
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const body = await c.req.json<{ conversation_id: string; enabled: boolean }>()
   const { conversation_id, enabled } = body
 
-  if (!conversation_id) return c.json({ error: 'conversation_id required' }, 400)
+  if (!conversation_id) throw new ApiError(ErrCode.CHAT_CONVERSATION_ID_REQUIRED)
 
   // Verify conversation ownership
   const conv = await db.select().from(conversations).where(and(eq(conversations.id, conversation_id), sql`${conversations.deleted_at} IS NULL`)).get()
   if (!conv || conv.user_id !== userId) {
-    return c.json({ error: 'Conversation not found or access denied' }, 404)
+    throw new ApiError(ErrCode.CHAT_CONVERSATION_ACCESS_DENIED)
   }
 
   if (enabled) {
@@ -97,7 +99,7 @@ chatRoute.post('/infinite-mode', async (c) => {
 chatRoute.post('/', async (c) => {
   const userId = (c as any).get('userId') as string
   if (!userId) {
-    return c.json({ error: 'Unauthorized' }, 401)
+    throw new ApiError(ErrCode.UNAUTHORIZED)
   }
 
   const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string }>()
@@ -108,7 +110,7 @@ chatRoute.post('/', async (c) => {
   let agentId: string | undefined = requestedAgentId
 
   if (!message?.trim()) {
-    return c.json({ error: 'Empty message' }, 400)
+    throw new ApiError(ErrCode.CHAT_EMPTY_MESSAGE)
   }
 
   return streamSSE(c, async (stream) => {
@@ -193,7 +195,7 @@ chatRoute.post('/', async (c) => {
 
       if (isWorld && !convId) {
         // 世界会话必须经 POST /api/worlds 创建（那里会一并写入 worlds 行）
-        send({ type: 'error', message: 'World conversations must be created via POST /api/worlds' })
+        send({ type: 'error', code: ErrCode.CONV_WORLD_CREATE_ONLY })
         return
       }
 
@@ -225,7 +227,7 @@ chatRoute.post('/', async (c) => {
         // Verify conversation belongs to user
         const conv = await db.select().from(conversations).where(and(eq(conversations.id, convId), sql`${conversations.deleted_at} IS NULL`)).get()
         if (!conv || conv.user_id !== userId) {
-          send({ type: 'error', message: 'Conversation not found or access denied' })
+          send({ type: 'error', code: ErrCode.CHAT_CONVERSATION_ACCESS_DENIED })
           return
         }
         // 单聊 Agent 锚定：已有会话的发言 Agent 以 conversations.agent_id 为准，
@@ -246,7 +248,7 @@ chatRoute.post('/', async (c) => {
         // 供编排器注入系统提示词。
         if (isWorld) {
           if (conv.type !== 'world') {
-            send({ type: 'error', message: 'Conversation is not a world' })
+            send({ type: 'error', code: ErrCode.CHAT_WORLD_ONLY })
             return
           }
           const memberRows = await db.select({ agent_id: groupConversationAgents.agent_id })
@@ -259,7 +261,7 @@ chatRoute.post('/', async (c) => {
         }
       }
       if (isWorld && groupAgentIds.length === 0) {
-        send({ type: 'error', message: 'World has no members' })
+        send({ type: 'error', code: ErrCode.CHAT_WORLD_NO_MEMBERS })
         return
       }
 
@@ -715,10 +717,10 @@ chatRoute.post('/', async (c) => {
       }
       infiniteState.delete(convId)
     } catch (err) {
-      // Catch-all: guarantee the client always receives a terminal event
-      const errMsg = err instanceof Error ? err.message : 'Internal server error'
-      console.error('Chat handler error:', errMsg)
-      send({ type: 'error', message: errMsg })
+      // Catch-all: guarantee the client always receives a terminal event.
+      // 原始异常只进日志（含完整堆栈），wire 上仅发结构化错误码。
+      console.error('[chat] pipeline:', err)
+      send({ type: 'error', code: ErrCode.CHAT_INTERNAL_ERROR })
     } finally {
       clearInterval(keepalive)
       if (relayTimer) clearTimeout(relayTimer)
@@ -733,7 +735,7 @@ chatRoute.post('/', async (c) => {
 chatRoute.post('/:conversationId/answer', async (c) => {
   const userId = (c as any).get('userId') as string
   if (!userId) {
-    return c.json({ error: 'Unauthorized' }, 401)
+    throw new ApiError(ErrCode.UNAUTHORIZED)
   }
 
   const conversationId = c.req.param('conversationId')
@@ -741,21 +743,21 @@ chatRoute.post('/:conversationId/answer', async (c) => {
   const { question_id, answer, selected_options } = body
 
   if (!question_id) {
-    return c.json({ error: 'question_id is required' }, 400)
+    throw new ApiError(ErrCode.CHAT_QUESTION_ID_REQUIRED)
   }
 
   // 验证问题属于当前会话
   const pending = getPendingQuestion(question_id)
   if (!pending) {
-    return c.json({ error: 'Question not found or has expired' }, 410)
+    throw new ApiError(ErrCode.CHAT_QUESTION_EXPIRED)
   }
   if (pending.conversationId !== conversationId) {
-    return c.json({ error: 'Question does not belong to this conversation' }, 403)
+    throw new ApiError(ErrCode.CHAT_QUESTION_WRONG_CONVERSATION)
   }
 
   const resolved = resolveQuestion(question_id, answer || '', selected_options)
   if (!resolved) {
-    return c.json({ error: 'Question already answered or expired' }, 410)
+    throw new ApiError(ErrCode.CHAT_QUESTION_ALREADY_ANSWERED)
   }
 
   trackUserActivity(userId).catch(() => {})

@@ -1,5 +1,7 @@
 import type { AppConfig } from '@momoi/shared/types'
 import type { ToolDefinition } from '@momoi/shared/types'
+import { ErrCode } from '@momoi/shared/errors'
+import { ApiError } from '../lib/apiError.js'
 
 // Multimodal content parts (OpenAI-compatible)
 export type ContentPart =
@@ -141,7 +143,7 @@ export async function* streamChatCompletion(
       })
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
-        throw new Error('API request timed out after 120s')
+        throw new ApiError(ErrCode.AI_UPSTREAM_TIMEOUT, undefined, { log: 'API request timed out after 120s' })
       }
       throw err
     }
@@ -155,7 +157,11 @@ export async function* streamChatCompletion(
     if (!response.ok && includeThinkingParams && response.status === 400) {
       const text = await response.text()
       if (!isUnsupportedThinkingField(response.status, text)) {
-        throw new Error(`API error ${response.status}: ${text}`)
+        throw new ApiError(
+          ErrCode.AI_UPSTREAM_ERROR,
+          { detail: `HTTP ${response.status}: ${text.slice(0, 300)}` },
+          { log: `API error ${response.status}: ${text}` },
+        )
       }
       endpointsWithoutThinkingParams.add(endpoint)
       response = await post(false)
@@ -166,7 +172,11 @@ export async function* streamChatCompletion(
 
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(`API error ${response.status}: ${text}`)
+    throw new ApiError(
+      ErrCode.AI_UPSTREAM_ERROR,
+      { detail: `HTTP ${response.status}: ${text.slice(0, 300)}` },
+      { log: `API error ${response.status}: ${text}` },
+    )
   }
 
   const reader = response.body!.getReader()
@@ -180,7 +190,7 @@ export async function* streamChatCompletion(
     const { done, value } = await reader.read()
     if (done) {
       if (!receivedDone && !receivedFinish) {
-        throw new Error('Upstream API stream closed unexpectedly without [DONE] signal')
+        throw new ApiError(ErrCode.AI_STREAM_CLOSED)
       }
       break
     }
@@ -227,7 +237,11 @@ export async function* streamChatCompletion(
       //「成功」流，把真实错误掩盖成无意义的空 JSON 解析错误。
       if (json.error) {
         const msg = json.error?.message || JSON.stringify(json.error)
-        throw new Error(`API error (in-stream): ${msg}`)
+        throw new ApiError(
+          ErrCode.AI_UPSTREAM_ERROR,
+          { detail: msg.slice(0, 300) },
+          { log: `API error (in-stream): ${msg}` },
+        )
       }
       const choice = json.choices?.[0]
       if (!choice) continue
