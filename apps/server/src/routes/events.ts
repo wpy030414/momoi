@@ -9,7 +9,9 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { randomUUID } from 'crypto'
+import { ErrCode } from '@momoi/shared/errors'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
+import { ApiError } from '../lib/apiError.js'
 import { subscribeRealtime, getActiveDeviceCount } from '../lib/realtime.js'
 import { scheduleOfflineNotifications, cancelOfflineNotifications } from '../lib/push-scheduler.js'
 import { triggerVisitGreeting } from '../lib/visit-greeting.js'
@@ -22,7 +24,7 @@ eventsRoute.use('*', userAuthMiddleware)
 eventsRoute.get('/', async (c) => {
   const userId = (c as any).get('userId') as string
   if (!userId) {
-    return c.json({ error: 'Unauthorized' }, 401)
+    throw new ApiError(ErrCode.UNAUTHORIZED)
   }
 
   const deviceId = c.req.query('device_id') || randomUUID()

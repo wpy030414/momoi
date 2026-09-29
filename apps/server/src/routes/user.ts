@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import { db, users, userOauthBindings, wechatBindings, qqBindings, conversations } from '../db/index.js'
 import { eq, and } from 'drizzle-orm'
 import { hashPin, verifyPin, signUserToken, isAdmin, setAuthCookie, clearAuthCookie } from '../lib/auth.js'
+import { ApiError } from '../lib/apiError.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { isDirectRegistrationOpen, isOauthRegistrationOpen } from '../lib/config.js'
 import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../lib/rateLimiter.js'
@@ -58,7 +60,7 @@ userRoute.post('/logout', (c) => {
 // Check whether the user has set a PIN
 userRoute.get('/status', async (c) => {
   const username = getUsername(c)
-  if (!username) return c.json({ error: 'Username required' }, 400)
+  if (!username) throw new ApiError(ErrCode.USER_NAME_REQUIRED)
   const row = await db.select().from(users).where(eq(users.username, username)).get()
   const [directOpen, oauthOpen] = await Promise.all([isDirectRegistrationOpen(), isOauthRegistrationOpen()])
   return c.json({ has_pin: !!(row?.pin_hash), direct_registration_open: directOpen, oauth_registration_open: oauthOpen })
@@ -67,30 +69,30 @@ userRoute.get('/status', async (c) => {
 // Verify PIN and return JWT
 userRoute.post('/verify', async (c) => {
   const username = getUsername(c)
-  if (!username) return c.json({ error: 'Username required' }, 400)
+  if (!username) throw new ApiError(ErrCode.USER_NAME_REQUIRED)
 
   const ip = getClientIp(c)
   const blocked = checkIpBlocked(ip)
   if (blocked) {
-    return c.json({ error: blocked }, 429)
+    throw new ApiError(ErrCode.USER_RATE_LIMITED, { seconds: blocked.seconds })
   }
 
   const { pin } = await c.req.json<{ pin: string }>()
   if (!pin || !PIN_RE.test(pin)) {
-    return c.json({ error: 'PIN must be 4-8 digits' }, 400)
+    throw new ApiError(ErrCode.USER_PIN_FORMAT)
   }
 
   const userRow = await db.select().from(users).where(eq(users.username, username)).get()
-  if (!userRow?.pin_hash) return c.json({ error: 'PIN not set' }, 404)
+  if (!userRow?.pin_hash) throw new ApiError(ErrCode.USER_PIN_NOT_SET)
 
   // Reject disabled accounts before issuing a token
   if (userRow.banned) {
-    return c.json({ error: 'Account is disabled' }, 403)
+    throw new ApiError(ErrCode.USER_DISABLED)
   }
 
   if (!verifyPin(pin, userRow.pin_hash)) {
     recordPinFailure(ip)
-    return c.json({ error: 'Invalid PIN' }, 401)
+    throw new ApiError(ErrCode.AUTH_INVALID_PIN)
   }
 
   clearPinFailures(ip)
@@ -103,11 +105,11 @@ userRoute.post('/verify', async (c) => {
 // Set PIN for the first time (no old PIN required)
 userRoute.post('/set-pin', async (c) => {
   const username = getUsername(c)
-  if (!username) return c.json({ error: 'Username required' }, 400)
+  if (!username) throw new ApiError(ErrCode.USER_NAME_REQUIRED)
 
   const { pin } = await c.req.json<{ pin: string }>()
   if (!pin || !PIN_RE.test(pin)) {
-    return c.json({ error: 'PIN must be 4-8 digits' }, 400)
+    throw new ApiError(ErrCode.USER_PIN_FORMAT)
   }
 
   // Check registration gate — only new users (no PIN yet) are blocked when closed
@@ -115,17 +117,17 @@ userRoute.post('/set-pin', async (c) => {
   if (!existing?.pin_hash) {
     const registrationOpen = await isDirectRegistrationOpen()
     if (!registrationOpen) {
-      return c.json({ error: 'Registration is currently closed' }, 403)
+      throw new ApiError(ErrCode.USER_REGISTRATION_CLOSED)
     }
   }
 
   if (existing?.pin_hash) {
-    return c.json({ error: 'PIN already set, use change-pin' }, 409)
+    throw new ApiError(ErrCode.USER_PIN_ALREADY_SET)
   }
 
   // Reject disabled accounts before issuing a token
   if (existing?.banned) {
-    return c.json({ error: 'Account is disabled' }, 403)
+    throw new ApiError(ErrCode.USER_DISABLED)
   }
 
   const hashed = hashPin(pin)
@@ -147,25 +149,25 @@ userRoute.post('/set-pin', async (c) => {
 // Change PIN (requires old PIN)
 userRoute.post('/change-pin', async (c) => {
   const username = getUsername(c)
-  if (!username) return c.json({ error: 'Username required' }, 400)
+  if (!username) throw new ApiError(ErrCode.USER_NAME_REQUIRED)
 
   const ip = getClientIp(c)
   const blocked = checkIpBlocked(ip)
   if (blocked) {
-    return c.json({ error: blocked }, 429)
+    throw new ApiError(ErrCode.USER_RATE_LIMITED, { seconds: blocked.seconds })
   }
 
   const { old_pin, new_pin } = await c.req.json<{ old_pin: string; new_pin: string }>()
   if (!old_pin || !PIN_RE.test(old_pin) || !new_pin || !PIN_RE.test(new_pin)) {
-    return c.json({ error: 'PIN must be 4-8 digits' }, 400)
+    throw new ApiError(ErrCode.USER_PIN_FORMAT)
   }
 
   const userRow = await db.select().from(users).where(eq(users.username, username)).get()
-  if (!userRow?.pin_hash) return c.json({ error: 'PIN not set' }, 404)
+  if (!userRow?.pin_hash) throw new ApiError(ErrCode.USER_PIN_NOT_SET)
 
   if (!verifyPin(old_pin, userRow.pin_hash)) {
     recordPinFailure(ip)
-    return c.json({ error: 'Invalid current PIN' }, 401)
+    throw new ApiError(ErrCode.AUTH_INVALID_CURRENT_PIN)
   }
 
   clearPinFailures(ip)
@@ -181,13 +183,13 @@ userRoute.post('/rename', userAuthMiddleware, async (c) => {
   const oldUsername = (c as any).get('userId') as string
   const { new_username } = await c.req.json<{ new_username: string }>()
   if (!new_username || !new_username.trim()) {
-    return c.json({ error: 'New username is required' }, 400)
+    throw new ApiError(ErrCode.USER_RENAME_REQUIRED)
   }
   const newName = new_username.trim()
-  if (newName === oldUsername) return c.json({ error: 'Same as current username' }, 400)
+  if (newName === oldUsername) throw new ApiError(ErrCode.USER_RENAME_SAME)
 
   const conflict = await db.select().from(users).where(eq(users.username, newName)).get()
-  if (conflict) return c.json({ error: 'Username already taken' }, 409)
+  if (conflict) throw new ApiError(ErrCode.USER_NAME_TAKEN)
 
   const now = Math.floor(Date.now() / 1000)
   await db.update(users).set({ username: newName, last_login_at: now }).where(eq(users.username, oldUsername)).run()
@@ -230,8 +232,8 @@ userRoute.delete('/oauth-bindings/:id', userAuthMiddleware, async (c) => {
   const bindingId = c.req.param('id')
 
   const binding = await db.select().from(userOauthBindings).where(eq(userOauthBindings.id, bindingId)).get()
-  if (!binding) return c.json({ error: 'Binding not found' }, 404)
-  if (binding.user_id !== username) return c.json({ error: 'Not your binding' }, 403)
+  if (!binding) throw new ApiError(ErrCode.USER_BINDING_NOT_FOUND)
+  if (binding.user_id !== username) throw new ApiError(ErrCode.USER_BINDING_NOT_OWNED)
 
   // Ensure at least one login method remains (PIN or other binding)
   const userRow = await db.select().from(users).where(eq(users.username, username)).get()
@@ -239,7 +241,7 @@ userRoute.delete('/oauth-bindings/:id', userAuthMiddleware, async (c) => {
     .where(eq(userOauthBindings.user_id, username)).all()
   const otherBindings = allBindings.filter((b: { id: string }) => b.id !== bindingId)
   if (!userRow?.pin_hash && otherBindings.length === 0) {
-    return c.json({ error: 'Cannot remove your only login method. Set a PIN or link another account first.' }, 400)
+    throw new ApiError(ErrCode.USER_CANNOT_REMOVE_ONLY_LOGIN)
   }
 
   await db.delete(userOauthBindings).where(eq(userOauthBindings.id, bindingId)).run()

@@ -1,6 +1,8 @@
 import type { Context, Next } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import { STAND_ALONE } from '../lib/standalone.js'
 import { verifyUserToken, getAuthToken } from '../lib/auth.js'
+import { ApiError } from '../lib/apiError.js'
 
 /**
  * User auth middleware — validates the JWT from the HttpOnly cookie
@@ -17,11 +19,11 @@ export async function userAuthMiddleware(c: Context, next: Next) {
   }
   const token = getAuthToken(c)
   if (!token) {
-    return c.json({ error: 'Unauthorized' }, 401)
+    throw new ApiError(ErrCode.UNAUTHORIZED)
   }
   const result = await verifyUserToken(token)
   if (!result) {
-    return c.json({ error: 'Invalid token' }, 401)
+    throw new ApiError(ErrCode.AUTH_INVALID_TOKEN)
   }
   c.set('userId', result.username)
   await next()

@@ -3,7 +3,9 @@ import type { Context, Next } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import { SignJWT, jwtVerify } from 'jose'
 import { eq } from 'drizzle-orm'
+import { ErrCode } from '@momoi/shared/errors'
 import { env } from './config.js'
+import { ApiError } from './apiError.js'
 import { db, settings } from '../db/index.js'
 import { STAND_ALONE } from './standalone.js'
 
@@ -82,14 +84,14 @@ export async function adminAuthMiddleware(c: Context, next: Next) {
   }
   const token = getAuthToken(c)
   if (!token) {
-    return c.json({ error: 'Unauthorized' }, 401)
+    throw new ApiError(ErrCode.UNAUTHORIZED)
   }
   const result = await verifyUserToken(token)
   if (!result) {
-    return c.json({ error: 'Invalid token' }, 401)
+    throw new ApiError(ErrCode.AUTH_INVALID_TOKEN)
   }
   if (!isAdmin(result.username)) {
-    return c.json({ error: 'Forbidden' }, 403)
+    throw new ApiError(ErrCode.AUTH_FORBIDDEN)
   }
   c.set('userId', result.username)
   await next()

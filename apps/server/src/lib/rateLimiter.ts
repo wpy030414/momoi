@@ -54,9 +54,10 @@ export function getClientIp(c: any): string {
 
 /**
  * 检查 IP 是否处于封禁状态。
- * 返回 null 表示放行，返回字符串表示封禁原因（含剩余秒数）。
+ * 返回 null 表示放行；返回 { seconds } 表示封禁中（seconds = 剩余秒数），
+ * 由调用方据此抛出 USER_RATE_LIMITED。
  */
-export function checkIpBlocked(ip: string): string | null {
+export function checkIpBlocked(ip: string): { seconds: number } | null {
   const entry = ipMap.get(ip)
   if (!entry) return null
 
@@ -70,7 +71,7 @@ export function checkIpBlocked(ip: string): string | null {
   }
 
   const remaining = Math.ceil((entry.blockedUntil - now) / 1000)
-  return `Too many failed attempts. Please try again in ${remaining} seconds.`
+  return { seconds: remaining }
 }
 
 /**

@@ -1,16 +1,38 @@
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { randomBytes, randomUUID } from 'crypto'
+import { ErrCode, type ErrParams } from '@momoi/shared/errors'
 import { db, users, userOauthBindings } from '../db/index.js'
 import { eq, and } from 'drizzle-orm'
 import { getConfig, isOauthRegistrationOpen } from '../lib/config.js'
 import { signUserToken, setAuthCookie, getAuthToken, verifyUserToken, verifyPin, hashPin } from '../lib/auth.js'
+import { ApiError } from '../lib/apiError.js'
 
 export const oauthRoute = new Hono()
 
 const STATE_COOKIE = 'momoi_oauth_state'
 const PROVIDER_COOKIE = 'momoi_oauth_provider'
 const ORIGIN_COOKIE = 'momoi_oauth_origin'
+
+/**
+ * 回调失败统一出口：清理 OAuth 临时 cookie 后 302 回 SPA。
+ * 错误码经 ?oauth_error_code=<CODE> 传递；params.detail 存在时追加
+ * oauth_error_detail（URL 序列化自动 percent-encode）。
+ */
+function fail(c: Context, code: ErrCode, params?: ErrParams) {
+  const savedOrigin = getCookie(c, ORIGIN_COOKIE)
+  const spaOrigin = savedOrigin || new URL(c.req.url).origin
+  deleteCookie(c, STATE_COOKIE, { path: '/api/oauth' })
+  deleteCookie(c, PROVIDER_COOKIE, { path: '/api/oauth' })
+  deleteCookie(c, ORIGIN_COOKIE, { path: '/api/oauth' })
+  const url = new URL('/', spaOrigin)
+  url.searchParams.set('oauth_error_code', code)
+  if (params?.detail !== undefined) {
+    url.searchParams.set('oauth_error_detail', String(params.detail))
+  }
+  return c.redirect(url.toString())
+}
 
 oauthRoute.get('/providers', async (c) => {
   const config = await getConfig()
@@ -21,7 +43,7 @@ oauthRoute.get('/:providerId/login', async (c) => {
   const providerId = c.req.param('providerId')
   const config = await getConfig()
   const provider = config.oauth_providers.find((p) => p.id === providerId)
-  if (!provider) return c.json({ error: 'Unknown OAuth2 provider' }, 404)
+  if (!provider) throw new ApiError(ErrCode.OAUTH_UNKNOWN_PROVIDER)
 
   const state = randomBytes(32).toString('hex')
   const cookieBase = { httpOnly: true, sameSite: 'Lax' as const, path: '/api/oauth', maxAge: 600 }
@@ -64,21 +86,14 @@ oauthRoute.get('/callback', async (c) => {
     deleteCookie(c, ORIGIN_COOKIE, { path: '/api/oauth' })
   }
 
-  const fail = (msg: string) => {
-    cleanupCookies()
-    const url = new URL('/', spaOrigin)
-    url.searchParams.set('oauth_error', msg)
-    return c.redirect(url.toString())
-  }
-
-  if (error) return fail(error)
-  if (!state || !storedState || state !== storedState) return fail('Invalid state')
-  if (!code) return fail('No authorization code')
-  if (!providerId) return fail('Unknown provider')
+  if (error) return fail(c, ErrCode.OAUTH_PROVIDER_ERROR, { detail: error })
+  if (!state || !storedState || state !== storedState) return fail(c, ErrCode.OAUTH_INVALID_STATE)
+  if (!code) return fail(c, ErrCode.OAUTH_NO_AUTH_CODE)
+  if (!providerId) return fail(c, ErrCode.OAUTH_UNKNOWN_PROVIDER)
 
   const config = await getConfig()
   const provider = config.oauth_providers.find((p) => p.id === providerId)
-  if (!provider) return fail('Provider not found')
+  if (!provider) return fail(c, ErrCode.OAUTH_UNKNOWN_PROVIDER)
 
   try {
     const tokenRes = await fetch(provider.token_url, {
@@ -92,7 +107,7 @@ oauthRoute.get('/callback', async (c) => {
     })
     const tokenData = await tokenRes.json() as Record<string, unknown>
     const accessToken = tokenData.access_token as string | undefined
-    if (!accessToken) return fail(`Token exchange failed: ${JSON.stringify(tokenData)}`)
+    if (!accessToken) return fail(c, ErrCode.OAUTH_TOKEN_EXCHANGE_FAILED, { detail: JSON.stringify(tokenData) })
 
     const userRes = await fetch(provider.userinfo_url, { headers: { Authorization: `Bearer ${accessToken}` } })
     const userData = await userRes.json() as Record<string, unknown>
@@ -106,8 +121,8 @@ oauthRoute.get('/callback', async (c) => {
     if (binding) {
       // Existing binding → login directly
       const userRow = await db.select().from(users).where(eq(users.username, binding.user_id)).get()
-      if (!userRow) return fail('Linked user account not found')
-      if (userRow.banned) return fail('Account is disabled')
+      if (!userRow) return fail(c, ErrCode.OAUTH_LINKED_USER_NOT_FOUND)
+      if (userRow.banned) return fail(c, ErrCode.USER_DISABLED)
 
       const now = Math.floor(Date.now() / 1000)
       await db.update(users).set({ last_login_at: now }).where(eq(users.username, binding.user_id)).run()
@@ -149,9 +164,7 @@ oauthRoute.get('/callback', async (c) => {
 
     const oauthRegOpen = await isOauthRegistrationOpen()
     if (!oauthRegOpen) {
-      const errorUrl = new URL('/', spaOrigin)
-      errorUrl.searchParams.set('oauth_error', 'OAuth registration is currently closed')
-      return c.redirect(errorUrl.toString())
+      return fail(c, ErrCode.OAUTH_REGISTRATION_CLOSED)
     }
 
     const spaUrl = new URL('/', spaOrigin)
@@ -160,7 +173,11 @@ oauthRoute.get('/callback', async (c) => {
     spaUrl.searchParams.set('provider_user_id', remoteId)
     return c.redirect(spaUrl.toString())
   } catch (err) {
-    return fail(`OAuth error: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    // 原始异常只进服务端日志；wire（302 query）仅透传 err.message 摘要
+    console.error('[oauth] callback failed:', err)
+    return fail(c, ErrCode.OAUTH_PROVIDER_ERROR, {
+      detail: err instanceof Error ? err.message : 'Unknown error',
+    })
   }
 })
 
@@ -176,27 +193,27 @@ oauthRoute.post('/register', async (c) => {
   const { provider_id, provider_user_id, action, username, pin } = body
 
   if (!provider_id || !provider_user_id || !action || !username || !pin) {
-    return c.json({ error: 'Missing required fields' }, 400)
+    throw new ApiError(ErrCode.OAUTH_MISSING_FIELDS)
   }
   if (!/^\d{4,8}$/.test(pin)) {
-    return c.json({ error: 'PIN must be 4-8 digits' }, 400)
+    throw new ApiError(ErrCode.USER_PIN_FORMAT)
   }
 
   // Prevent re-binding an already-bound OAuth identity
   const existingBinding = await db.select().from(userOauthBindings)
     .where(and(eq(userOauthBindings.provider_id, provider_id), eq(userOauthBindings.provider_user_id, provider_user_id)))
     .get()
-  if (existingBinding) return c.json({ error: 'This OAuth account is already linked' }, 409)
+  if (existingBinding) throw new ApiError(ErrCode.OAUTH_ALREADY_LINKED)
 
   const now = Math.floor(Date.now() / 1000)
 
   if (action === 'link') {
     // Link: verify existing password + PIN, then add binding
     const userRow = await db.select().from(users).where(eq(users.username, username)).get()
-    if (!userRow) return c.json({ error: 'Account not found' }, 404)
-    if (!userRow.pin_hash) return c.json({ error: 'Account has no PIN set' }, 400)
-    if (userRow.banned) return c.json({ error: 'Account is disabled' }, 403)
-    if (!verifyPin(pin, userRow.pin_hash)) return c.json({ error: 'Invalid PIN' }, 401)
+    if (!userRow) throw new ApiError(ErrCode.OAUTH_ACCOUNT_NOT_FOUND)
+    if (!userRow.pin_hash) throw new ApiError(ErrCode.OAUTH_ACCOUNT_NO_PIN)
+    if (userRow.banned) throw new ApiError(ErrCode.USER_DISABLED)
+    if (!verifyPin(pin, userRow.pin_hash)) throw new ApiError(ErrCode.AUTH_INVALID_PIN)
 
     await db.insert(userOauthBindings).values({
       id: randomUUID(),
@@ -216,12 +233,12 @@ oauthRoute.post('/register', async (c) => {
   // Check OAuth registration gate for new account creation
   const oauthOpen = await isOauthRegistrationOpen()
   if (!oauthOpen) {
-    return c.json({ error: 'OAuth registration is currently closed' }, 403)
+    throw new ApiError(ErrCode.OAUTH_REGISTRATION_CLOSED)
   }
 
   // Create: new account with PIN + OAuth binding
   const existingUser = await db.select().from(users).where(eq(users.username, username)).get()
-  if (existingUser) return c.json({ error: 'Username already taken' }, 409)
+  if (existingUser) throw new ApiError(ErrCode.USER_NAME_TAKEN)
 
   const hashed = hashPin(pin)
   await db.insert(users).values({
