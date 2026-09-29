@@ -7,8 +7,10 @@
 // /api/user route fork (userAuthMiddleware passes through userId='admin').
 
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
+import { ApiError } from '../lib/apiError.js'
 import {
   getAgent,
   listUserMemories,
@@ -42,15 +44,15 @@ memoriesRoute.post('/', async (c) => {
   const body = await c.req.json<{ agent_id?: string; content?: string }>()
   const agentId = body.agent_id?.trim() || ''
   const content = body.content?.trim() || ''
-  if (!agentId) return c.json({ error: 'agent_id is required' }, 400)
-  if (!content) return c.json({ error: 'Content cannot be empty' }, 400)
+  if (!agentId) throw new ApiError(ErrCode.MEMORY_AGENT_ID_REQUIRED)
+  if (!content) throw new ApiError(ErrCode.MEMORY_CONTENT_EMPTY)
   if (content.length > MAX_CONTENT_LENGTH) {
-    return c.json({ error: `Content too long (max ${MAX_CONTENT_LENGTH} characters)` }, 400)
+    throw new ApiError(ErrCode.MEMORY_CONTENT_TOO_LONG, { limit: MAX_CONTENT_LENGTH })
   }
   // The neutral agent never gets memories injected — reject to avoid dead rows.
-  if (agentId === NEUTRAL_AGENT_ID) return c.json({ error: 'Neutral agent cannot have memories' }, 403)
+  if (agentId === NEUTRAL_AGENT_ID) throw new ApiError(ErrCode.MEMORY_NEUTRAL_AGENT_FORBIDDEN)
   const agent = await getAgent(agentId)
-  if (!agent) return c.json({ error: 'Agent not found' }, 404)
+  if (!agent) throw new ApiError(ErrCode.ADMIN_AGENT_NOT_FOUND)
   const memory = await saveUserAgentMemory(userId, agentId, content, 'user')
   return c.json({ memory })
 })
@@ -59,12 +61,12 @@ memoriesRoute.post('/', async (c) => {
 memoriesRoute.put('/:id', async (c) => {
   const body = await c.req.json<{ content?: string }>()
   const content = body.content?.trim() || ''
-  if (!content) return c.json({ error: 'Content cannot be empty' }, 400)
+  if (!content) throw new ApiError(ErrCode.MEMORY_CONTENT_EMPTY)
   if (content.length > MAX_CONTENT_LENGTH) {
-    return c.json({ error: `Content too long (max ${MAX_CONTENT_LENGTH} characters)` }, 400)
+    throw new ApiError(ErrCode.MEMORY_CONTENT_TOO_LONG, { limit: MAX_CONTENT_LENGTH })
   }
   const memory = await updateUserAgentMemory(getUserId(c), c.req.param('id'), content)
-  if (!memory) return c.json({ error: 'Memory not found' }, 404)
+  if (!memory) throw new ApiError(ErrCode.MEMORY_NOT_FOUND)
   return c.json({ memory })
 })
 
@@ -77,6 +79,6 @@ memoriesRoute.delete('/agent/:agentId', async (c) => {
 // DELETE /:id — delete one memory (scoped to owner).
 memoriesRoute.delete('/:id', async (c) => {
   const ok = await deleteUserAgentMemory(getUserId(c), c.req.param('id'))
-  if (!ok) return c.json({ error: 'Memory not found' }, 404)
+  if (!ok) throw new ApiError(ErrCode.MEMORY_NOT_FOUND)
   return c.json({ success: true })
 })

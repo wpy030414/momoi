@@ -3,10 +3,12 @@
 // ============================================================
 
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import { db, conversations, groupConversationAgents, agents } from '../db/index.js'
 import { eq, and, sql, ne } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
+import { ApiError } from '../lib/apiError.js'
 import { broadcastGroupMembers } from '../lib/realtime.js'
 import { trackUserActivity } from './user.js'
 
@@ -22,7 +24,7 @@ groupRoute.use('*', userAuthMiddleware)
 // Get agents for a group conversation
 groupRoute.get('/:id/agents', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const convId = c.req.param('id')
 
@@ -31,7 +33,7 @@ groupRoute.get('/:id/agents', async (c) => {
     .from(conversations)
     .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
     .get()
-  if (!conv) return c.json({ error: 'Not found' }, 404)
+  if (!conv) throw new ApiError(ErrCode.CONV_NOT_FOUND)
 
   // Get agent associations
   const rows = await db.select({
@@ -58,20 +60,20 @@ groupRoute.get('/:id/agents', async (c) => {
 // Add an agent to a group conversation
 groupRoute.post('/:id/agents', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const convId = c.req.param('id')
   const body = await c.req.json<{ agent_id: string }>()
 
-  if (!body.agent_id) return c.json({ error: 'agent_id required' }, 400)
-  if (body.agent_id === NEUTRAL_AGENT_ID) return c.json({ error: 'Neutral agent cannot be added to group chat' }, 403)
+  if (!body.agent_id) throw new ApiError(ErrCode.GROUP_AGENT_ID_REQUIRED)
+  if (body.agent_id === NEUTRAL_AGENT_ID) throw new ApiError(ErrCode.GROUP_NEUTRAL_AGENT_FORBIDDEN)
 
   // Verify conversation ownership
   const conv = await db.select()
     .from(conversations)
     .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
     .get()
-  if (!conv) return c.json({ error: 'Not found' }, 404)
+  if (!conv) throw new ApiError(ErrCode.CONV_NOT_FOUND)
 
   // Get current max sort_order
   const existing = await db.select()
@@ -96,7 +98,7 @@ groupRoute.post('/:id/agents', async (c) => {
 // Remove an agent from a group conversation
 groupRoute.delete('/:id/agents/:agentId', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const convId = c.req.param('id')
   const agentId = c.req.param('agentId')
@@ -106,7 +108,7 @@ groupRoute.delete('/:id/agents/:agentId', async (c) => {
     .from(conversations)
     .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
     .get()
-  if (!conv) return c.json({ error: 'Not found' }, 404)
+  if (!conv) throw new ApiError(ErrCode.CONV_NOT_FOUND)
 
   await db.delete(groupConversationAgents)
     .where(and(

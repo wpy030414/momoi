@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
 import { randomUUID } from 'crypto'
+import { ErrCode } from '@momoi/shared/errors'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { db, conversations } from '../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
+import { ApiError } from '../lib/apiError.js'
 import { SandboxFS } from '../tools/workspace.js'
 import { uploadToCdn } from '../lib/cdn.js'
 import { isExternalImageHostingEnabled } from '../lib/config.js'
@@ -18,28 +20,28 @@ const MAX_SIZE = 20 * 1024 * 1024 // 20MB
 uploadRoute.post('/', async (c) => {
   try {
     const userId = (c as any).get('userId') as string
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+    if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
     const body = await c.req.parseBody()
     const file = body['file']
     const conversationId = body['conversation_id'] as string | undefined
 
     if (!file || typeof file === 'string') {
-      return c.json({ error: 'No file provided' }, 400)
+      throw new ApiError(ErrCode.UPLOAD_NO_FILE)
     }
 
     if (!conversationId) {
-      return c.json({ error: 'conversation_id is required' }, 400)
+      throw new ApiError(ErrCode.UPLOAD_CONVERSATION_ID_REQUIRED)
     }
 
     // Verify conversation ownership
     const conv = await db.select().from(conversations)
       .where(and(eq(conversations.id, conversationId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
       .get()
-    if (!conv) return c.json({ error: 'Conversation not found' }, 403)
+    if (!conv) throw new ApiError(ErrCode.CONV_NOT_FOUND)
 
     if (file.size > MAX_SIZE) {
-      return c.json({ error: 'File too large (max 20MB)' }, 400)
+      throw new ApiError(ErrCode.UPLOAD_FILE_TOO_LARGE, { limit: '20MB' })
     }
 
     const ext = (file.name || '').split('.').pop()
@@ -71,7 +73,11 @@ uploadRoute.post('/', async (c) => {
       type: file.type,
     })
   } catch (err: any) {
-    console.error('Upload failed:', err)
-    return c.json({ error: err.message || 'Upload failed' }, 500)
+    if (err instanceof ApiError) throw err
+    throw new ApiError(
+      ErrCode.UPLOAD_FAILED,
+      { detail: (err.message || 'Upload failed').slice(0, 300) },
+      { log: 'upload failed', cause: err },
+    )
   }
 })

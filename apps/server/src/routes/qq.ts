@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import { db, conversations, qqBindings, qqGroupConversations } from '../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
+import { ApiError } from '../lib/apiError.js'
 import { withNamedLock } from '../im/locks.js'
 import { getAccessToken } from '../im/qq/api.js'
 import { isBotReady, restartBotForUser, stopBotForUser } from '../im/qq/manager.js'
@@ -33,7 +35,8 @@ qqRoute.get('/bind', userAuthMiddleware, async (c) => {
       bound_at: binding.created_at,
       conversation_id: binding.conversation_id || undefined,
       status: binding.status,
-      error: binding.error || undefined,
+      error_code: binding.error ? ErrCode.QQ_CONNECTION_FAILED : undefined,
+      error_detail: binding.error || undefined,
       group_enabled: binding.group_enabled === true,
       ws_connected: isBotReady(userId, agentId),
     })
@@ -49,7 +52,8 @@ qqRoute.get('/bind', userAuthMiddleware, async (c) => {
       bound_at: b.created_at,
       conversation_id: b.conversation_id || undefined,
       status: b.status,
-      error: b.error || undefined,
+      error_code: b.error ? ErrCode.QQ_CONNECTION_FAILED : undefined,
+      error_detail: b.error || undefined,
       group_enabled: b.group_enabled === true,
       ws_connected: isBotReady(userId, b.agent_id),
     })),
@@ -66,7 +70,7 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
 
   const agentId = (body.agent_id || '').trim()
   if (!agentId) {
-    return c.json({ error: 'agent_id is required' }, 400)
+    throw new ApiError(ErrCode.QQ_AGENT_ID_REQUIRED)
   }
 
   // If a target conversation is specified, verify it belongs to this user
@@ -80,10 +84,10 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
         sql`${conversations.deleted_at} IS NULL`,
       )).get()
     if (!conv) {
-      return c.json({ error: 'Conversation not found' }, 404)
+      throw new ApiError(ErrCode.CONV_NOT_FOUND)
     }
     if (conv.type === 'group' || conv.type === 'world') {
-      return c.json({ error: 'Group and world conversations cannot be bound to QQ' }, 400)
+      throw new ApiError(ErrCode.QQ_CONV_NOT_BINDABLE)
     }
   }
 
@@ -104,15 +108,17 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
     if (hasCredentials) {
       // 凭证必须成对提供
       if (!appId || !appSecret) {
-        return c.json({ error: 'AppID 与 AppSecret 必须成对提供' }, 400)
+        throw new ApiError(ErrCode.QQ_CREDENTIALS_REQUIRED)
       }
       // 凭证校验（不起 WS）：失败 fail-fast，用户在表单内联看到原因
       try {
         await getAccessToken({ appId, appSecret })
       } catch (err) {
-        return c.json({
-          error: `AppID 或 AppSecret 无效：${(err as Error).message}`,
-        }, 400)
+        throw new ApiError(
+          ErrCode.QQ_CREDENTIALS_INVALID,
+          { detail: String((err as Error).message ?? '').slice(0, 300) },
+          { log: 'QQ credential check failed', cause: err },
+        )
       }
 
       if (existing) {
@@ -152,12 +158,12 @@ qqRoute.post('/bind', userAuthMiddleware, async (c) => {
 
     // 无凭证：已有绑定时仅更新路由目标或 group_enabled toggle
     if (!existing) {
-      return c.json({ error: '缺少 AppID/AppSecret 且不存在已有绑定' }, 400)
+      throw new ApiError(ErrCode.QQ_MISSING_EXISTING_BINDING)
     }
     // 仅 toggle group_enabled（无 conv_id 也无凭证）—— 即时生效无需重启连接
     if (!targetConvId) {
       if (typeof body.group_enabled !== 'boolean') {
-        return c.json({ error: '缺少 conv_id' }, 400)
+        throw new ApiError(ErrCode.QQ_CONV_ID_REQUIRED)
       }
       await db.update(qqBindings).set({
         group_enabled: body.group_enabled ? 1 : 0,
@@ -188,7 +194,7 @@ qqRoute.delete('/bind', userAuthMiddleware, async (c) => {
   const body = await c.req.json().catch(() => ({})) as { agent_id?: string }
   const agentId = (body.agent_id || '').trim()
   if (!agentId) {
-    return c.json({ error: 'agent_id is required' }, 400)
+    throw new ApiError(ErrCode.QQ_AGENT_ID_REQUIRED)
   }
   stopBotForUser(userId, agentId)
   // Clean up group conversation mappings tied to this agent's app_id

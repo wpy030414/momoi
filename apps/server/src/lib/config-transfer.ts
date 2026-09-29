@@ -4,8 +4,8 @@
  * 导出：从 DB 收集「体验 + 智能体（除声线）+ 用户注册设置」为 version 1 的
  * YAML 包（config-output-${Date.now()}.yml）。绝不包含网关密钥与 voice 字段。
  *
- * 导入：YAML 解析（maxAliasCount/merge 防护）→ 白名单严格校验（错误结构化为
- * {path, message}，message 为可被前端 st() 反向翻译的英文句）→ dry-run 摘要 /
+ * 导入：YAML 解析（maxAliasCount/merge 防护）→ 白名单严格校验（错误以 ErrCode
+ * （CONFIG_IMPORT_*）+ params 结构化，前端按 errors.<code> 渲染）→ dry-run 摘要 /
  * 正式应用。合并语义：省略 = 不更新（绝非置空）；Agent 按 id upsert；本地
  * 多余 Agent 与 OAuth 供应商一律保留（保护会话/绑定外键）。
  *
@@ -16,6 +16,7 @@
 
 import { randomUUID } from 'crypto'
 import YAML from 'yaml'
+import { ErrCode } from '@momoi/shared/errors'
 import { NEUTRAL_AGENT_ID, NEUTRAL_AGENT_NAME } from '@momoi/shared/constants'
 import type { Agent, AppConfig, ConfigExportBundle, ImportIssue, ImportSummary, OAuth2Provider } from '@momoi/shared/types'
 
@@ -25,54 +26,6 @@ export const MAX_IMPORT_BYTES = 10 * 1024 * 1024
 const EXPERIENCE_KEYS = ['app_name', 'app_favicon', 'app_background', 'show_github', 'recommended_questions', 'followup_questions'] as const
 const AGENT_KEYS = ['id', 'role', 'name', 'model', 'system_prompt', 'avatar'] as const
 const PROVIDER_KEYS = ['id', 'name', 'client_id', 'client_secret', 'authorize_url', 'token_url', 'userinfo_url', 'scopes'] as const
-
-// ---- 错误消息（英文整句；en.json 的 serverSide.admin.configImport.* 需逐字符一致，
-// ---- {{param}} 占位符由 st() 的 pattern 匹配还原） ----
-
-const MSG = {
-  notMapping: 'Import file must be a YAML mapping',
-  tooLarge: 'Import file is too large (max 10MB)',
-  invalidYaml: 'Invalid YAML file',
-  unknownTopKey: 'Unknown top-level key: {{key}}',
-  badVersion: 'Unsupported config format version {{version}}, expected 1',
-  badExportedAt: 'exported_at must be a short string or number',
-  empty: 'Nothing to import: no settings sections found',
-  badSection: '{{section}} must be a mapping',
-  badAgentsType: 'agents must be an array',
-  unknownExperienceKey: 'Unknown key in experience: {{key}}',
-  badAppName: 'app_name must be 1-50 characters',
-  badImageUrl: '{{field}} must be empty, a data:image URL, or an http(s) URL',
-  badBoolean: '{{field}} must be a boolean',
-  notArray: '{{field}} must be an array',
-  tooManyQuestions: 'recommended_questions allows at most 3 items',
-  tooManyFollowups: 'followup_questions allows at most 5 items',
-  badQuestion: '{{field}} items must be 1-20 characters',
-  unknownAgentKey: 'Unknown key in agents item: {{key}}',
-  badRole: 'Agent role must be "default" or "neutral"',
-  badAgentId: 'Agent id must be a valid UUID',
-  neutralNameImmutable: 'The neutral agent name cannot be changed by import',
-  neutralAvatarIgnored: 'Neutral agent avatar is ignored',
-  agentNameRequired: 'Agent name is required when creating a new agent',
-  badAgentName: 'Agent name must be 1-30 characters',
-  badModel: 'Agent model must be at most 200 characters',
-  badSystemPrompt: 'Agent system_prompt is too long (max 100000 characters)',
-  duplicateAgentId: 'Duplicate agent id in import file: {{id}}',
-  tooManyAgents: 'Too many agents in import file (max 50)',
-  unknownUsersKey: 'Unknown key in users: {{key}}',
-  tooManyProviders: 'Too many OAuth providers (max 10)',
-  badProviderEntry: 'oauth_providers items must be mappings',
-  unknownProviderKey: 'Unknown key in oauth_providers item: {{key}}',
-  badProviderField: 'OAuth provider {{field}} must be a string',
-  badProviderId: 'Invalid OAuth provider id, use 1-64 letters, digits, - or _',
-  badProviderName: 'OAuth provider name must be 1-64 characters',
-  badProviderUrl: 'OAuth provider {{field}} must be an http(s) URL',
-  providerTooLong: 'OAuth provider {{field}} must be at most 500 characters',
-  duplicateProviderId: 'Duplicate OAuth provider id: {{id}}',
-} as const
-
-function interpolate(tpl: string, params: Record<string, string | number>): string {
-  return tpl.replace(/\{\{(\w+)\}\}/g, (_, k: string) => String(params[k] ?? `{{${k}}}`))
-}
 
 // ---- 可注入依赖 ----
 
@@ -145,7 +98,7 @@ export function stringifyExportYAML(bundle: ConfigExportBundle): string {
 
 export function parseImportYAML(text: string): { ok: true; data: unknown } | { ok: false; error: ImportIssue } {
   if (Buffer.byteLength(text, 'utf8') > MAX_IMPORT_BYTES) {
-    return { ok: false, error: { path: '', message: MSG.tooLarge } }
+    return { ok: false, error: { path: '', code: ErrCode.CONFIG_IMPORT_TOO_LARGE } }
   }
   try {
     // maxAliasCount 防 YAML 锚点引用爆炸（billion laughs）；merge:false 禁
@@ -153,7 +106,8 @@ export function parseImportYAML(text: string): { ok: true; data: unknown } | { o
     const data = YAML.parse(text, { maxAliasCount: 100, merge: false, prettyErrors: true })
     return { ok: true, data }
   } catch (err) {
-    return { ok: false, error: { path: (err as Error).message.split('\n')[0].slice(0, 200), message: MSG.invalidYaml } }
+    // 解析器报错首行放 path 定位（≤200 字符）；code 驱动前端 errors.<code> 渲染
+    return { ok: false, error: { path: (err as Error).message.split('\n')[0].slice(0, 200), code: ErrCode.CONFIG_IMPORT_INVALID_YAML } }
   }
 }
 
@@ -201,23 +155,23 @@ export function validateImportBundle(raw: unknown, ctx: ValidateContext): Valida
   const warnings: ImportIssue[] = []
 
   if (!isPlainObject(raw)) {
-    return { ok: false, errors: [{ path: '', message: MSG.notMapping }], warnings }
+    return { ok: false, errors: [{ path: '', code: ErrCode.CONFIG_IMPORT_NOT_MAPPING }], warnings }
   }
 
   // --- 顶层白名单 ---
   for (const key of Object.keys(raw)) {
     if (!['version', 'exported_at', 'experience', 'agents', 'users'].includes(key)) {
-      errors.push({ path: key, message: interpolate(MSG.unknownTopKey, { key }) })
+      errors.push({ path: key, code: ErrCode.CONFIG_IMPORT_UNKNOWN_TOP_KEY, params: { key } })
     }
   }
   // version：缺省视为当前版本（手写最小文件可不写）；出现则必须 === 1
   if (raw.version !== undefined && raw.version !== BUNDLE_VERSION) {
-    errors.push({ path: 'version', message: interpolate(MSG.badVersion, { version: String(raw.version) }) })
+    errors.push({ path: 'version', code: ErrCode.CONFIG_IMPORT_BAD_VERSION, params: { version: String(raw.version) } })
   }
   if (raw.exported_at !== undefined) {
     const v = raw.exported_at
     const ok = (typeof v === 'string' && v.length <= 40) || typeof v === 'number'
-    if (!ok) errors.push({ path: 'exported_at', message: MSG.badExportedAt })
+    if (!ok) errors.push({ path: 'exported_at', code: ErrCode.CONFIG_IMPORT_BAD_EXPORTED_AT })
   }
 
   const experience = raw.experience !== undefined ? validateExperience(raw.experience, errors) : undefined
@@ -228,7 +182,7 @@ export function validateImportBundle(raw: unknown, ctx: ValidateContext): Valida
   // 变更（如中立条目只带 avatar）时归一化产物为空，但该段依然是"有效导入"
   // ——只产生 warning，不构成 empty。
   if (raw.experience === undefined && raw.agents === undefined && raw.users === undefined) {
-    errors.push({ path: '', message: MSG.empty })
+    errors.push({ path: '', code: ErrCode.CONFIG_IMPORT_EMPTY })
   }
 
   if (errors.length > 0) return { ok: false, errors, warnings }
@@ -243,20 +197,20 @@ export function validateImportBundle(raw: unknown, ctx: ValidateContext): Valida
 
 function validateExperience(v: unknown, errors: ImportIssue[]): ConfigExportBundle['experience'] | undefined {
   if (!isPlainObject(v)) {
-    errors.push({ path: 'experience', message: interpolate(MSG.badSection, { section: 'experience' }) })
+    errors.push({ path: 'experience', code: ErrCode.CONFIG_IMPORT_BAD_SECTION, params: { section: 'experience' } })
     return undefined
   }
   const out: NonNullable<ConfigExportBundle['experience']> = {}
   for (const key of Object.keys(v)) {
     if (!(EXPERIENCE_KEYS as readonly string[]).includes(key)) {
-      errors.push({ path: `experience.${key}`, message: interpolate(MSG.unknownExperienceKey, { key }) })
+      errors.push({ path: `experience.${key}`, code: ErrCode.CONFIG_IMPORT_UNKNOWN_EXPERIENCE_KEY, params: { key } })
       continue
     }
     const val = v[key]
     switch (key) {
       case 'app_name': {
         if (typeof val !== 'string' || val.trim().length < 1 || val.trim().length > 50) {
-          errors.push({ path: 'experience.app_name', message: MSG.badAppName })
+          errors.push({ path: 'experience.app_name', code: ErrCode.CONFIG_IMPORT_BAD_APP_NAME })
         } else {
           out.app_name = val.trim()
         }
@@ -265,7 +219,7 @@ function validateExperience(v: unknown, errors: ImportIssue[]): ConfigExportBund
       case 'app_favicon':
       case 'app_background': {
         if (typeof val !== 'string' || !isValidImageValue(val)) {
-          errors.push({ path: `experience.${key}`, message: interpolate(MSG.badImageUrl, { field: key }) })
+          errors.push({ path: `experience.${key}`, code: ErrCode.CONFIG_IMPORT_BAD_IMAGE_URL, params: { field: key } })
         } else {
           out[key] = val
         }
@@ -273,7 +227,7 @@ function validateExperience(v: unknown, errors: ImportIssue[]): ConfigExportBund
       }
       case 'show_github': {
         if (typeof val !== 'boolean') {
-          errors.push({ path: 'experience.show_github', message: interpolate(MSG.badBoolean, { field: 'show_github' }) })
+          errors.push({ path: 'experience.show_github', code: ErrCode.CONFIG_IMPORT_BAD_BOOLEAN, params: { field: 'show_github' } })
         } else {
           out.show_github = val
         }
@@ -282,11 +236,11 @@ function validateExperience(v: unknown, errors: ImportIssue[]): ConfigExportBund
       case 'recommended_questions':
       case 'followup_questions': {
         const max = key === 'recommended_questions' ? 3 : 5
-        const maxMsg = key === 'recommended_questions' ? MSG.tooManyQuestions : MSG.tooManyFollowups
+        const maxCode = key === 'recommended_questions' ? ErrCode.CONFIG_IMPORT_TOO_MANY_QUESTIONS : ErrCode.CONFIG_IMPORT_TOO_MANY_FOLLOWUPS
         if (!Array.isArray(val)) {
-          errors.push({ path: `experience.${key}`, message: interpolate(MSG.notArray, { field: key }) })
+          errors.push({ path: `experience.${key}`, code: ErrCode.CONFIG_IMPORT_NOT_ARRAY, params: { field: key } })
         } else if (val.length > max) {
-          errors.push({ path: `experience.${key}`, message: maxMsg })
+          errors.push({ path: `experience.${key}`, code: maxCode })
         } else {
           const items: string[] = []
           let valid = true
@@ -298,7 +252,7 @@ function validateExperience(v: unknown, errors: ImportIssue[]): ConfigExportBund
             items.push(q.trim())
           }
           if (!valid) {
-            errors.push({ path: `experience.${key}`, message: interpolate(MSG.badQuestion, { field: key }) })
+            errors.push({ path: `experience.${key}`, code: ErrCode.CONFIG_IMPORT_BAD_QUESTION, params: { field: key } })
           } else {
             out[key] = items
           }
@@ -312,11 +266,11 @@ function validateExperience(v: unknown, errors: ImportIssue[]): ConfigExportBund
 
 function validateAgents(v: unknown, ctx: ValidateContext, errors: ImportIssue[], warnings: ImportIssue[]): ConfigTransferAgentOut[] | undefined {
   if (!Array.isArray(v)) {
-    errors.push({ path: 'agents', message: MSG.badAgentsType })
+    errors.push({ path: 'agents', code: ErrCode.CONFIG_IMPORT_BAD_AGENTS_TYPE })
     return undefined
   }
   if (v.length > 50) {
-    errors.push({ path: 'agents', message: MSG.tooManyAgents })
+    errors.push({ path: 'agents', code: ErrCode.CONFIG_IMPORT_TOO_MANY_AGENTS })
     return undefined
   }
   const out: ConfigTransferAgentOut[] = []
@@ -324,18 +278,18 @@ function validateAgents(v: unknown, ctx: ValidateContext, errors: ImportIssue[],
   for (let i = 0; i < v.length; i++) {
     const entry = v[i]
     if (!isPlainObject(entry)) {
-      errors.push({ path: `agents[${i}]`, message: interpolate(MSG.badSection, { section: `agents[${i}]` }) })
+      errors.push({ path: `agents[${i}]`, code: ErrCode.CONFIG_IMPORT_BAD_SECTION, params: { section: `agents[${i}]` } })
       continue
     }
     for (const key of Object.keys(entry)) {
       if (!(AGENT_KEYS as readonly string[]).includes(key)) {
-        errors.push({ path: `agents[${i}].${key}`, message: interpolate(MSG.unknownAgentKey, { key }) })
+        errors.push({ path: `agents[${i}].${key}`, code: ErrCode.CONFIG_IMPORT_UNKNOWN_AGENT_KEY, params: { key } })
       }
     }
 
     const role = entry.role
     if (role !== undefined && role !== 'default' && role !== 'neutral') {
-      errors.push({ path: `agents[${i}].role`, message: MSG.badRole })
+      errors.push({ path: `agents[${i}].role`, code: ErrCode.CONFIG_IMPORT_BAD_ROLE })
       continue
     }
 
@@ -344,30 +298,30 @@ function validateAgents(v: unknown, ctx: ValidateContext, errors: ImportIssue[],
       const neutral: ConfigTransferAgentOut = { id: NEUTRAL_AGENT_ID, role: 'neutral' }
       if (entry.name !== undefined) {
         if (typeof entry.name !== 'string' || entry.name.trim() !== ctx.currentNeutralAgentName.trim()) {
-          errors.push({ path: `agents[${i}].name`, message: MSG.neutralNameImmutable })
+          errors.push({ path: `agents[${i}].name`, code: ErrCode.CONFIG_IMPORT_NEUTRAL_NAME_IMMUTABLE })
         }
         // 与现值一致 → 不进 bundle（name 永不通过导入修改）
       }
       // 非空 avatar 才提示忽略；空串（导出文件自带）静默跳过，避免噪音
       if (entry.avatar !== undefined && entry.avatar !== '') {
-        warnings.push({ path: `agents[${i}].avatar`, message: MSG.neutralAvatarIgnored })
+        warnings.push({ path: `agents[${i}].avatar`, code: ErrCode.CONFIG_IMPORT_NEUTRAL_AVATAR_IGNORED })
       }
       if (entry.model !== undefined) {
         if (typeof entry.model !== 'string' || entry.model.length > 200) {
-          errors.push({ path: `agents[${i}].model`, message: MSG.badModel })
+          errors.push({ path: `agents[${i}].model`, code: ErrCode.CONFIG_IMPORT_BAD_MODEL })
         } else {
           neutral.model = entry.model
         }
       }
       if (entry.system_prompt !== undefined) {
         if (typeof entry.system_prompt !== 'string' || entry.system_prompt.length > 100000) {
-          errors.push({ path: `agents[${i}].system_prompt`, message: MSG.badSystemPrompt })
+          errors.push({ path: `agents[${i}].system_prompt`, code: ErrCode.CONFIG_IMPORT_BAD_SYSTEM_PROMPT })
         } else {
           neutral.system_prompt = entry.system_prompt
         }
       }
       if (seenIds.has(NEUTRAL_AGENT_ID)) {
-        errors.push({ path: `agents[${i}]`, message: interpolate(MSG.duplicateAgentId, { id: NEUTRAL_AGENT_ID }) })
+        errors.push({ path: `agents[${i}]`, code: ErrCode.CONFIG_IMPORT_DUPLICATE_AGENT_ID, params: { id: NEUTRAL_AGENT_ID } })
       }
       seenIds.add(NEUTRAL_AGENT_ID)
       // 无变更字段（name 同名不进、avatar 被忽略、model/system_prompt 缺省）也保留
@@ -380,35 +334,35 @@ function validateAgents(v: unknown, ctx: ValidateContext, errors: ImportIssue[],
     const agent: ConfigTransferAgentOut = { role: 'default' }
     if (entry.id !== undefined) {
       if (typeof entry.id !== 'string' || !UUID_RE.test(entry.id)) {
-        errors.push({ path: `agents[${i}].id`, message: MSG.badAgentId })
+        errors.push({ path: `agents[${i}].id`, code: ErrCode.CONFIG_IMPORT_BAD_AGENT_ID })
         continue
       }
       agent.id = entry.id
     }
     if (entry.name !== undefined) {
       if (typeof entry.name !== 'string' || entry.name.trim().length < 1 || entry.name.trim().length > 30) {
-        errors.push({ path: `agents[${i}].name`, message: MSG.badAgentName })
+        errors.push({ path: `agents[${i}].name`, code: ErrCode.CONFIG_IMPORT_BAD_AGENT_NAME })
       } else {
         agent.name = entry.name.trim()
       }
     }
     if (entry.model !== undefined) {
       if (typeof entry.model !== 'string' || entry.model.length > 200) {
-        errors.push({ path: `agents[${i}].model`, message: MSG.badModel })
+        errors.push({ path: `agents[${i}].model`, code: ErrCode.CONFIG_IMPORT_BAD_MODEL })
       } else {
         agent.model = entry.model
       }
     }
     if (entry.system_prompt !== undefined) {
       if (typeof entry.system_prompt !== 'string' || entry.system_prompt.length > 100000) {
-        errors.push({ path: `agents[${i}].system_prompt`, message: MSG.badSystemPrompt })
+        errors.push({ path: `agents[${i}].system_prompt`, code: ErrCode.CONFIG_IMPORT_BAD_SYSTEM_PROMPT })
       } else {
         agent.system_prompt = entry.system_prompt
       }
     }
     if (entry.avatar !== undefined) {
       if (typeof entry.avatar !== 'string' || !isValidImageValue(entry.avatar)) {
-        errors.push({ path: `agents[${i}].avatar`, message: interpolate(MSG.badImageUrl, { field: 'avatar' }) })
+        errors.push({ path: `agents[${i}].avatar`, code: ErrCode.CONFIG_IMPORT_BAD_IMAGE_URL, params: { field: 'avatar' } })
       } else {
         agent.avatar = entry.avatar
       }
@@ -416,11 +370,11 @@ function validateAgents(v: unknown, ctx: ValidateContext, errors: ImportIssue[],
     // 新建（id 缺省或库中不存在）必须提供 name；更新可省略任意字段
     const isNew = agent.id === undefined || !ctx.existingAgentIds.has(agent.id)
     if (isNew && agent.name === undefined) {
-      errors.push({ path: `agents[${i}].name`, message: MSG.agentNameRequired })
+      errors.push({ path: `agents[${i}].name`, code: ErrCode.CONFIG_IMPORT_AGENT_NAME_REQUIRED })
     }
     if (agent.id !== undefined) {
       if (seenIds.has(agent.id)) {
-        errors.push({ path: `agents[${i}]`, message: interpolate(MSG.duplicateAgentId, { id: agent.id }) })
+        errors.push({ path: `agents[${i}]`, code: ErrCode.CONFIG_IMPORT_DUPLICATE_AGENT_ID, params: { id: agent.id } })
       }
       seenIds.add(agent.id)
     }
@@ -431,25 +385,25 @@ function validateAgents(v: unknown, ctx: ValidateContext, errors: ImportIssue[],
 
 function validateUsers(v: unknown, errors: ImportIssue[]): NonNullable<ConfigExportBundle['users']> | undefined {
   if (!isPlainObject(v)) {
-    errors.push({ path: 'users', message: interpolate(MSG.badSection, { section: 'users' }) })
+    errors.push({ path: 'users', code: ErrCode.CONFIG_IMPORT_BAD_SECTION, params: { section: 'users' } })
     return undefined
   }
   const out: NonNullable<ConfigExportBundle['users']> = {}
   for (const key of Object.keys(v)) {
     if (!['direct_registration_open', 'oauth_registration_open', 'oauth_providers'].includes(key)) {
-      errors.push({ path: `users.${key}`, message: interpolate(MSG.unknownUsersKey, { key }) })
+      errors.push({ path: `users.${key}`, code: ErrCode.CONFIG_IMPORT_UNKNOWN_USERS_KEY, params: { key } })
     }
   }
   if (v.direct_registration_open !== undefined) {
     if (typeof v.direct_registration_open !== 'boolean') {
-      errors.push({ path: 'users.direct_registration_open', message: interpolate(MSG.badBoolean, { field: 'direct_registration_open' }) })
+      errors.push({ path: 'users.direct_registration_open', code: ErrCode.CONFIG_IMPORT_BAD_BOOLEAN, params: { field: 'direct_registration_open' } })
     } else {
       out.direct_registration_open = v.direct_registration_open
     }
   }
   if (v.oauth_registration_open !== undefined) {
     if (typeof v.oauth_registration_open !== 'boolean') {
-      errors.push({ path: 'users.oauth_registration_open', message: interpolate(MSG.badBoolean, { field: 'oauth_registration_open' }) })
+      errors.push({ path: 'users.oauth_registration_open', code: ErrCode.CONFIG_IMPORT_BAD_BOOLEAN, params: { field: 'oauth_registration_open' } })
     } else {
       out.oauth_registration_open = v.oauth_registration_open
     }
@@ -457,9 +411,9 @@ function validateUsers(v: unknown, errors: ImportIssue[]): NonNullable<ConfigExp
   if (v.oauth_providers !== undefined) {
     const arr = v.oauth_providers
     if (!Array.isArray(arr)) {
-      errors.push({ path: 'users.oauth_providers', message: interpolate(MSG.notArray, { field: 'oauth_providers' }) })
+      errors.push({ path: 'users.oauth_providers', code: ErrCode.CONFIG_IMPORT_NOT_ARRAY, params: { field: 'oauth_providers' } })
     } else if (arr.length > 10) {
-      errors.push({ path: 'users.oauth_providers', message: MSG.tooManyProviders })
+      errors.push({ path: 'users.oauth_providers', code: ErrCode.CONFIG_IMPORT_TOO_MANY_PROVIDERS })
     } else {
       const providers: Partial<OAuth2Provider>[] = []
       const seen = new Set<string>()
@@ -467,29 +421,29 @@ function validateUsers(v: unknown, errors: ImportIssue[]): NonNullable<ConfigExp
       for (let i = 0; i < arr.length; i++) {
         const p = arr[i]
         if (!isPlainObject(p)) {
-          errors.push({ path: `users.oauth_providers[${i}]`, message: MSG.badProviderEntry })
+          errors.push({ path: `users.oauth_providers[${i}]`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_ENTRY })
           valid = false
           continue
         }
         for (const key of Object.keys(p)) {
           if (!(PROVIDER_KEYS as readonly string[]).includes(key)) {
-            errors.push({ path: `users.oauth_providers[${i}].${key}`, message: interpolate(MSG.unknownProviderKey, { key }) })
+            errors.push({ path: `users.oauth_providers[${i}].${key}`, code: ErrCode.CONFIG_IMPORT_UNKNOWN_PROVIDER_KEY, params: { key } })
             valid = false
           }
         }
         // id：合并主键，必填
         if (typeof p.id !== 'string' || !PROVIDER_ID_RE.test(p.id)) {
-          errors.push({ path: `users.oauth_providers[${i}].id`, message: MSG.badProviderId })
+          errors.push({ path: `users.oauth_providers[${i}].id`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_ID })
           valid = false
         } else if (seen.has(p.id)) {
-          errors.push({ path: `users.oauth_providers[${i}].id`, message: interpolate(MSG.duplicateProviderId, { id: p.id }) })
+          errors.push({ path: `users.oauth_providers[${i}].id`, code: ErrCode.CONFIG_IMPORT_DUPLICATE_PROVIDER_ID, params: { id: p.id } })
           valid = false
         } else {
           seen.add(p.id)
         }
         // name：展示名，必填
         if (typeof p.name !== 'string' || p.name.trim().length < 1 || p.name.trim().length > 64) {
-          errors.push({ path: `users.oauth_providers[${i}].name`, message: MSG.badProviderName })
+          errors.push({ path: `users.oauth_providers[${i}].name`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_NAME })
           valid = false
         }
         const entry: Partial<OAuth2Provider> = { id: p.id as string, name: (p.name as string).trim() }
@@ -497,7 +451,7 @@ function validateUsers(v: unknown, errors: ImportIssue[]): NonNullable<ConfigExp
           const val = p[field]
           if (val === undefined) continue
           if (typeof val !== 'string' || val.length > 500) {
-            errors.push({ path: `users.oauth_providers[${i}].${field}`, message: interpolate(MSG.providerTooLong, { field }) })
+            errors.push({ path: `users.oauth_providers[${i}].${field}`, code: ErrCode.CONFIG_IMPORT_PROVIDER_TOO_LONG, params: { field } })
             valid = false
           } else {
             entry[field] = val
@@ -507,7 +461,7 @@ function validateUsers(v: unknown, errors: ImportIssue[]): NonNullable<ConfigExp
           const val = p[field]
           if (val === undefined) continue
           if (typeof val !== 'string' || val === '' || !isHttpUrl(val)) {
-            errors.push({ path: `users.oauth_providers[${i}].${field}`, message: interpolate(MSG.badProviderUrl, { field }) })
+            errors.push({ path: `users.oauth_providers[${i}].${field}`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_URL, params: { field } })
             valid = false
           } else {
             entry[field] = val

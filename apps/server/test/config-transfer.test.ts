@@ -12,6 +12,7 @@
 // 全部通过 fake deps 注入，不触发 db/index.js 的建库副作用。
 
 import { describe, it, expect } from 'vitest'
+import { ErrCode } from '@momoi/shared/errors'
 import {
   stringifyExportYAML,
   parseImportYAML,
@@ -169,8 +170,8 @@ function validateYAML(text: string, ctx = makeCtx()) {
   return { parseFailed: false as const, ...validateImportBundle(parsed.data, ctx) }
 }
 
-function msgs(issues: ImportIssue[]): string[] {
-  return issues.map((e) => e.message)
+function codes(issues: ImportIssue[]): ErrCode[] {
+  return issues.map((e) => e.code)
 }
 
 // ---- parseImportYAML ----
@@ -185,13 +186,17 @@ describe('parseImportYAML', () => {
   it('拒绝超过 10MB 的文本', () => {
     const r = parseImportYAML('x: ' + 'a'.repeat(MAX_IMPORT_BYTES))
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error.message).toBe('Import file is too large (max 10MB)')
+    if (!r.ok) expect(r.error.code).toBe(ErrCode.CONFIG_IMPORT_TOO_LARGE)
   })
 
   it('拒绝语法错误的 YAML', () => {
     const r = parseImportYAML('a: [unclosed')
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error.message).toBe('Invalid YAML file')
+    if (!r.ok) {
+      expect(r.error.code).toBe(ErrCode.CONFIG_IMPORT_INVALID_YAML)
+      // path 携带解析器报错首行（≤200 字符）供定位
+      expect(r.error.path.length).toBeGreaterThan(0)
+    }
   })
 
   it('拒绝锚点引用爆炸（maxAliasCount）', () => {
@@ -215,7 +220,7 @@ describe('validateImportBundle — 顶层', () => {
     for (const raw of [['a'], 'hello', null, 42]) {
       const r = validateImportBundle(raw, makeCtx())
       expect(r.ok).toBe(false)
-      expect(msgs(r.errors)).toContain('Import file must be a YAML mapping')
+      expect(codes(r.errors)).toContain(ErrCode.CONFIG_IMPORT_NOT_MAPPING)
     }
   })
 
@@ -224,7 +229,11 @@ describe('validateImportBundle — 顶层', () => {
     expect(r.parseFailed).toBe(false)
     if (!r.parseFailed) {
       expect(r.ok).toBe(false)
-      expect(msgs(r.errors)).toContain('Unknown top-level key: mcp_servers')
+      expect(r.errors).toContainEqual({
+        path: 'mcp_servers',
+        code: ErrCode.CONFIG_IMPORT_UNKNOWN_TOP_KEY,
+        params: { key: 'mcp_servers' },
+      })
     }
   })
 
@@ -240,7 +249,7 @@ describe('validateImportBundle — 顶层', () => {
     expect(r.parseFailed).toBe(false)
     if (!r.parseFailed) {
       expect(r.ok).toBe(false)
-      expect(msgs(r.errors)).toContain('Nothing to import: no settings sections found')
+      expect(codes(r.errors)).toContain(ErrCode.CONFIG_IMPORT_EMPTY)
     }
   })
 })
@@ -251,8 +260,12 @@ describe('validateImportBundle — experience', () => {
     expect(r.parseFailed).toBe(false)
     if (!r.parseFailed) {
       expect(r.ok).toBe(false)
-      expect(msgs(r.errors)).toContain('Unknown key in experience: api_key')
-      expect(msgs(r.errors)).toContain('app_name must be 1-50 characters')
+      expect(r.errors).toContainEqual({
+        path: 'experience.api_key',
+        code: ErrCode.CONFIG_IMPORT_UNKNOWN_EXPERIENCE_KEY,
+        params: { key: 'api_key' },
+      })
+      expect(codes(r.errors)).toContain(ErrCode.CONFIG_IMPORT_BAD_APP_NAME)
     }
   })
 
@@ -291,7 +304,11 @@ describe('validateImportBundle — experience', () => {
     expect(tooManyFq.parseFailed || tooManyFq.ok).toBe(false)
     const tooLong = validateYAML('experience:\n  recommended_questions: ["123456789012345678901"]')
     expect(tooLong.parseFailed).toBe(false)
-    if (!tooLong.parseFailed) expect(msgs(tooLong.errors)).toContain('recommended_questions items must be 1-20 characters')
+    if (!tooLong.parseFailed) expect(tooLong.errors).toContainEqual({
+      path: 'experience.recommended_questions',
+      code: ErrCode.CONFIG_IMPORT_BAD_QUESTION,
+      params: { field: 'recommended_questions' },
+    })
     const blank = validateYAML('experience:\n  recommended_questions: ["   "]')
     expect(blank.parseFailed || blank.ok).toBe(false)
   })
@@ -303,7 +320,7 @@ describe('validateImportBundle — agents', () => {
     expect(renamed.parseFailed).toBe(false)
     if (!renamed.parseFailed) {
       expect(renamed.ok).toBe(false)
-      expect(msgs(renamed.errors)).toContain('The neutral agent name cannot be changed by import')
+      expect(codes(renamed.errors)).toContain(ErrCode.CONFIG_IMPORT_NEUTRAL_NAME_IMMUTABLE)
     }
     const same = validateYAML(`agents:\n  - id: ${NEUTRAL_AGENT_ID}\n    name: ${NEUTRAL_AGENT_NAME}\n    model: gpt-4o`)
     expect(same.parseFailed).toBe(false)
@@ -313,7 +330,7 @@ describe('validateImportBundle — agents', () => {
     expect(withAvatar.parseFailed).toBe(false)
     if (!withAvatar.parseFailed) {
       expect(withAvatar.ok).toBe(true)
-      expect(msgs(withAvatar.warnings)).toContain('Neutral agent avatar is ignored')
+      expect(codes(withAvatar.warnings)).toContain(ErrCode.CONFIG_IMPORT_NEUTRAL_AVATAR_IGNORED)
       // avatar 被忽略——不进 bundle
       expect(withAvatar.bundle?.agents?.[0]?.avatar).toBeUndefined()
     }
@@ -338,11 +355,11 @@ describe('validateImportBundle — agents', () => {
   it('新建（id 缺省或库中不存在）必须提供 name；已存在者可省略全部字段以外的键', () => {
     const noNameNew = validateYAML('agents:\n  - model: gpt-4o')
     expect(noNameNew.parseFailed).toBe(false)
-    if (!noNameNew.parseFailed) expect(msgs(noNameNew.errors)).toContain('Agent name is required when creating a new agent')
+    if (!noNameNew.parseFailed) expect(codes(noNameNew.errors)).toContain(ErrCode.CONFIG_IMPORT_AGENT_NAME_REQUIRED)
 
     const noNameUnknownId = validateYAML(`agents:\n  - id: ${UUID_B}\n    model: gpt-4o`)
     expect(noNameUnknownId.parseFailed).toBe(false)
-    if (!noNameUnknownId.parseFailed) expect(msgs(noNameUnknownId.errors)).toContain('Agent name is required when creating a new agent')
+    if (!noNameUnknownId.parseFailed) expect(codes(noNameUnknownId.errors)).toContain(ErrCode.CONFIG_IMPORT_AGENT_NAME_REQUIRED)
 
     // UUID_A 已存在：只给 model，省略 name → 通过
     const partialUpdate = validateYAML(`agents:\n  - id: ${UUID_A}\n    model: claude`)
@@ -357,18 +374,26 @@ describe('validateImportBundle — agents', () => {
     expect(badRole.parseFailed || badRole.ok).toBe(false)
     const unknownKey = validateYAML(`agents:\n  - id: ${UUID_A}\n    voice_enabled: true`)
     expect(unknownKey.parseFailed).toBe(false)
-    if (!unknownKey.parseFailed) expect(msgs(unknownKey.errors)).toContain('Unknown key in agents item: voice_enabled')
+    if (!unknownKey.parseFailed) expect(unknownKey.errors).toContainEqual({
+      path: 'agents[0].voice_enabled',
+      code: ErrCode.CONFIG_IMPORT_UNKNOWN_AGENT_KEY,
+      params: { key: 'voice_enabled' },
+    })
   })
 
   it('51 个 agent 拒绝；文件内重复 id 拒绝', () => {
     const many = 'agents:\n' + Array.from({ length: 51 }, (_, i) => `  - name: A${i}`).join('\n')
     const tooMany = validateYAML(many)
     expect(tooMany.parseFailed).toBe(false)
-    if (!tooMany.parseFailed) expect(msgs(tooMany.errors)).toContain('Too many agents in import file (max 50)')
+    if (!tooMany.parseFailed) expect(codes(tooMany.errors)).toContain(ErrCode.CONFIG_IMPORT_TOO_MANY_AGENTS)
 
     const dup = validateYAML(`agents:\n  - id: ${UUID_A}\n    name: A\n  - id: ${UUID_A}\n    name: B`)
     expect(dup.parseFailed).toBe(false)
-    if (!dup.parseFailed) expect(msgs(dup.errors)).toContain(`Duplicate agent id in import file: ${UUID_A}`)
+    if (!dup.parseFailed) expect(dup.errors).toContainEqual({
+      path: 'agents[1]',
+      code: ErrCode.CONFIG_IMPORT_DUPLICATE_AGENT_ID,
+      params: { id: UUID_A },
+    })
   })
 
   it('普通条目带 role: neutral 之外的中立 id 伪装——id 即中立 ID 时按中立处理', () => {
@@ -389,8 +414,16 @@ describe('validateImportBundle — users', () => {
     const r = validateYAML('users:\n  mcp: true\n  direct_registration_open: "yes"')
     expect(r.parseFailed).toBe(false)
     if (!r.parseFailed) {
-      expect(msgs(r.errors)).toContain('Unknown key in users: mcp')
-      expect(msgs(r.errors)).toContain('direct_registration_open must be a boolean')
+      expect(r.errors).toContainEqual({
+        path: 'users.mcp',
+        code: ErrCode.CONFIG_IMPORT_UNKNOWN_USERS_KEY,
+        params: { key: 'mcp' },
+      })
+      expect(r.errors).toContainEqual({
+        path: 'users.direct_registration_open',
+        code: ErrCode.CONFIG_IMPORT_BAD_BOOLEAN,
+        params: { field: 'direct_registration_open' },
+      })
     }
   })
 
@@ -401,17 +434,29 @@ describe('validateImportBundle — users', () => {
     expect(longId.parseFailed || longId.ok).toBe(false)
     const badUrl = validateYAML('users:\n  oauth_providers:\n    - id: gh\n      name: X\n      authorize_url: ftp://x')
     expect(badUrl.parseFailed).toBe(false)
-    if (!badUrl.parseFailed) expect(msgs(badUrl.errors)).toContain('OAuth provider authorize_url must be an http(s) URL')
+    if (!badUrl.parseFailed) expect(badUrl.errors).toContainEqual({
+      path: 'users.oauth_providers[0].authorize_url',
+      code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_URL,
+      params: { field: 'authorize_url' },
+    })
     const unknownField = validateYAML('users:\n  oauth_providers:\n    - id: gh\n      name: X\n      extra: 1')
     expect(unknownField.parseFailed).toBe(false)
-    if (!unknownField.parseFailed) expect(msgs(unknownField.errors)).toContain('Unknown key in oauth_providers item: extra')
+    if (!unknownField.parseFailed) expect(unknownField.errors).toContainEqual({
+      path: 'users.oauth_providers[0].extra',
+      code: ErrCode.CONFIG_IMPORT_UNKNOWN_PROVIDER_KEY,
+      params: { key: 'extra' },
+    })
     const dup = validateYAML('users:\n  oauth_providers:\n    - id: gh\n      name: X\n    - id: gh\n      name: Y')
     expect(dup.parseFailed).toBe(false)
-    if (!dup.parseFailed) expect(msgs(dup.errors)).toContain('Duplicate OAuth provider id: gh')
+    if (!dup.parseFailed) expect(dup.errors).toContainEqual({
+      path: 'users.oauth_providers[1].id',
+      code: ErrCode.CONFIG_IMPORT_DUPLICATE_PROVIDER_ID,
+      params: { id: 'gh' },
+    })
     const many = 'users:\n  oauth_providers:\n' + Array.from({ length: 11 }, (_, i) => `    - id: p${i}\n      name: P${i}`).join('\n')
     const tooMany = validateYAML(many)
     expect(tooMany.parseFailed).toBe(false)
-    if (!tooMany.parseFailed) expect(msgs(tooMany.errors)).toContain('Too many OAuth providers (max 10)')
+    if (!tooMany.parseFailed) expect(codes(tooMany.errors)).toContain(ErrCode.CONFIG_IMPORT_TOO_MANY_PROVIDERS)
   })
 
   it('合法 provider 通过，省略的可选字段不进 bundle', () => {

@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import { db, conversations, wechatBindings } from '../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
+import { ApiError } from '../lib/apiError.js'
 import { withNamedLock } from '../im/locks.js'
 import { broadcastConversationSync } from '../lib/realtime.js'
 import QRCode from 'qrcode'
@@ -57,10 +59,10 @@ wechatRoute.post('/bind', userAuthMiddleware, async (c) => {
         sql`${conversations.deleted_at} IS NULL`,
       )).get()
     if (!conv) {
-      return c.json({ error: 'Conversation not found' }, 404)
+      throw new ApiError(ErrCode.CONV_NOT_FOUND)
     }
     if (conv.type === 'group' || conv.type === 'world') {
-      return c.json({ error: 'Group and world conversations cannot be bound to WeChat' }, 400)
+      throw new ApiError(ErrCode.WECHAT_CONV_NOT_BINDABLE)
     }
   }
 
@@ -70,7 +72,7 @@ wechatRoute.post('/bind', userAuthMiddleware, async (c) => {
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    return c.json({ error: `iLink QR code request failed: ${res.status} ${text}` }, 502)
+    throw new ApiError(ErrCode.WECHAT_QR_FAILED, { detail: `HTTP ${res.status} ${text}`.slice(0, 300) })
   }
 
   const data = await res.json() as { qrcode: string; qrcode_img_content: string; expiry_ms: number }
@@ -127,7 +129,7 @@ wechatRoute.post('/bind', userAuthMiddleware, async (c) => {
 wechatRoute.get('/bind/status', userAuthMiddleware, async (c) => {
   const userId = (c as any).get('userId') as string
   const qrcodeId = c.req.query('qrcode_id')
-  if (!qrcodeId) return c.json({ error: 'Missing qrcode_id' }, 400)
+  if (!qrcodeId) throw new ApiError(ErrCode.WECHAT_QRCODE_ID_REQUIRED)
 
   const res = await fetch(`${ILLINK_BASE}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcodeId)}`, {
     headers: {
@@ -171,7 +173,7 @@ wechatRoute.get('/bind/status', userAuthMiddleware, async (c) => {
               sql`${conversations.deleted_at} IS NULL`,
             )).get()
           if (!targetConv) {
-            return c.json({ status: 'expired', error: '目标会话已删除，请重新选择会话并绑定。' })
+            return c.json({ status: 'expired', code: ErrCode.WECHAT_CONV_DELETED })
           }
         }
 
@@ -194,7 +196,7 @@ wechatRoute.get('/bind/status', userAuthMiddleware, async (c) => {
         // showing, and unbindConversationWechat removed the row). Refuse the
         // confirmation instead of creating a conversation_id='' zombie binding
         // that would never route.
-        return c.json({ status: 'expired', error: '目标会话已删除，请重新选择会话并绑定。' })
+        return c.json({ status: 'expired', code: ErrCode.WECHAT_CONV_DELETED })
       }
 
       broadcastConversationSync(userId)

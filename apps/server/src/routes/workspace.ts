@@ -3,10 +3,12 @@
 // ============================================================
 
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import path from 'path'
 import { db, conversations } from '../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
+import { ApiError } from '../lib/apiError.js'
 import { SandboxFS } from '../tools/workspace.js'
 
 export const workspaceRoute = new Hono()
@@ -44,7 +46,7 @@ function guessMime(ext: string): string {
 // GET /api/workspace/:conversationId/file/*filepath
 workspaceRoute.get('/:conversationId/file/*', async (c) => {
   const userId = (c as any).get('userId') as string
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const convId = c.req.param('conversationId')
 
@@ -52,12 +54,12 @@ workspaceRoute.get('/:conversationId/file/*', async (c) => {
   const conv = await db.select().from(conversations)
     .where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`))
     .get()
-  if (!conv) return c.json({ error: 'Not found' }, 404)
+  if (!conv) throw new ApiError(ErrCode.WORKSPACE_NOT_FOUND)
 
   // Extract filepath after /file/
   const fullPath = c.req.path
   const fileIdx = fullPath.indexOf('/file/')
-  if (fileIdx === -1) return c.json({ error: 'Invalid path' }, 400)
+  if (fileIdx === -1) throw new ApiError(ErrCode.WORKSPACE_INVALID_PATH)
   const filePath = decodeURIComponent(fullPath.slice(fileIdx + 6))
 
   const workspace = new SandboxFS(convId)
@@ -78,6 +80,6 @@ workspaceRoute.get('/:conversationId/file/*', async (c) => {
       },
     })
   } catch {
-    return c.json({ error: 'File not found' }, 404)
+    throw new ApiError(ErrCode.WORKSPACE_FILE_NOT_FOUND)
   }
 })

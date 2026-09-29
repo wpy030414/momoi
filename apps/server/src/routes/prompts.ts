@@ -12,6 +12,8 @@
 // ============================================================
 
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
+import { ApiError } from '../lib/apiError.js'
 import { promptEngine, normalizePreviewContext, seedToolDescriptions } from '../prompts/index.js'
 import { getAllTools } from '../ai/tools.js'
 
@@ -31,9 +33,9 @@ promptsRoute.get('/', (c) => {
 // 单个片段：元信息 + 当前渲染文本（按 id 查询，id 含 `/`，故用 query 而非路径参数）
 promptsRoute.get('/fragment', (c) => {
   const id = c.req.query('id')
-  if (!id) return c.json({ error: 'id is required' }, 400)
+  if (!id) throw new ApiError(ErrCode.PROMPT_ID_REQUIRED)
   const fragment = promptEngine.list().find((f) => f.id === id)
-  if (!fragment) return c.json({ error: `Fragment not found: ${id}` }, 404)
+  if (!fragment) throw new ApiError(ErrCode.PROMPT_FRAGMENT_NOT_FOUND, { id })
   return c.json({ fragment, text: promptEngine.render(id) })
 })
 
@@ -42,10 +44,11 @@ promptsRoute.post('/preview', async (c) => {
   const body = await c.req.json<{ target?: string; context?: Record<string, unknown> }>()
     .catch(() => ({} as { target?: string; context?: Record<string, unknown> }))
   const target = body.target
-  if (!target) return c.json({ error: 'target is required' }, 400)
+  if (!target) throw new ApiError(ErrCode.PROMPT_TARGET_REQUIRED)
   if (!promptEngine.hasTarget(target)) {
+    // 保持 c.json：附带 targets 附加字段（候选清单），随 body 一起上 wire
     return c.json({
-      error: `Unknown target: ${target}`,
+      code: ErrCode.NOT_FOUND,
       targets: promptEngine.listTargets().map((t) => t.target),
     }, 404)
   }

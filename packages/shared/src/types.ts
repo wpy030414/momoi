@@ -158,10 +158,11 @@ export interface ConfigExportBundle {
   }
 }
 
-/** 结构化导入问题：path 定位（如 agents[2].name），message 为可被 st() 反向翻译的英文句 */
+/** 结构化导入问题：path 定位（如 agents[2].name）；code/params 驱动前端 errors.<code> 渲染 */
 export interface ImportIssue {
   path: string
-  message: string
+  code: ErrCode
+  params?: ErrParams
 }
 
 /** dry-run / 正式导入共用的变更摘要 */

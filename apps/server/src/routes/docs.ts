@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, relative, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ApiError } from '../lib/apiError.js'
 import { repoRoot } from '../lib/paths.js'
 
 // Resolve docs/ relative to this file's location:
@@ -70,12 +72,12 @@ docsRoute.get('/:path{.+}', async (c) => {
   // Security: prevent directory traversal
   const safePath = join(docsDir, docPath).replace(/\\/g, '/')
   if (!safePath.startsWith(docsDir.replace(/\\/g, '/'))) {
-    return c.json({ error: 'Invalid path' }, 403)
+    throw new ApiError(ErrCode.DOCS_INVALID_PATH)
   }
   try {
     const content = await readFile(safePath, 'utf-8')
     return c.json({ content, path: docPath })
   } catch {
-    return c.json({ error: 'Not found' }, 404)
+    throw new ApiError(ErrCode.DOCS_NOT_FOUND)
   }
 })

@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
+import { ErrCode } from '@momoi/shared/errors'
 import { adminAuthMiddleware } from '../lib/auth.js'
+import { ApiError } from '../lib/apiError.js'
 import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen, isExternalImageHostingEnabled, getTtsConfig, updateTtsConfig, deleteUserMemories } from '../lib/config.js'
 import { base64ToBuffer, uploadToCdn } from '../lib/cdn.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '@momoi/shared/constants'
@@ -122,7 +124,7 @@ adminRoute.get('/config/export', async (c) => {
 adminRoute.post('/config/import', async (c) => {
   const body = await c.req.json<{ content?: unknown }>().catch(() => null)
   if (!body || typeof body.content !== 'string' || body.content.trim() === '') {
-    return c.json({ error: 'content is required' }, 400)
+    throw new ApiError(ErrCode.ADMIN_CONTENT_REQUIRED)
   }
   const dryRun = c.req.query('dry_run') === '1'
 
@@ -171,7 +173,7 @@ adminRoute.get('/agents', async (c) => {
 adminRoute.post('/agents', async (c) => {
   const body = await c.req.json<{ name: string; model: string; system_prompt: string; avatar?: string; voice_enabled?: boolean; voice_sample_url?: string; voice_settings?: string }>()
   if (!body.name?.trim()) {
-    return c.json({ error: 'Agent name is required' }, 400)
+    throw new ApiError(ErrCode.ADMIN_AGENT_NAME_REQUIRED)
   }
 
   // External image hosting: convert base64 avatar → CDN URL
@@ -210,7 +212,7 @@ adminRoute.put('/agents/:id', async (c) => {
 
   const agent = await updateAgent(id, body)
   if (!agent) {
-    return c.json({ error: 'Agent not found' }, 404)
+    throw new ApiError(ErrCode.ADMIN_AGENT_NOT_FOUND)
   }
   return c.json({ agent })
 })
@@ -220,12 +222,12 @@ adminRoute.delete('/agents/:id', async (c) => {
 
   // Neutral agent cannot be deleted
   if (id === NEUTRAL_AGENT_ID) {
-    return c.json({ error: 'Neutral agent cannot be deleted' }, 403)
+    throw new ApiError(ErrCode.ADMIN_NEUTRAL_AGENT_DELETE)
   }
 
   const ok = await deleteAgent(id)
   if (!ok) {
-    return c.json({ error: 'Agent not found' }, 404)
+    throw new ApiError(ErrCode.ADMIN_AGENT_NOT_FOUND)
   }
   return c.json({ success: true })
 })
@@ -285,7 +287,7 @@ adminRoute.get('/stats/conversations/:id/messages', async (c) => {
     .get()
 
   if (!conv) {
-    return c.json({ error: 'Conversation not found' }, 404)
+    throw new ApiError(ErrCode.CONV_NOT_FOUND)
   }
 
   const msgs = await db
@@ -357,13 +359,13 @@ adminRoute.put('/users/:username/ban', async (c) => {
   const adminUser = (c as any).get('userId') as string
 
   if (username === adminUser) {
-    return c.json({ error: 'Cannot ban yourself' }, 403)
+    throw new ApiError(ErrCode.ADMIN_CANNOT_BAN_SELF)
   }
 
   const { banned } = await c.req.json<{ banned: boolean }>()
   const existing = await db.select().from(users).where(eq(users.username, username)).get()
   if (!existing) {
-    return c.json({ error: 'User not found' }, 404)
+    throw new ApiError(ErrCode.ADMIN_USER_NOT_FOUND)
   }
 
   await db.update(users).set({ banned }).where(eq(users.username, username)).run()
@@ -376,12 +378,12 @@ adminRoute.delete('/users/:username', async (c) => {
   const adminUser = (c as any).get('userId') as string
 
   if (username === adminUser) {
-    return c.json({ error: 'Cannot delete yourself' }, 403)
+    throw new ApiError(ErrCode.ADMIN_CANNOT_DELETE_SELF)
   }
 
   const userRow = await db.select().from(users).where(eq(users.username, username)).get()
   if (!userRow) {
-    return c.json({ error: 'User not found' }, 404)
+    throw new ApiError(ErrCode.ADMIN_USER_NOT_FOUND)
   }
 
   // Delete all conversations (cascades to messages, group_conversation_agents)
@@ -415,12 +417,12 @@ adminRoute.post('/users/:username/forget-memories', async (c) => {
   const adminUser = (c as any).get('userId') as string
 
   if (username === adminUser) {
-    return c.json({ error: 'Cannot forget own memories' }, 403)
+    throw new ApiError(ErrCode.ADMIN_CANNOT_FORGET_OWN)
   }
 
   const userRow = await db.select().from(users).where(eq(users.username, username)).get()
   if (!userRow) {
-    return c.json({ error: 'User not found' }, 404)
+    throw new ApiError(ErrCode.ADMIN_USER_NOT_FOUND)
   }
 
   const count = await deleteUserMemories(username)
@@ -464,11 +466,11 @@ adminRoute.post('/skills/upload', async (c) => {
     const file = body['file']
 
     if (!file || typeof file === 'string') {
-      return c.json({ error: 'No file provided' }, 400)
+      throw new ApiError(ErrCode.ADMIN_SKILL_NO_FILE)
     }
 
     if (file.size > MAX_UPLOAD_SIZE) {
-      return c.json({ error: 'File too large (max 50MB)' }, 400)
+      throw new ApiError(ErrCode.ADMIN_SKILL_FILE_TOO_LARGE, { limit: '50MB' })
     }
 
     const buffer = Buffer.from(await file.arrayBuffer())
@@ -477,7 +479,7 @@ adminRoute.post('/skills/upload', async (c) => {
     // Zip slip protection
     for (const entry of zip.getEntries()) {
       if (entry.entryName.includes('..')) {
-        return c.json({ error: 'Invalid zip: path traversal detected' }, 400)
+        throw new ApiError(ErrCode.ADMIN_SKILL_ZIP_TRAVERSAL)
       }
     }
 
@@ -497,14 +499,14 @@ adminRoute.post('/skills/upload', async (c) => {
     // Validate SKILL.md exists
     const skillPath = path.join(actualDir, 'SKILL.md')
     if (!fs.existsSync(skillPath)) {
-      return c.json({ error: 'No valid SKILL.md found in archive' }, 400)
+      throw new ApiError(ErrCode.ADMIN_SKILL_NO_SKILL_MD)
     }
 
     // Parse frontmatter to get skill name
     const raw = fs.readFileSync(skillPath, 'utf-8')
     const match = raw.match(/^---\n([\s\S]*?)\n---\n/)
     if (!match) {
-      return c.json({ error: 'Invalid SKILL.md: missing frontmatter' }, 400)
+      throw new ApiError(ErrCode.ADMIN_SKILL_NO_FRONTMATTER)
     }
 
     const yamlStr = match[1]
@@ -518,7 +520,7 @@ adminRoute.post('/skills/upload', async (c) => {
     }
 
     if (!skillName) {
-      return c.json({ error: 'Invalid SKILL.md: name is required in frontmatter' }, 400)
+      throw new ApiError(ErrCode.ADMIN_SKILL_NAME_REQUIRED)
     }
 
     // Move to final destination
@@ -539,8 +541,12 @@ adminRoute.post('/skills/upload', async (c) => {
     if (fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true })
     }
-    console.error('Skill upload failed:', err)
-    return c.json({ error: err.message || 'Upload failed' }, 500)
+    if (err instanceof ApiError) throw err
+    throw new ApiError(
+      ErrCode.UPLOAD_FAILED,
+      { detail: (err.message || 'Upload failed').slice(0, 300) },
+      { log: 'skill upload failed', cause: err },
+    )
   }
 })
 
@@ -550,7 +556,7 @@ adminRoute.post('/skills/install', async (c) => {
   const skillDir = path.resolve(repoRoot(), 'skills', body.name)
 
   if (!fs.existsSync(path.join(skillDir, 'SKILL.md'))) {
-    return c.json({ error: `Skill "${body.name}" not found or missing SKILL.md` }, 404)
+    throw new ApiError(ErrCode.ADMIN_SKILL_NOT_FOUND, { name: body.name })
   }
 
   skillRegistry.refresh()
@@ -580,7 +586,7 @@ adminRoute.get('/mcp-servers', async (c) => {
 adminRoute.post('/mcp-servers', async (c) => {
   const body = await c.req.json<{ name: string; url: string }>()
   if (!body.name?.trim() || !body.url?.trim()) {
-    return c.json({ error: 'Name and URL are required' }, 400)
+    throw new ApiError(ErrCode.ADMIN_MCP_FIELDS_REQUIRED)
   }
   const server = await createMcpServer(body.name.trim(), body.url.trim())
   return c.json({ server })
@@ -590,14 +596,14 @@ adminRoute.put('/mcp-servers/:id', async (c) => {
   const id = c.req.param('id')
   const body = await c.req.json<{ name?: string; url?: string; enabled?: boolean }>()
   const server = await updateMcpServer(id, body)
-  if (!server) return c.json({ error: 'MCP server not found' }, 404)
+  if (!server) throw new ApiError(ErrCode.ADMIN_MCP_NOT_FOUND)
   return c.json({ server })
 })
 
 adminRoute.delete('/mcp-servers/:id', async (c) => {
   const id = c.req.param('id')
   const ok = await deleteMcpServer(id)
-  if (!ok) return c.json({ error: 'MCP server not found' }, 404)
+  if (!ok) throw new ApiError(ErrCode.ADMIN_MCP_NOT_FOUND)
   return c.json({ success: true })
 })
 
@@ -661,24 +667,24 @@ adminRoute.put('/tts/config', async (c) => {
 adminRoute.post('/agents/:id/voice/upload', async (c) => {
   const id = c.req.param('id')
   const agent = await getAgentStub(id)
-  if (!agent) return c.json({ error: 'Agent not found' }, 404)
+  if (!agent) throw new ApiError(ErrCode.ADMIN_AGENT_NOT_FOUND)
 
   const body = await c.req.parseBody()
   const file = body['file']
   if (!file || typeof file === 'string') {
-    return c.json({ error: 'No audio file provided' }, 400)
+    throw new ApiError(ErrCode.ADMIN_VOICE_NO_FILE)
   }
 
   const MAX_AUDIO_SIZE = 10 * 1024 * 1024 // 10MB
   if (file.size > MAX_AUDIO_SIZE) {
-    return c.json({ error: 'File too large (max 10MB)' }, 400)
+    throw new ApiError(ErrCode.ADMIN_VOICE_FILE_TOO_LARGE, { limit: '10MB' })
   }
 
   // Validate audio type
   const ext = path.extname(file.name).toLowerCase()
   const allowedExts = ['.wav', '.mp3', '.ogg', '.m4a', '.flac']
   if (!allowedExts.includes(ext)) {
-    return c.json({ error: `Unsupported audio format: ${ext}. Allowed: ${allowedExts.join(', ')}` }, 400)
+    throw new ApiError(ErrCode.ADMIN_VOICE_FORMAT_UNSUPPORTED, { ext, allowed: allowedExts.join(', ') })
   }
 
   const voiceDir = path.resolve(repoRoot(), 'data', 'voice', id)
@@ -698,14 +704,14 @@ adminRoute.post('/agents/:id/voice/upload', async (c) => {
 adminRoute.post('/agents/:id/voice/clone', async (c) => {
   const id = c.req.param('id')
   const agent = await getAgentStub(id)
-  if (!agent) return c.json({ error: 'Agent not found' }, 404)
+  if (!agent) throw new ApiError(ErrCode.ADMIN_AGENT_NOT_FOUND)
 
   const samplePath = path.resolve(repoRoot(), 'data', 'voice', id, 'sample.wav')
   if (!fs.existsSync(samplePath)) {
     // Try mp3
     const mp3Path = path.resolve(repoRoot(), 'data', 'voice', id, 'sample.mp3')
     if (!fs.existsSync(mp3Path)) {
-      return c.json({ error: 'No voice sample uploaded. Please upload a reference audio first.' }, 400)
+      throw new ApiError(ErrCode.ADMIN_VOICE_NO_SAMPLE)
     }
   }
 
@@ -723,15 +729,19 @@ adminRoute.post('/agents/:id/voice/clone', async (c) => {
 
     return c.json({ success: true, speaker_id: speakerId })
   } catch (err: any) {
-    console.error('Voice clone failed:', err)
-    return c.json({ error: `Voice clone failed: ${err.message}` }, 500)
+    if (err instanceof ApiError) throw err
+    throw new ApiError(
+      ErrCode.ADMIN_VOICE_CLONE_FAILED,
+      { detail: String(err.message ?? '').slice(0, 300) },
+      { log: 'voice clone failed', cause: err },
+    )
   }
 })
 
 adminRoute.get('/agents/:id/voice/status', async (c) => {
   const id = c.req.param('id')
   const agent = await getAgentStub(id)
-  if (!agent) return c.json({ error: 'Agent not found' }, 404)
+  if (!agent) throw new ApiError(ErrCode.ADMIN_AGENT_NOT_FOUND)
 
   const settings = parseOrEmpty(agent.voice_settings)
   return c.json({
@@ -744,7 +754,7 @@ adminRoute.get('/agents/:id/voice/status', async (c) => {
 adminRoute.delete('/agents/:id/voice', async (c) => {
   const id = c.req.param('id')
   const agent = await getAgentStub(id)
-  if (!agent) return c.json({ error: 'Agent not found' }, 404)
+  if (!agent) throw new ApiError(ErrCode.ADMIN_AGENT_NOT_FOUND)
 
   const voiceDir = path.resolve(repoRoot(), 'data', 'voice', id)
   if (fs.existsSync(voiceDir)) {

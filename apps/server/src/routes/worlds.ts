@@ -13,10 +13,12 @@
 
 import { Hono } from 'hono'
 import { randomUUID } from 'crypto'
+import { ErrCode } from '@momoi/shared/errors'
 import { db, conversations, groupConversationAgents, agents, worlds } from '../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
+import { ApiError } from '../lib/apiError.js'
 import { broadcastConversationSync } from '../lib/realtime.js'
 import { trackUserActivity } from './user.js'
 
@@ -80,7 +82,7 @@ async function listWorldAgents(conversationId: string) {
  */
 worldsRoute.post('/', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const body = await c.req.json<{
     laws?: string
@@ -91,7 +93,7 @@ worldsRoute.post('/', async (c) => {
   // 至少 1 个 Agent（群聊要求 ≥2，世界无此约束 —— 一个人的世界也是世界）
   const agentIds = (body.agent_ids ?? []).filter((id) => id && id !== NEUTRAL_AGENT_ID)
   if (agentIds.length < 1) {
-    return c.json({ error: 'At least one agent is required' }, 400)
+    throw new ApiError(ErrCode.WORLD_AGENTS_REQUIRED)
   }
 
   const convId = randomUUID()
@@ -132,11 +134,11 @@ worldsRoute.post('/', async (c) => {
 // 读取世界（法则 + 成员）。归属校验在 findWorld（含 deleted_at 过滤）。
 worldsRoute.get('/:id', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const id = c.req.param('id')
   const world = await findWorld(id, userId)
-  if (!world) return c.json({ error: 'Not found' }, 404)
+  if (!world) throw new ApiError(ErrCode.WORLD_NOT_FOUND)
 
   return c.json({ world, agents: await listWorldAgents(id) })
 })
@@ -144,17 +146,17 @@ worldsRoute.get('/:id', async (c) => {
 // 编辑世界法则 —— 世界唯一的可变项。
 worldsRoute.patch('/:id', async (c) => {
   const userId = getUserId(c)
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const id = c.req.param('id')
   const body = await c.req.json<{ laws?: string }>()
 
   if (typeof body.laws !== 'string') {
-    return c.json({ error: 'Nothing to update' }, 400)
+    throw new ApiError(ErrCode.WORLD_NOTHING_TO_UPDATE)
   }
 
   const existing = await findWorld(id, userId)
-  if (!existing) return c.json({ error: 'Not found' }, 404)
+  if (!existing) throw new ApiError(ErrCode.WORLD_NOT_FOUND)
 
   const laws = body.laws.trim().slice(0, MAX_TEXT_LENGTH)
   const now = Math.floor(Date.now() / 1000)

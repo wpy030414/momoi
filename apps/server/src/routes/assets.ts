@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import path from 'path'
 import fs from 'fs'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
+import { ApiError } from '../lib/apiError.js'
 import { repoRoot } from '../lib/paths.js'
 
 export const assetsRoute = new Hono()
@@ -12,18 +14,18 @@ assetsRoute.get('/voice/:agent_id/:message_id/:filename', userAuthMiddleware, as
 
   // Path traversal protection
   if (path.basename(filename) !== filename) {
-    return c.text('Forbidden', 403)
+    throw new ApiError(ErrCode.ASSET_FORBIDDEN)
   }
 
   const filePath = path.resolve(repoRoot(), 'data', 'voice', agent_id, message_id, filename)
 
   // Ensure resolved path stays within data/voice/
   if (!filePath.startsWith(path.resolve(repoRoot(), 'data', 'voice'))) {
-    return c.text('Forbidden', 403)
+    throw new ApiError(ErrCode.ASSET_FORBIDDEN)
   }
 
   if (!fs.existsSync(filePath)) {
-    return c.text('Not Found', 404)
+    throw new ApiError(ErrCode.ASSET_NOT_FOUND)
   }
 
   const buffer = fs.readFileSync(filePath)

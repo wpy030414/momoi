@@ -3,9 +3,11 @@
 // ============================================================
 
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { db, pushSubscriptions } from '../db/index.js'
 import { getVapidKeys } from '../lib/config.js'
+import { ApiError } from '../lib/apiError.js'
 import { and, eq, or, ne } from 'drizzle-orm'
 
 export const pushNotificationRoute = new Hono()
@@ -22,7 +24,7 @@ pushNotificationRoute.get('/vapid-public-key', async (c) => {
 // POST /api/push-notification/subscribe — 客户端上报 Web Push subscription
 pushNotificationRoute.post('/subscribe', async (c) => {
   const userId = (c as any).get('userId') as string
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const { deviceId, endpoint, keys } = await c.req.json<{
     deviceId: string
@@ -31,7 +33,7 @@ pushNotificationRoute.post('/subscribe', async (c) => {
   }>()
 
   if (!deviceId || !endpoint || !keys?.p256dh || !keys?.auth) {
-    return c.json({ error: 'Missing required fields' }, 400)
+    throw new ApiError(ErrCode.PUSH_FIELDS_REQUIRED)
   }
 
   const now = Math.floor(Date.now() / 1000)
@@ -77,12 +79,12 @@ pushNotificationRoute.post('/subscribe', async (c) => {
 // DELETE /api/push-notification/unsubscribe — 客户端取消订阅
 pushNotificationRoute.delete('/unsubscribe', async (c) => {
   const userId = (c as any).get('userId') as string
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const { endpoint, deviceId } = await c.req.json<{ endpoint?: string; deviceId?: string }>()
 
   if (!endpoint && !deviceId) {
-    return c.json({ error: 'Missing endpoint or deviceId' }, 400)
+    throw new ApiError(ErrCode.PUSH_FIELDS_REQUIRED)
   }
 
   // 优先按 endpoint 精确删除；endpoint 不可得（本地订阅已消失）时按

@@ -3,8 +3,17 @@
 // ============================================================
 
 import { describe, it, expect } from 'vitest'
+import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import { normalizePreviewContext } from '../src/prompts/preview.js'
+import { registerErrorHandlers } from '../src/lib/errorHandler.js'
 import { promptsRoute } from '../src/routes/prompts.js'
+
+// promptsRoute 单测挂载壳：复用 index.ts 同款全局错误处理（ApiError →
+// { code, params } + 注册表 status），否则裸 Hono 路由抛错只会得到 500。
+const app = new Hono()
+app.route('/', promptsRoute)
+registerErrorHandlers(app)
 
 describe('预览上下文归化（白名单）', () => {
   it('chat.system：合法键保留，非法键与非法类型丢弃', () => {
@@ -58,7 +67,7 @@ describe('预览上下文归化（白名单）', () => {
 
 describe('提示词目录与预览路由', () => {
   it('GET / 返回配方清单与片段目录', async () => {
-    const res = await promptsRoute.request('/')
+    const res = await app.request('/')
     expect(res.status).toBe(200)
     const body = await res.json() as { targets: any[]; fragments: any[] }
     expect(body.targets.map((t) => t.target)).toContain('chat.system')
@@ -71,18 +80,21 @@ describe('提示词目录与预览路由', () => {
   })
 
   it('GET /fragment?id=... 返回片段与渲染文本', async () => {
-    const res = await promptsRoute.request('/fragment?id=retry/prompt-placeholder')
+    const res = await app.request('/fragment?id=retry/prompt-placeholder')
     expect(res.status).toBe(200)
     const body = await res.json() as { fragment: { id: string }; text: string }
     expect(body.fragment.id).toBe('retry/prompt-placeholder')
     expect(body.text).toBe('（继续）')
 
-    const missing = await promptsRoute.request('/fragment?id=nope')
+    const missing = await app.request('/fragment?id=nope')
     expect(missing.status).toBe(404)
+    const missingBody = await missing.json() as { code: ErrCode; params?: { id?: string } }
+    expect(missingBody.code).toBe(ErrCode.PROMPT_FRAGMENT_NOT_FOUND)
+    expect(missingBody.params?.id).toBe('nope')
   })
 
   it('POST /preview 组装并逐段溯源；未知配方 404', async () => {
-    const res = await promptsRoute.request('/preview', {
+    const res = await app.request('/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -96,11 +108,15 @@ describe('提示词目录与预览路由', () => {
     expect(body.parts.map((p) => p.id)).toContain('chat/persona')
     expect(body.context).not.toHaveProperty('unknown')
 
-    const bad = await promptsRoute.request('/preview', {
+    const bad = await app.request('/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ target: 'not/exists' }),
     })
     expect(bad.status).toBe(404)
+    // 未知 target 保持 c.json 携带 targets 附加字段（候选清单）
+    const badBody = await bad.json() as { code: ErrCode; targets: string[] }
+    expect(badBody.code).toBe(ErrCode.NOT_FOUND)
+    expect(badBody.targets).toContain('chat.system')
   })
 })

@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
+import { ErrCode } from '@momoi/shared/errors'
 import path from 'path'
 import fs from 'fs'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { getAgent } from '../lib/config.js'
+import { ApiError } from '../lib/apiError.js'
 import { repoRoot } from '../lib/paths.js'
 
 export const voiceRoute = new Hono()
@@ -17,7 +19,7 @@ voiceRoute.post('/segments', async (c) => {
   const { agent_id, message_id } = body
 
   if (!agent_id || message_id == null) {
-    return c.json({ error: 'agent_id and message_id are required' }, 400)
+    throw new ApiError(ErrCode.VOICE_PARAMS_REQUIRED)
   }
 
   const dir = path.resolve(repoRoot(), 'data', 'voice', agent_id, String(message_id))
