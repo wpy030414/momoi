@@ -32,7 +32,7 @@ interface Attachment {
 
 - 目录：`data/workspaces/{convId}/__uploads__/`（上传时通过 SandboxFS 自动创建）
 - 文件名：`{randomUUID()}{原扩展名}` —— 扩展名保留，其余全部替换，杜绝路径穿越与文件名冲突
-- 上传限制：**20MB**，超出返回 `400 { "error": "File too large (max 20MB)" }`
+- 上传限制：**20MB**，超出返回 `400 { "code": "UPLOAD_FILE_TOO_LARGE", "params": { "limit": "20MB" } }`
 - **对话隔离**：文件按所属对话存入对应工作区，Agent 工具可直接搜索
 
 ## 接口契约

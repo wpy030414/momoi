@@ -1218,3 +1218,36 @@
 - 新增接口：`GET /api/admin/prompts`、`GET /api/admin/prompts/fragment?id=`、`POST /api/admin/prompts/preview`（均走管理员鉴权）
 - 测试：62 → 70 项（引擎单测 / 黄金快照 / 预览归化与路由）
 - 既有文档中 `buildSystemPrompt()` 的引用指向 `prompts/`（见 `specs/module-prompt-engine.md`）
+
+## D48：业务错误码契约——助记字符串枚举、wire 不发 message、全量一次迁移
+
+**日期**：2026-09-29
+
+**背景**：后端约 179 个 HTTP 错误点 + 7 个 SSE 错误发送点无错误码机制——9 种响应体形状变体、~90% 英文硬编码 + 15 条中文 + 中英混合插值，多处把 `err.message` 原样透传给终端用户，且无 `app.onError`（未捕获异常走 Hono 纯文本 500）。前端 `st()` 用 en locale `serverSide` 段（~200 条三语对照）做「英文句子 → i18n 键」反向翻译，中文消息与动态消息永远匹配不上；另有 5 处裸 fetch 绕过 `st()` 英文直出。
+
+**决策**：
+
+1. **助记字符串枚举**（`ErrCode.CONV_NOT_FOUND = 'CONV_NOT_FOUND'`，148 码 + `ERR_REGISTRY` 元数据），code 直接作为前端 i18n 键后缀 `errors.<CODE>`。
+2. **wire 不发 message**：错误响应体只有 `{ code, params? }`；动态细节进 `params.detail`（截断 ≤300 字符），人类可读描述只在三语 locale，调试细节只在服务端日志。
+3. **全量一次迁移**（8 个 commit 整批合入）：全部路由 + SSE + 前端消费端（含裸 fetch 收编、`st()` 与 `serverSide` 整体删除）。
+
+**原因**：
+
+- 字符串码 vs 数字位段（`0x10000000` 式）：码即 i18n 键、日志可 grep、curl/网络面板自解释，省掉一层注册表外的前缀解析；枚举成员名保留助记性与 IDE 补全
+- 不发 message vs 附带默认英文句：避免「code 与 message 双真相」漂移与泄漏面（未捕获异常的 err.message 曾直接上屏）；代价是三语全覆盖——由一致性测试把关 + `errors.__unknown` 兜底（未知码显示 `操作失败（{{code}}）`）
+- 全量 vs 渐进双形状：自部署同仓同发、web 是 REST 错误体唯一消费者（im 渠道与 SSE 中继均无外部消费），过渡期兼容层是纯成本；`st()` 与 errorCode 并存是最差状态
+- status 放 shared 的 `ERR_REGISTRY`：错误码的 HTTP 语义就是 API 契约的一部分，server 默认状态 / web 状态分支 / 一致性测试三处共用单一来源
+
+**备选与权衡**：
+
+- ❌ 数字位段错误码：紧凑但不可 grep，i18n 键需额外映射层
+- ❌ wire 保留英文 message 作兜底：双真相必然漂移；未知码场景用 `__unknown` 模板 + code 展示已足够
+- ❌ 渐进迁移（先核心模块、`st()` 保留兜底）：双轨期两套翻译机制并存，中英混杂问题只有全量才能清干净
+- ⚠️ 行为变化点：`upload` 路由会话不存在 403→404（统一语义）；`WECHAT_QR_FAILED` 与 `AI_*` 引入精确 502/504；群聊降级气泡去掉动态英文后缀
+
+**影响**：
+
+- 新增：`packages/shared/src/errors.ts`（148 码 + 注册表）、`apps/server/src/lib/apiError.ts`、`apps/web/src/lib/apiError.ts`、`i18n` 的 `errT()`、`docs/specs/module-errors.md`、`errors.contract.test.ts` + `error-registry-i18n.test.ts`
+- 迁移：20 个路由文件 + 2 个中间件 + `provider`/`pi-adapter`/`group-orchestrator` + `config-transfer`（ImportIssue 换 code）+ `rateLimiter`（结构化秒数）；前端 16 个展示文件 + 5 处裸 fetch；三语 locale 增 `errors.*`（~150 键，约 60 条自 `serverSide` 平移）删 `serverSide` 整段
+- 修复顺带：`ChangePinDialog` 无视真实错误固定显示「PIN 不正确」；`workflow.lawsFailed` 单花括号
+- 详见 `docs/specs/module-errors.md`

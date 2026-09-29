@@ -46,7 +46,7 @@
 }
 ```
 
-- `message` 为空或全空白 → `400 { "error": "Empty message" }`
+- `message` 为空或全空白 → `400 { "code": "CHAT_EMPTY_MESSAGE" }`
 - `thinking_mode` 判定为 `thinking_mode !== false`，即**省略时默认开启**
 - `conversation_type`：`direct`（默认）为单 Agent 对话，`group` 为群聊模式
 - `agent_ids`：群聊模式下指定参与 Agent 的 ID 列表
@@ -118,9 +118,9 @@
 
 **响应**：
 - `200 { "success": true }` — 回答已接收，ask_user Promise resolve
-- `400 { "error": "question_id is required" }` — 缺少 question_id
-- `403 { "error": "Question does not belong to this conversation" }` — 问题不属于指定会话
-- `410 { "error": "Question not found or has expired" }` — 问题不存在、已被回答或已超时
+- `400 { "code": "CHAT_QUESTION_ID_REQUIRED" }` — 缺少 question_id
+- `403 { "code": "CHAT_QUESTION_WRONG_CONVERSATION" }` — 问题不属于指定会话
+- `410 { "code": "CHAT_QUESTION_EXPIRED" }` — 问题不存在、已被回答或已超时
 
 **行为**：`answer` 和 `selected_options` 至少传一个。两者的优先级：
 - 若有 `selected_options` → 回答文本为「用户选择了: xxx。附加说明: yyy」

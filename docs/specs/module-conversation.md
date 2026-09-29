@@ -96,7 +96,7 @@
 **响应**：`{ "conversation": { ... } }`（更新后的对话对象）
 **权限**：需为当前用户的对话，否则不更新（查询条件含 `user_id`）。
 
-> ✅ **已修复（信息泄露）**：曾存在缺陷 —— `PATCH` 的 update 带 `user_id` 条件（越权改不动数据），但操作后不校验影响行数、末尾 `SELECT` 回显**只按 `id` 查未带 `user_id`**，导致 bob 对 alice 的对话发 PATCH 会拿到 200 + alice 的完整对话对象（写失败却回显他人资源）。现已将回显 `SELECT` 补上 `user_id` 条件并在查不到时返回 404。实测：bob PATCH alice 对话 → `404 {"error":"Not found"}`；owner 改自己 → `200` 且标题确实更新。
+> ✅ **已修复（信息泄露）**：曾存在缺陷 —— `PATCH` 的 update 带 `user_id` 条件（越权改不动数据），但操作后不校验影响行数、末尾 `SELECT` 回显**只按 `id` 查未带 `user_id`**，导致 bob 对 alice 的对话发 PATCH 会拿到 200 + alice 的完整对话对象（写失败却回显他人资源）。现已将回显 `SELECT` 补上 `user_id` 条件并在查不到时返回 404。实测：bob PATCH alice 对话 → `404 {"code":"CONV_NOT_FOUND"}`；owner 改自己 → `200` 且标题确实更新。
 
 ### DELETE /api/conversations/:id
 

@@ -176,7 +176,7 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 
 **响应**：`{ "has_pin": true | false, "direct_registration_open": true | false, "oauth_registration_open": true | false }`
 
-**错误**：缺少 `X-User` → `400 { "error": "Username required" }`
+**错误**：缺少 `X-User` → `400 { "code": "USER_NAME_REQUIRED" }`
 
 ### POST /api/user/verify
 

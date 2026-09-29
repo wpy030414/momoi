@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS wechat_bindings (
 { "status": "expired" }
 
 // 目标会话已被删除（绑定失败）
-{ "status": "expired", "error": "目标会话已删除，请重新选择会话并绑定。" }
+{ "status": "expired", "code": "WECHAT_CONV_DELETED" }
 ```
 
 **确认逻辑**（`status === 'confirmed'` 且含 `bot_token`）：

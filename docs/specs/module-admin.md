@@ -107,7 +107,7 @@
 
 删除 Agent。
 
-**中立 Agent 规则**：中立 Agent 不可删除 → 403 `{ "error": "Neutral agent cannot be deleted" }`
+**中立 Agent 规则**：中立 Agent 不可删除 → 403 `{ "code": "ADMIN_NEUTRAL_AGENT_DELETE" }`
 
 **响应**：`{ "success": true }`
 

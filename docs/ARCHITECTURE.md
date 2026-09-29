@@ -225,7 +225,7 @@ type ServerMessage =
   | { type: 'follow_up'; text: string }
   | { type: 'infinite_mode_off' }
   | { type: 'done'; reply: string; suggestions: string[]; agent_id?: string; agent_name?: string; infinite?: boolean }
-  | { type: 'error'; message: string; agent_id?: string; agent_name?: string }
+  | { type: 'error'; code: string; params?: Record<string, string | number>; agent_id?: string; agent_name?: string }
 
 // 实时事件（GET /api/events）—— 以 type 字段区分
 | { type: 'stream'; conversation_id: string; event: ServerMessage }

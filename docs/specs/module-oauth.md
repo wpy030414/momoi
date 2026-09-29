@@ -55,7 +55,7 @@ interface OAuth2Provider {
 | `setOauthRegistrationOpen(open)` | 写入 DB 设置 |
 
 **影响范围**：
-- 开关关闭时：callback 检测到全新 OAuth 用户 → 跳转 SPA 页面并携带 `oauth_error=OAuth registration is currently closed`。
+- 开关关闭时：callback 检测到全新 OAuth 用户 → 跳转 SPA 页面并携带 `oauth_error_code=OAUTH_REGISTRATION_CLOSED`。
 - 开关关闭时：`POST /api/oauth/register` 的 `action=create`（新建账户）分支被拒绝 → 403。
 - 开关关闭**不影响**：已有绑定的登录（场景 1）和已登录用户的绑定（场景 2）。
 
@@ -142,7 +142,7 @@ GET {provider.authorize_url}
 
 **响应**：`302 Found` 重定向至 IdP 授权页面。
 
-**错误**：`providerId` 在 `oauth_providers` 中找不到 → `404 { "error": "Unknown OAuth2 provider" }`
+**错误**：`providerId` 在 `oauth_providers` 中找不到 → `404 { "code": "OAUTH_UNKNOWN_PROVIDER" }`
 
 ---
 
@@ -174,11 +174,11 @@ OAuth2 回调端点——IdP 将用户授权后带着 `code` 和 `state` 重定�
    → 有（已登录）→ 自动绑定（INSERT user_oauth_bindings）→ 302 → /
 
 3. 没有 → 检查 oauth_registration_open 开关
-   → 关闭 → 302 → /?oauth_error=OAuth registration is currently closed
+   → 关闭 → 302 → /?oauth_error_code=OAUTH_REGISTRATION_CLOSED
    → 开启 → 302 → /?oauth_register=1&provider_id=xxx&provider_user_id=xxx
 ```
 
-**失败处理**：任一环节失败均执行 `cleanupCookies()`（清除三个 OAuth Cookie），然后 302 重定向至 `{spaOrigin}/?oauth_error={message}`。
+**失败处理**：任一环节失败均执行 `cleanupCookies()`（清除三个 OAuth Cookie），然后 302 重定向至 `{spaOrigin}/?oauth_error_code={CODE}`（动态细节另附 `&oauth_error_detail=`）。
 
 **安全校验**（按执行顺序）：
 
@@ -287,16 +287,16 @@ GET /api/oauth/github/login
   ▼
 IdP 302 → /api/oauth/callback?code=xxx&state=yyy
   │
-  ├─ [state 不匹配] ──→ 302 /?oauth_error=Invalid state
+  ├─ [state 不匹配] ──→ 302 /?oauth_error_code=OAUTH_INVALID_STATE
   │
-  ├─ [error 参数存在] ──→ 302 /?oauth_error={error}
+  ├─ [error 参数存在] ──→ 302 /?oauth_error_code=OAUTH_PROVIDER_ERROR&oauth_error_detail={error}
   │
-  ├─ [code 为空] ──→ 302 /?oauth_error=No authorization code
+  ├─ [code 为空] ──→ 302 /?oauth_error_code=OAUTH_NO_AUTH_CODE
   │
   ▼
 POST IdP token_url（code → access_token）
   │
-  ├─ [交换失败] ──→ 302 /?oauth_error=Token exchange failed: ...
+  ├─ [交换失败] ──→ 302 /?oauth_error_code=OAUTH_TOKEN_EXCHANGE_FAILED&oauth_error_detail=...
   │
   ▼
 GET IdP userinfo_url（access_token → user info）
@@ -306,8 +306,8 @@ GET IdP userinfo_url（access_token → user info）
   │
   ├── [存在绑定] ──────────────────────────────────────────────┐
   │     │                                                        │
-  │     ├─ [对应用户不存在] ──→ 302 /?oauth_error=...             │
-  │     ├─ [对应用户 banned] ──→ 302 /?oauth_error=...            │
+  │     ├─ [对应用户不存在] ──→ 302 /?oauth_error_code=OAUTH_LINKED_USER_NOT_FOUND
+  │     ├─ [对应用户 banned] ──→ 302 /?oauth_error_code=USER_DISABLED
   │     │                                                        │
   │     └─ 签发 JWT → Set-Cookie: momoi_token                     │
   │        → 302 /?oauth_user=xxx&oauth_expires=xxx  ◄── 登录成功 │
@@ -320,7 +320,7 @@ GET IdP userinfo_url（access_token → user info）
   └── [无绑定 + 无有效 token] ────────────────────────────────────┤
         │                                                        │
         ├─ [oauth_registration_open = false]                      │
-        │     └─ 302 /?oauth_error=OAuth registration is closed   │
+        │     └─ 302 /?oauth_error_code=OAUTH_REGISTRATION_CLOSED   │
         │                                                        │
         └─ [oauth_registration_open = true]                       │
               └─ 302 /?oauth_register=1&provider_id=...&...       │
@@ -392,7 +392,7 @@ GET IdP userinfo_url（access_token → user info）
 5. **OAuth Cookie 作用域隔离**：三个临时 Cookie（`momoi_oauth_state`、`momoi_oauth_provider`、`momoi_oauth_origin`）的 `Path=/api/oauth`，与认证 Cookie `momoi_token`（`Path=/`）互不干扰。
 6. **OAuth 注册端点不经过任何认证中间件**：`GET /callback` 和 `POST /register` 在用户尚未持有 JWT 时调用，因此不挂载 `userAuthMiddleware`。认证逻辑在 handler 内自行处理。
 7. **Callback 的 user 表存在性校验**：即使 `user_oauth_bindings` 中存在绑定行，也必须确认对应 `users` 行仍然存在且未被 banned。覆盖用户被管理员删除或封禁的边缘情况。
-8. **可观测性**：所有失败路径均通过 URL 参数（`oauth_error`）向 SPA 报告错误消息，前端可据此向用户展示友好提示。
+8. **可观测性**：所有失败路径均通过 URL 参数（`oauth_error_code`，可选 `oauth_error_detail`）向 SPA 报告错误码，前端按码直查 i18n 向用户展示友好提示。
 
 ## 验收标准
 
@@ -400,20 +400,20 @@ GET IdP userinfo_url（access_token → user info）
 
 - [ ] 未配置任何 `oauth_providers` 时，`/providers` 返回空数组，不报错。
 - [ ] 点击 OAuth 登录按钮后正确跳转至 IdP 授权页面，URL 参数（client_id、redirect_uri、scope、state）齐全。
-- [ ] 用户在 IdP 拒绝授权时，回调携带 `error` 参数，SPA 收到 `oauth_error` 并展示错误。
+- [ ] 用户在 IdP 拒绝授权时，回调携带 `error` 参数，SPA 收到 `oauth_error_code=OAUTH_PROVIDER_ERROR` 并展示错误。
 - [ ] **场景 1**：已有绑定的 OAuth 账号登录 → 直接签发 JWT → SPA 收到 `oauth_user` + `oauth_expires` → 前端自动完成登录。
 - [ ] **场景 2**：已登录用户绑定新 OAuth 账号 → 自动 INSERT `user_oauth_bindings` → 页面刷新后 `oauth_providers` 列表中该提供商显示已绑定。
 - [ ] **场景 3a**：全新 OAuth 用户（开关开启）→ 跳转注册页面 → 选择"创建新账户"→ 输入用户名 + PIN → 成功登录，`users` 表新增行 + `user_oauth_bindings` 表新增行。
 - [ ] **场景 3b**：全新 OAuth 用户（开关开启）→ 跳转注册页面 → 选择"绑定已有账户"→ 输入已有用户名 + PIN → 验证通过 → 成功绑定并登录。
-- [ ] **场景 3c**：全新 OAuth 用户（开关关闭）→ callback 返回 `oauth_error=OAuth registration is currently closed`，不进入注册页面。
+- [ ] **场景 3c**：全新 OAuth 用户（开关关闭）→ callback 返回 `oauth_error_code=OAUTH_REGISTRATION_CLOSED`，不进入注册页面。
 
 ### 安全验收
 
-- [ ] State 不匹配时回调被拒绝（302 至 `?oauth_error=Invalid state`），无法完成登录。
+- [ ] State 不匹配时回调被拒绝（302 至 `?oauth_error_code=OAUTH_INVALID_STATE`），无法完成登录。
 - [ ] 绕过前端直接 `POST /register` 且 `action=create` + 开关关闭时 → 403 拒绝。
 - [ ] 绕过前端直接 `POST /register` 且 `action=link` + 错误 PIN → 401 拒绝。
 - [ ] 对已被绑定到用户 A 的 OAuth 身份，尝试通过 `POST /register` 绑定到用户 B → 409 拒绝。
-- [ ] 对已被 banned 的用户，OAuth 登录被拒绝（`oauth_error=Account is disabled`）。
+- [ ] 对已被 banned 的用户，OAuth 登录被拒绝（`oauth_error_code=USER_DISABLED`）。
 - [ ] `GET /api/oauth/providers` 响应中不包含 `client_secret` 字段。
 - [ ] OAuth Cookie（state/provider/origin）在 callback 完成后被清除（`Max-Age=0` Set-Cookie）。
 
@@ -422,6 +422,6 @@ GET IdP userinfo_url（access_token → user info）
 - [ ] Referer 缺失时，`redirect_uri` 回退到 `c.req.url` 的 origin，流程不崩溃。
 - [ ] IdP userinfo 返回结构异常（无 `sub`/`id`/`user_id`）时，兜底 `randomUUID()`，视为新用户进入注册流程。
 - [ ] `oauth_providers` 配置为空数组时，所有 OAuth 端点返回 404（login）或空列表（providers）。
-- [ ] Token 交换超时或 IdP 返回非 JSON → catch 块捕获 → 302 `?oauth_error=OAuth error: {message}`。
+- [ ] Token 交换超时或 IdP 返回非 JSON → catch 块捕获 → 302 `?oauth_error_code=OAUTH_PROVIDER_ERROR&oauth_error_detail={摘要}`。
 - [ ] `POST /register` 缺少任意必填字段 → 400。
 - [ ] PIN 不符合 `^\d{4,8}$` → 400。

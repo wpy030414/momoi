@@ -111,7 +111,8 @@ CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_i
   "bound_at": 1726123456,
   "conversation_id": "目标会话 UUID（未锚定时省略）",
   "status": "connected",
-  "error": "最近错误（无则省略）",
+  "error_code": "QQ_CONNECTION_FAILED（最近连接错误，无则省略）",
+  "error_detail": "网关错误详情（无则省略）",
   "group_enabled": false,
   "ws_connected": true
 }
@@ -143,7 +144,7 @@ CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_i
    - 有 `conv_id`：仅更新 `conversation_id`（换绑会话，无需动连接）；
    - 仅 `group_enabled`（无 `conv_id` 无凭证）：仅更新 `group_enabled` toggle（即时生效，无需重启连接）。
 
-**响应**：`{ "success": true }`（凭证校验失败：400 `{ "error": "AppID 或 AppSecret 无效：..." }`）
+**响应**：`{ "success": true }`（凭证校验失败：400 `{ "code": "QQ_CREDENTIALS_INVALID", "params": { "detail": "<上游错误摘要>" } }`）
 
 ### DELETE /api/qq/bind -- 解绑
 
