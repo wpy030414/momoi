@@ -3,8 +3,11 @@ import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import { ErrCode } from '@momoi/shared/errors'
 
 import { env, bootstrapAgents } from './lib/config.js'
+import { ApiError } from './lib/apiError.js'
 import { STAND_ALONE } from './lib/standalone.js'
 import { db, users } from './db/index.js'
 
@@ -53,6 +56,28 @@ app.use('*', cors({
   allowHeaders: ['Content-Type', 'Authorization', 'X-User'],
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }))
+
+// 错误序列化收口——wire 上只有 { code, params }（不发 message，详见 docs/specs/module-errors.md）
+app.onError((err, c) => {
+  if (err instanceof ApiError) {
+    if (err.status >= 500) {
+      console.error(`[api] ${err.code}${err.log ? `: ${err.log}` : ''}`, err.cause ?? '')
+    }
+    return c.json({ code: err.code, ...(err.params ? { params: err.params } : {}) }, err.status as ContentfulStatusCode)
+  }
+  // 未捕获异常：完整堆栈只进日志，绝不透传给客户端
+  console.error('[api] unhandled:', err)
+  return c.json({ code: ErrCode.INTERNAL }, 500)
+})
+
+// API 路由未匹配 → JSON 错误体；非 API 路径维持默认纯文本（生产下由静态托管兜底 SPA）
+app.notFound((c) => {
+  if (c.req.path.startsWith('/api/')) {
+    return c.json({ code: ErrCode.NOT_FOUND }, 404)
+  }
+  // 不能调 c.notFound()（会递归自身），等价于 Hono 默认 404
+  return new Response('404 Not Found', { status: 404 })
+})
 
 // API Routes
 app.route('/api/conversations', conversationsRoute)
