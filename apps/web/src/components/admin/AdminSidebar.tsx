@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Bot, Globe, Palette, Server, Puzzle, Users, MessageSquare } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, Bot, Globe, Palette, Server, Puzzle, Users, MessageSquare } from 'lucide-react'
 import { Button } from '../ui/button'
 import { ScrollArea } from '../ui/scroll-area'
 
@@ -13,6 +13,7 @@ interface AdminSidebarProps {
 
 export const ADMIN_TABS = [
   { value: 'gateway', labelKey: 'settings.tabGateway', Icon: Globe },
+  { value: 'config', labelKey: 'settings.tabConfig', Icon: ArrowLeftRight },
   { value: 'experience', labelKey: 'settings.tabExperience', Icon: Palette },
   { value: 'agent', labelKey: 'settings.tabAgent', Icon: Bot },
   { value: 'mcp', labelKey: 'settings.tabMcp', Icon: Server },

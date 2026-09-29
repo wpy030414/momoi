@@ -6,6 +6,7 @@ import { PanelLeft, Plus, RotateCcw, Upload } from 'lucide-react'
 import { AgentManager, type AgentManagerHandle } from './tabs/AgentManager'
 import { GatewaySettings, type GatewaySettingsHandle } from './tabs/GatewaySettings'
 import { ExperienceSettings } from './tabs/ExperienceSettings'
+import { ConfigTransfer } from './tabs/ConfigTransfer'
 import { McpManager, type McpManagerHandle } from './tabs/McpManager'
 import { SkillManager, type SkillManagerHandle } from './tabs/SkillManager'
 import { ReviewPanel } from './tabs/ReviewPanel'
@@ -75,6 +76,7 @@ export function AdminPanelMain({ activeTab, standAlone, sidebarOpen, setSidebarO
         <div className="max-w-3xl mx-auto px-6 pb-8">
           {activeTab === 'agent' && <AgentManager ref={agentRef} />}
           {activeTab === 'gateway' && <GatewaySettings ref={gatewayRef} />}
+          {activeTab === 'config' && <ConfigTransfer />}
           {activeTab === 'experience' && <ExperienceSettings />}
           {activeTab === 'mcp' && <McpManager ref={mcpRef} />}
           {activeTab === 'skills' && <SkillManager ref={skillRef} />}

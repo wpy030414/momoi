@@ -367,6 +367,38 @@ export const api = {
   updateTtsConfig: (cfg: { endpoint?: string; provider?: string }) =>
     request<{ endpoint: string; provider: string }>('/api/admin/tts/config', { method: 'PUT', body: JSON.stringify(cfg) }),
 
+  // Admin - Config transfer（配置导入导出）
+  // 导出端点返回 YAML 文本而非 JSON，request() 不适用——手写 fetch（同
+  // uploadSkill 模式：cookie 自动附带、401 清会话、错误走 st()）。
+  exportConfig: (): Promise<{ blob: Blob; filename: string }> => {
+    const startedAt = Date.now()
+    return fetch('/api/admin/config/export').then(async (res) => {
+      if (!res.ok) {
+        if (res.status === 401) {
+          clearSession()
+          notifyAuthExpired(startedAt)
+        }
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        throw new Error(st(err.error || `HTTP ${res.status}`))
+      }
+      const cd = res.headers.get('Content-Disposition') || ''
+      const m = cd.match(/filename="?([^";]+)"?/)
+      const blob = await res.blob()
+      return { blob, filename: m?.[1] || `config-output-${Date.now()}.yml` }
+    })
+  },
+  // 校验失败也返回 HTTP 200（携带完整结构化错误列表），由调用方检查 ok 字段
+  importConfigDryRun: (content: string) =>
+    request<import('@momoi/shared/types').ImportResponse>('/api/admin/config/import?dry_run=1', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  importConfig: (content: string) =>
+    request<import('@momoi/shared/types').ImportResponse>('/api/admin/config/import', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+
   // WeChat binding
   wechatBindInfo: () =>
     request<{ bound: boolean; wechat_user_id?: string; bound_at?: number; conversation_id?: string; session_expired?: boolean }>(
