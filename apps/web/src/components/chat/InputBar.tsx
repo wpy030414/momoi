@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect, KeyboardEvent, useCallback, memo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { errT } from '../../i18n'
+import { handleAuthOn401 } from '../../lib/api'
+import { toApiError } from '../../lib/apiError'
 import { ArrowUp, Brain, Infinity, Loader2, Paperclip, X, Upload } from 'lucide-react'
 import { createPortal } from 'react-dom'
 
@@ -328,19 +331,20 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
           convId = await onEnsureConversation()
         }
         if (!convId) {
-          throw new Error('No conversation available for upload')
+          throw new Error(t('chat.uploadNoConversation'))
         }
         const formData = new FormData()
         formData.append('file', file)
         formData.append('conversation_id', convId)
         // The HttpOnly cookie authenticates the upload automatically
+        const startedAt = Date.now()
         const res = await fetch('/api/upload', {
           method: 'POST',
           body: formData,
         })
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: res.statusText }))
-          throw new Error(err.error || `Upload failed: ${file.name}`)
+          handleAuthOn401('/api/upload', startedAt, res.status)
+          throw await toApiError(res)
         }
         const data = await res.json()
         newAttachments.push(data)
@@ -348,7 +352,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
       setAttachments((prev) => [...prev, ...newAttachments])
     } catch (err) {
       console.error('Upload failed:', err)
-      setUploadError(err instanceof Error ? err.message : String(err))
+      setUploadError(errT(err))
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''

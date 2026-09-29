@@ -5,6 +5,7 @@ import { Loading } from '../ui/spinner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog'
 import { Plus, Trash2, Pencil, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '../../lib/api'
+import { errT } from '../../i18n'
 import { useToast } from '../ui/toast'
 import type { UserAgentMemory } from '@momoi/shared/types'
 
@@ -84,8 +85,8 @@ export function MemoryManager({ agentId, agent, memories, loading, onChanged }: 
       setDialogOpen(false)
       onChanged()
       toast({ title: t('memory.toastSaved'), variant: 'success' })
-    } catch (err: any) {
-      setFormError(err.message)
+    } catch (err) {
+      setFormError(errT(err))
     }
     setSaving(false)
   }

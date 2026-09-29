@@ -6,6 +6,7 @@ import { Input } from '../../ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
 import { Plus, Trash2, Pencil } from 'lucide-react'
 import { api } from '../../../lib/api'
+import { errT } from '../../../i18n'
 import { useToast } from '../../ui/toast'
 import type { McpServerConfig } from '@momoi/shared/types'
 
@@ -69,8 +70,8 @@ export const McpManager = forwardRef<McpManagerHandle>(function McpManager(_prop
       setDialogOpen(false)
       fetchServers()
       toast({ title: t('settings.toastMcpSaved'), variant: 'success' })
-    } catch (err: any) {
-      setFormError(err.message)
+    } catch (err) {
+      setFormError(errT(err))
     }
     setSaving(false)
   }

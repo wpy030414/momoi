@@ -15,6 +15,7 @@ import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
 import { Loading } from '../ui/spinner'
 import { AgentPickerList, type AgentBrief } from './AgentPickerList'
+import { errT } from '../../i18n'
 
 export type WorkflowMode = 'group' | 'world'
 
@@ -89,7 +90,7 @@ export function NewWorkflowDialog({
       reset()
       onOpenChange(false)
     } catch (err) {
-      setError((err as Error).message || t('workflow.failed'))
+      setError(errT(err) || t('workflow.failed'))
       setSubmitting(false)
     }
   }

@@ -20,7 +20,7 @@ import { useToast } from './components/ui/toast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
 import { PanelLeft, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
-import { ensureLocale } from './i18n'
+import { ensureLocale, errT } from './i18n'
 // 静态导入：模块零依赖且体积 ~1 KB，且 isPushSupported 每次渲染都要同步调用，
 // 模块本就在主包中——动态导入不产生任何分包收益（曾因此触发
 // INEFFECTIVE_DYNAMIC_IMPORT 警告），故统一走静态导入。
@@ -95,7 +95,8 @@ export function App() {
       const url = new URL(window.location.href)
       url.searchParams.delete('oauth_user')
       url.searchParams.delete('oauth_expires')
-      url.searchParams.delete('oauth_error')
+      url.searchParams.delete('oauth_error_code')
+      url.searchParams.delete('oauth_error_detail')
       history.replaceState(null, '', url.toString())
     }
   }, [])
@@ -568,7 +569,7 @@ export function App() {
       await chat.saveWorldLaws(laws)
       toast({ title: t('workflow.saved'), variant: 'info' })
     } catch (err) {
-      toast({ title: t('workflow.lawsFailed', { error: (err as Error).message }), variant: 'info' })
+      toast({ title: t('workflow.lawsFailed', { error: errT(err) }), variant: 'info' })
     } finally {
       setSavingLaws(false)
     }

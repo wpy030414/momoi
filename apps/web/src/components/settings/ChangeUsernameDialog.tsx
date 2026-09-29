@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { api } from '../../lib/api'
+import { errT } from '../../i18n'
 
 interface ChangeUsernameDialogProps {
   open: boolean
@@ -41,7 +42,7 @@ export function ChangeUsernameDialog({ open, onOpenChange, username, onDone }: C
         onOpenChange(false)
       }, 1500)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('changeUsername.conflict'))
+      setError(errT(err))
     } finally {
       setLoading(false)
     }

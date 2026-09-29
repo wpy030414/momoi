@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api } from '../../../lib/api'
+import { api, handleAuthOn401 } from '../../../lib/api'
+import { toApiError } from '../../../lib/apiError'
+import { errT } from '../../../i18n'
 import type { Agent } from '@momoi/shared/types'
 import { Input } from '../../ui/input'
 import { Loading } from '../../ui/spinner'
@@ -382,10 +384,12 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     const formData = new FormData()
     formData.append('file', file)
     try {
-      const res = await fetch(`/api/admin/agents/${editingAgent.id}/voice/upload`, { method: 'POST', body: formData })
+      const path = `/api/admin/agents/${editingAgent.id}/voice/upload`
+      const startedAt = Date.now()
+      const res = await fetch(path, { method: 'POST', body: formData })
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Upload failed' }))
-        toast({ title: err.error || 'Voice sample upload failed', variant: 'error' })
+        handleAuthOn401(path, startedAt, res.status)
+        toast({ title: errT(await toApiError(res)), variant: 'error' })
         return
       }
       const data = await res.json()
@@ -393,7 +397,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
       toast({ title: t('voice.sampleUploaded'), variant: 'success' })
     } catch (err) {
       console.error('Voice sample upload failed:', err)
-      toast({ title: String(err), variant: 'error' })
+      toast({ title: errT(err), variant: 'error' })
     }
   }
 
@@ -401,10 +405,12 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     if (!editingAgent) return
     setVoiceCloning(true)
     try {
-      const res = await fetch(`/api/admin/agents/${editingAgent.id}/voice/clone`, { method: 'POST' })
+      const path = `/api/admin/agents/${editingAgent.id}/voice/clone`
+      const startedAt = Date.now()
+      const res = await fetch(path, { method: 'POST' })
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Clone failed' }))
-        toast({ title: err.error || 'Voice clone failed', variant: 'error' })
+        handleAuthOn401(path, startedAt, res.status)
+        toast({ title: errT(await toApiError(res)), variant: 'error' })
         setVoiceCloning(false)
         return
       }
@@ -413,7 +419,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
       toast({ title: t('voice.cloned'), variant: 'success' })
     } catch (err) {
       console.error('Voice clone failed:', err)
-      toast({ title: String(err), variant: 'error' })
+      toast({ title: errT(err), variant: 'error' })
     }
     setVoiceCloning(false)
   }

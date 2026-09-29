@@ -4,7 +4,8 @@ import { Button } from '../../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
 import { Download, Upload, AlertTriangle } from 'lucide-react'
 import { api } from '../../../lib/api'
-import { st } from '../../../i18n'
+import { errFromEnvelope } from '../../../lib/apiError'
+import { errT } from '../../../i18n'
 import { useToast } from '../../ui/toast'
 import type { ImportIssue, ImportSummary } from '@momoi/shared/types'
 
@@ -24,7 +25,7 @@ function IssueList({ issues, destructive }: { issues: ImportIssue[]; destructive
       {issues.map((e, i) => (
         <li key={i} className="font-mono break-all">
           {e.path ? `${e.path}: ` : ''}
-          {st(e.message)}
+          {errT(errFromEnvelope(e))}
         </li>
       ))}
     </ul>
@@ -63,7 +64,7 @@ export function ConfigTransfer() {
       URL.revokeObjectURL(url)
       toast({ title: t('settings.configExportDone'), variant: 'success' })
     } catch (err) {
-      toast({ title: String((err as Error).message || err), variant: 'error' })
+      toast({ title: errT(err), variant: 'error' })
     }
     setExporting(false)
   }
@@ -83,7 +84,7 @@ export function ConfigTransfer() {
       const res = await api.importConfigDryRun(content)
       setDialog({ ok: res.ok, errors: res.errors || [], warnings: res.warnings || [], summary: res.summary })
     } catch (err) {
-      toast({ title: String((err as Error).message || err), variant: 'error' })
+      toast({ title: errT(err), variant: 'error' })
     }
     setReading(false)
   }
@@ -100,7 +101,7 @@ export function ConfigTransfer() {
         setDialog({ ok: false, errors: res.errors || [], warnings: res.warnings || [] })
       }
     } catch (err) {
-      toast({ title: String((err as Error).message || err), variant: 'error' })
+      toast({ title: errT(err), variant: 'error' })
     }
     setApplying(false)
   }

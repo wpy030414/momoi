@@ -6,6 +6,8 @@ import { Input } from '../ui/input'
 import { Switch } from '../ui/switch'
 import { Loading, Spinner } from '../ui/spinner'
 import { api } from '../../lib/api'
+import { ApiError } from '../../lib/apiError'
+import { errT } from '../../i18n'
 import { CheckCircle2, AlertCircle, ArrowLeft, ExternalLink } from 'lucide-react'
 
 interface QqBindPanelProps {
@@ -25,7 +27,8 @@ type BindInfo = {
   bound_at?: number
   conversation_id?: string
   status?: 'connected' | 'error'
-  error?: string
+  error_code?: string
+  error_detail?: string
   ws_connected?: boolean
   group_enabled?: boolean
 }
@@ -57,7 +60,7 @@ export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanel
         setState({ phase: 'form', appId: '' })
       }
     } catch (err) {
-      setState({ phase: 'form', appId: '', error: err instanceof Error ? err.message : t('common.error') })
+      setState({ phase: 'form', appId: '', error: errT(err) })
     }
   }, [agentId, t])
 
@@ -82,7 +85,7 @@ export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanel
       await api.qqBindStart(convId, agentId, appId.trim(), appSecret.trim(), groupEnabled)
       setState({ phase: 'confirmed' })
     } catch (err) {
-      setState({ phase: 'form', appId, error: err instanceof Error ? err.message : t('common.error') })
+      setState({ phase: 'form', appId, error: errT(err) })
     }
   }, [appId, appSecret, convId, agentId, groupEnabled, t])
 
@@ -92,7 +95,7 @@ export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanel
       await api.qqBindStart(convId, agentId)
       await loadInfo()
     } catch (err) {
-      setState({ phase: 'form', appId, error: err instanceof Error ? err.message : t('common.error') })
+      setState({ phase: 'form', appId, error: errT(err) })
     }
   }, [convId, agentId, appId, loadInfo, t])
 
@@ -105,7 +108,7 @@ export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanel
       setAppSecret('')
       setState({ phase: 'form', appId: '' })
     } catch (err) {
-      setState({ phase: 'form', appId, error: err instanceof Error ? err.message : t('common.error') })
+      setState({ phase: 'form', appId, error: errT(err) })
     } finally {
       setUnbinding(false)
     }
@@ -201,7 +204,9 @@ export function QqBindPanel({ convId, agentId, onBack, onComplete }: QqBindPanel
               )}
               {unhealthy && (
                 <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 break-all">
-                  {info.error || t('qqBind.notConnected')}
+                  {info.error_code
+                    ? errT(new ApiError(info.error_code, 0, info.error_detail ? { detail: info.error_detail } : undefined))
+                    : t('qqBind.notConnected')}
                 </p>
               )}
             </div>

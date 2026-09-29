@@ -4,6 +4,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { api } from '../../lib/api'
+import { isApiError } from '../../lib/apiError'
+import { errT } from '../../i18n'
 
 const PIN_MIN = 4
 const PIN_MAX = 8
@@ -51,7 +53,15 @@ export function ChangePinDialog({ open, onOpenChange, username }: ChangePinDialo
         onOpenChange(false)
       }, 1500)
     } catch (err) {
-      setError(t('changePin.oldPinWrong'))
+      // 按错误码分流：旧 PIN 错误 / 新 PIN 格式不合法各有专属文案，
+      // 其余（会话过期、限流等）走 errT 通用渲染
+      if (isApiError(err) && err.code === 'AUTH_INVALID_CURRENT_PIN') {
+        setError(t('changePin.oldPinWrong'))
+      } else if (isApiError(err) && err.code === 'USER_PIN_FORMAT') {
+        setError(t('login.pinFormatError'))
+      } else {
+        setError(errT(err))
+      }
     } finally {
       setLoading(false)
     }

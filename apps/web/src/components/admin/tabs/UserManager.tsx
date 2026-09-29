@@ -7,6 +7,7 @@ import { Switch } from '../../ui/switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
 import { Plus, Trash2, Pencil, Eye, EyeOff, Brain } from 'lucide-react'
 import { api } from '../../../lib/api'
+import { errT } from '../../../i18n'
 import { useToast } from '../../ui/toast'
 import type { AdminUserRow, OAuth2Provider } from '@momoi/shared/types'
 
@@ -120,7 +121,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
       toast({ title: banned ? t('settings.toastUserBanned') : t('settings.toastUserUnbanned'), variant: 'success' })
       fetchUsers()
     } catch (err: any) {
-      toast({ title: err.message, variant: 'error' })
+      toast({ title: errT(err), variant: 'error' })
     }
   }
 
@@ -131,7 +132,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
       toast({ title: t('settings.toastUserDeleted'), variant: 'success' })
       fetchUsers()
     } catch (err: any) {
-      toast({ title: err.message, variant: 'error' })
+      toast({ title: errT(err), variant: 'error' })
     }
     setDeleteUsername(null)
   }
@@ -141,7 +142,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
       const res = await api.forgetUserMemories(username)
       toast({ title: t('settings.toastUserForgotten', { count: res.deleted }), variant: 'success' })
     } catch (err: any) {
-      toast({ title: err.message, variant: 'error' })
+      toast({ title: errT(err), variant: 'error' })
     }
   }
 

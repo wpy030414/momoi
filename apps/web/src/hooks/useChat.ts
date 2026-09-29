@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, getUser, clearSession, notifyAuthExpired, getDeviceIdForRequest, subscribeRealtime, connectRealtime } from '../lib/api'
+import { api, getUser, handleAuthOn401, getDeviceIdForRequest, subscribeRealtime, connectRealtime } from '../lib/api'
+import { errT } from '../i18n'
+import { errFromEnvelope, toApiError } from '../lib/apiError'
 import type { Conversation, Attachment, TraceEntry } from '@momoi/shared/types'
 import { THINKING_SEGMENT_OPEN } from '@momoi/shared/constants'
 
@@ -504,12 +506,8 @@ export function useChat() {
         })
 
         if (!res.ok) {
-          if (res.status === 401) {
-            clearSession()
-            notifyAuthExpired(reqStartedAt)
-          }
-          const err = await res.json().catch(() => ({ error: res.statusText }))
-          throw new Error(err.error || `HTTP ${res.status}`)
+          handleAuthOn401('/api/chat', reqStartedAt, res.status)
+          throw await toApiError(res)
         }
 
         // Parse SSE stream with idle timeout
@@ -588,7 +586,7 @@ export function useChat() {
               done = true
             } else {
               // No content at all — this is a real failure, retry
-              throw new Error('Stream ended without response')
+              throw new Error(t('chat.streamEnded'))
             }
           } else {
             done = true
@@ -615,7 +613,7 @@ export function useChat() {
           // else: loop continues
         } else if (attempt >= MAX_RETRIES) {
           console.error('Chat error:', err)
-          updateLastMessage(streamKey, { content: t('chat.errorMessage', { message: (err as Error).message }), streaming: false })
+          updateLastMessage(streamKey, { content: t('chat.errorMessage', { message: errT(err) }), streaming: false })
           done = true
         }
         // Non-fatal network error — retry
@@ -834,12 +832,12 @@ export function useChat() {
         break
 
       case 'error':
-        console.error('Server error:', msg.message)
+        console.error('Server error:', msg.code)
         if (remote) remoteLastAtRef.current.delete(key)
         updateMessages(key, (prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
-          return [...prev.slice(0, -1), { ...last, content: t('chat.errorMessage', { message: msg.message }), streaming: false }]
+          return [...prev.slice(0, -1), { ...last, content: t('chat.errorMessage', { message: errT(errFromEnvelope(msg)) }), streaming: false }]
         })
         break
 

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { api } from '../../lib/api'
+import { errT } from '../../i18n'
 
 const PIN_MIN = 4
 const PIN_MAX = 8
@@ -45,7 +46,7 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
       })
       onLogin(result.username, result.expires_at)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('login.operationFailed'))
+      setError(errT(err))
     } finally {
       setLoading(false)
     }
@@ -75,7 +76,7 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
       })
       onLogin(result.username, result.expires_at)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('login.operationFailed'))
+      setError(errT(err))
     } finally {
       setLoading(false)
     }

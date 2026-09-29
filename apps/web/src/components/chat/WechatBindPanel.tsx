@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '../ui/button'
 import { Loading } from '../ui/spinner'
 import { api } from '../../lib/api'
+import { errT } from '../../i18n'
 import { Smartphone, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react'
 
 interface WechatBindPanelProps {
@@ -77,7 +78,7 @@ export function WechatBindPanel({ convId, onBack, onComplete }: WechatBindPanelP
         }
       }, 1000)
     } catch (err) {
-      setState({ phase: 'error', message: err instanceof Error ? err.message : t('common.error') })
+      setState({ phase: 'error', message: errT(err) })
     }
   }, [clearPoll, t, convId])
 
@@ -89,7 +90,7 @@ export function WechatBindPanel({ convId, onBack, onComplete }: WechatBindPanelP
       setState({ phase: 'loading' })
       startBind()
     } catch (err) {
-      setState({ phase: 'error', message: err instanceof Error ? err.message : t('common.error') })
+      setState({ phase: 'error', message: errT(err) })
     } finally {
       setUnbinding(false)
     }

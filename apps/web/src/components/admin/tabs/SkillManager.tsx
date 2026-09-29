@@ -5,6 +5,7 @@ import { Loading } from '../../ui/spinner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
 import { Upload, Trash2 } from 'lucide-react'
 import { api } from '../../../lib/api'
+import { errT } from '../../../i18n'
 import { useToast } from '../../ui/toast'
 
 export interface SkillManagerHandle {
@@ -37,8 +38,8 @@ export const SkillManager = forwardRef<SkillManagerHandle>(function SkillManager
       const result = await api.uploadSkill(file)
       setSkills(result.skills)
       toast({ title: t('settings.toastSkillUploaded'), variant: 'success' })
-    } catch (err: any) {
-      setUploadError(err.message)
+    } catch (err) {
+      setUploadError(errT(err))
     }
     setUploading(false)
     if (fileInputRef.current) fileInputRef.current.value = ''

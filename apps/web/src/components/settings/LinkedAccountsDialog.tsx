@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { api } from '../../lib/api'
+import { errT } from '../../i18n'
 
 interface LinkedAccountsDialogProps {
   open: boolean
@@ -43,7 +44,7 @@ export function LinkedAccountsDialog({ open, onOpenChange }: LinkedAccountsDialo
       setBindings((prev) => prev.filter((b) => b.id !== unbindId))
       setUnbindId(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'))
+      setError(errT(err))
     } finally {
       setLoading(false)
     }

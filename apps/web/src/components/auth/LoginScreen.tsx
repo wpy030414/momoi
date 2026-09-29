@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { api } from '../../lib/api'
+import { ApiError } from '../../lib/apiError'
+import { errT } from '../../i18n'
 
 const PIN_MIN = 4
 const PIN_MAX = 8
@@ -25,13 +27,16 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
   useEffect(() => {
     api.getOauthProviders().then((r) => setOauthProviders(r.providers)).catch(() => {})
-    // Show OAuth callback errors (e.g. registration closed)
+    // Show OAuth callback errors (e.g. registration closed) —
+    // 回调以 oauth_error_code（+可选 oauth_error_detail）携带服务端错误码信封
     const params = new URLSearchParams(window.location.search)
-    const oauthError = params.get('oauth_error')
-    if (oauthError) {
-      setError(decodeURIComponent(oauthError))
+    const oauthErrorCode = params.get('oauth_error_code')
+    if (oauthErrorCode) {
+      const detail = params.get('oauth_error_detail')
+      setError(errT(new ApiError(oauthErrorCode, 0, detail ? { detail } : undefined)))
       const url = new URL(window.location.href)
-      url.searchParams.delete('oauth_error')
+      url.searchParams.delete('oauth_error_code')
+      url.searchParams.delete('oauth_error_detail')
       history.replaceState(null, '', url.toString())
     }
   }, [])
@@ -47,7 +52,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       setHasPin(status.has_pin)
       setDirectRegistrationOpen(status.direct_registration_open)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('login.operationFailed'))
+      setError(errT(err))
     } finally {
       setLoading(false)
     }
@@ -67,7 +72,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       const result = await api.verifyPin(username.trim(), pin)
       onLogin(username.trim(), result.expires_at)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('login.pinError'))
+      setError(errT(err))
     } finally {
       setLoading(false)
     }
@@ -91,7 +96,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       const result = await api.setPin(username.trim(), newPin)
       onLogin(username.trim(), result.expires_at)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('login.operationFailed'))
+      setError(errT(err))
     } finally {
       setLoading(false)
     }

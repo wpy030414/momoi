@@ -1,4 +1,4 @@
-import { st } from '../i18n'
+import { toApiError } from './apiError'
 
 const BASE = ''
 
@@ -163,6 +163,19 @@ export function getDeviceIdForRequest(): string | null {
 // a wrong-PIN attempt must never trigger the expired-session logout path.
 const CREDENTIALS_ENDPOINTS = ['/api/user/verify', '/api/user/change-pin']
 
+/**
+ * 401 统一处理：非凭据端点清会话 + 发节流的 auth:expired。
+ * request() / uploadSkill / exportConfig / 裸 fetch 收编点共用。
+ */
+export function handleAuthOn401(path: string, startedAt: number, status: number): void {
+  if (status !== 401) return
+  const isCredentialsRejection = CREDENTIALS_ENDPOINTS.some((p) => path.startsWith(p))
+  if (!isCredentialsRejection) {
+    clearSession()
+    notifyAuthExpired(startedAt)
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const user = getUser()
   const optsHeaders = (options?.headers as Record<string, string>) || {}
@@ -182,14 +195,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers,
   })
   if (!res.ok) {
-    const isCredentialsRejection =
-      res.status === 401 && CREDENTIALS_ENDPOINTS.some((p) => path.startsWith(p))
-    if (res.status === 401 && !isCredentialsRejection) {
-      clearSession()
-      notifyAuthExpired(startedAt)
-    }
-    const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(st(err.error || `HTTP ${res.status}`))
+    handleAuthOn401(path, startedAt, res.status)
+    throw await toApiError(res)
   }
   return res.json()
 }
@@ -345,12 +352,8 @@ export const api = {
       body: formData,
     }).then(async (res) => {
       if (!res.ok) {
-        if (res.status === 401) {
-          clearSession()
-          notifyAuthExpired(startedAt)
-        }
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(st(err.error || `HTTP ${res.status}`))
+        handleAuthOn401('/api/admin/skills/upload', startedAt, res.status)
+        throw await toApiError(res)
       }
       return res.json() as Promise<{ success: boolean; skills: import('@momoi/shared/types').InstalledSkill[] }>
     })
@@ -369,17 +372,13 @@ export const api = {
 
   // Admin - Config transfer（配置导入导出）
   // 导出端点返回 YAML 文本而非 JSON，request() 不适用——手写 fetch（同
-  // uploadSkill 模式：cookie 自动附带、401 清会话、错误走 st()）。
+  // uploadSkill 模式：cookie 自动附带、401 走 handleAuthOn401、错误走 toApiError）。
   exportConfig: (): Promise<{ blob: Blob; filename: string }> => {
     const startedAt = Date.now()
     return fetch('/api/admin/config/export').then(async (res) => {
       if (!res.ok) {
-        if (res.status === 401) {
-          clearSession()
-          notifyAuthExpired(startedAt)
-        }
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(st(err.error || `HTTP ${res.status}`))
+        handleAuthOn401('/api/admin/config/export', startedAt, res.status)
+        throw await toApiError(res)
       }
       const cd = res.headers.get('Content-Disposition') || ''
       const m = cd.match(/filename="?([^";]+)"?/)
@@ -424,7 +423,7 @@ export const api = {
 
   // QQ binding
   qqBindInfo: (agentId: string) =>
-    request<{ bound: boolean; agent_id?: string; app_id?: string; bound_at?: number; conversation_id?: string; status?: 'connected' | 'error'; error?: string; ws_connected?: boolean; group_enabled?: boolean }>(
+    request<{ bound: boolean; agent_id?: string; app_id?: string; bound_at?: number; conversation_id?: string; status?: 'connected' | 'error'; error_code?: string; error_detail?: string; ws_connected?: boolean; group_enabled?: boolean }>(
       `/api/qq/bind?agent_id=${encodeURIComponent(agentId)}`
     ),
 
