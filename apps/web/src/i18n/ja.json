@@ -182,7 +182,6 @@
     },
     "completed": "完了",
     "connectionTimeout": "接続が切断されました。再試行してください",
-    "deepThinking": "深層思考",
     "downloadFailed": "添付ファイルのダウンロードに失敗しました: {{message}}",
     "errorMessage": "エラー: {{message}}",
     "exportDefaultTitle": "会話",
@@ -225,6 +224,7 @@
     "unknownError": "不明なエラー",
     "uploadFailed": "添付ファイルのアップロードに失敗しました: {{message}}",
     "uploadNoConversation": "アップロードできる会話がありません",
+    "workspacePicker": "新規会話は選択したワークスペースに作成されます",
     "worldChangePlaceholder": "世界の変動を記述……"
   },
   "sidebar": {
@@ -242,7 +242,6 @@
     "renameWorkspace": "ワークスペースの名前を変更",
     "deleteWorkspace": "ワークスペースを削除",
     "deleteWorkspaceConfirm": "ワークスペース「{{name}}」を削除しますか？会話は未分類に戻り、ファイルはサーバーに残ります。",
-    "newInWorkspace": "ここに新規会話",
     "rename": "名前を変更",
     "saveAsMd": "Markdown として保存",
     "archive": "アーカイブ",

@@ -31,7 +31,8 @@
 | `apps/web/src/components/sidebar/Sidebar.tsx` | 标题区（搜索/添加按钮）、分组折叠渲染、工作区行内重命名、悬停菜单 |
 | `apps/web/src/components/sidebar/ConversationSearchDialog.tsx` | 会话搜索对话框（标题 + 消息内容） |
 | `apps/web/src/components/sidebar/NewWorkflowDialog.tsx` | 新工作流的目标工作区选择 |
-| `apps/web/src/hooks/useChat.ts` | `workspaces` 状态、`draftWorkspaceIdRef`（草稿锁定）、SSE 联动 |
+| `apps/web/src/components/chat/InputBar.tsx` | 输入框工作区下拉（新会话的目标工作区选择；已有会话禁用展示归属） |
+| `apps/web/src/hooks/useChat.ts` | `workspaces` 状态、`newChatWorkspaceId`（新会话工作区选择）、SSE 联动 |
 
 ## 接口契约
 
@@ -143,13 +144,13 @@ CREATE TABLE workspaces (
 2. 删除工作区不触碰磁盘目录；重建同名工作区 = 新 id 新目录
 3. 前端对悬空 `workspace_id` 必须按未分组渲染（防御渲染，`Sidebar.ungrouped` 过滤）
 4. 工作区 CRUD 后必须 `broadcastConversationSync(userId)` 驱动多设备刷新
-5. 草稿态（单聊/群聊）的 workspace_id 存于 `draftWorkspaceIdRef`，随首条消息发送；草稿态上传附件提前建会话时同样携带（`App.ensureConversation`）
+5. 新会话的目标工作区由**输入框下拉**统一选择（`useChat.newChatWorkspaceId`，null = 未分组）：显式新建草稿与首页隐式草稿共用同一选择，随首条消息发送；草稿态上传附件提前建会话时同样携带（`App.ensureConversation`）。已有会话的下拉禁用并展示归属（不可移动）
 
 ## 验收标准
 
 - CRUD：建/改名/删工作区；空名 400；越权/不存在 404；列表 created_at 升序
 - 删除非空工作区 → 成员会话立即出现在未分组；新会话不可再锁定已删工作区
-- 在工作区内新建会话（侧边栏 + / 新建、新工作流选择）→ 首条消息后会话出现在该工作区下，AI 文件操作落在 `ws-<id>/`
+- 新建会话锁定工作区（输入框下拉选择、新工作流对话框选择）→ 首条消息后会话出现在该工作区下，AI 文件操作落在 `ws-<id>/`
 - 同工作区两个会话：A 写文件，B 的 AI 可见；配额共享
 - 未分组会话文件落 `<convId>/`，行为与改造前完全一致
 - 搜索：标题/内容命中、`%` 转义、空 q、snippet 与高亮；点击结果跳转

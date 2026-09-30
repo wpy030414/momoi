@@ -33,11 +33,11 @@ const RETRY_BASE_MS = 2000
 const DRAFT_PREFIX = 'draft:'
 const isDraftKey = (k: string) => k.startsWith(DRAFT_PREFIX)
 
-/** 工作区 ID 运行时守卫：非非空字符串一律归 null（未分组）。防御「带 workspaceId
+/** 工作区 ID 运行时守卫：非非空字符串一律归 null（未分组）。防御「带 id
  *  形参的回调被直接当事件处理器传入」——点击事件/DOM 对象一旦漏进
- *  draftWorkspaceIdRef，会随草稿首条消息进入请求体，JSON.stringify 沿事件的
+ *  newChatWorkspaceIdRef，会随草稿首条消息进入请求体，JSON.stringify 沿事件的
  *  target → __reactFiber$ → stateNode 撞上循环引用，报错不可读且会话创建失败；
- *  TS 对「(workspaceId?) => void → () => void」赋值不报错，运行时守卫是唯一兜底。 */
+ *  TS 对「(id?) => void → () => void」赋值不报错，运行时守卫是唯一兜底。 */
 const asWorkspaceId = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
 
 /** 远程流判活 TTL：他设备流事件的终态（done/error）可能丢失，窗口内
@@ -117,9 +117,17 @@ export function useChat() {
   const [draftType, setDraftType] = useState<'direct' | 'group' | null>(null)
   /** 当前草稿的分区 key（唯一 draft:N）；activeId 与其互斥，二者合称视图 key */
   const [draftKey, setDraftKey] = useState<string | null>(null)
-  /** 草稿的目标工作区（ref，无渲染需求）：工作区内新建会话时锁定，
-   *  随草稿的首条消息发给服务端建会（创建后永不移动）。 */
-  const draftWorkspaceIdRef = useRef<string | null>(null)
+  /** 新会话的工作区选择（输入框下拉；null = 未分组）。
+   *  语义是「下一个新建会话落在哪」，而非某份草稿的私有锁：显式新建草稿、
+   *  首页隐式草稿建会时均读它，随首条消息发给服务端锁定（创建后不可移动）。
+   *  ref 镜像供稳定回调（sendMessage / ensureConversation）免重渲染读取。 */
+  const [newChatWorkspaceId, setNewChatWorkspaceState] = useState<string | null>(null)
+  const newChatWorkspaceIdRef = useRef<string | null>(null)
+  const setNewChatWorkspace = useCallback((id: string | null) => {
+    const wsId = asWorkspaceId(id)
+    newChatWorkspaceIdRef.current = wsId
+    setNewChatWorkspaceState(wsId)
+  }, [])
 
   // ---- 按会话分区的状态（渲染派生）；ref 镜像同步最新值供事件处理器读取 ----
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({})
@@ -460,7 +468,7 @@ export function useChat() {
       streamKey = draftKeyRef.current
     } else {
       streamKey = `${DRAFT_PREFIX}${++draftSeqRef.current}`
-      draftWorkspaceIdRef.current = null // 隐式草稿 = 未指定工作区；不残留上一个已作废草稿的锁定
+      // 隐式草稿直接采用输入框下拉的当前工作区选择（选择是粘性的，不重置）
       setDraftType('direct')
       setViewKey(null, streamKey)
     }
@@ -516,8 +524,8 @@ export function useChat() {
             // 载入时已写入 convTypesRef），服务端据此注入「世界模拟」块而非群组规则块
             conversation_type: groupMode ? (convTypeOf(streamKey) === 'world' ? 'world' : 'group') : undefined,
             agent_ids: groupMode && groupAgentIds ? groupAgentIds : undefined,
-            // 分组工作区：草稿态首条消息建会时锁定（convId 已存在时服务端忽略）
-            workspace_id: convId ? undefined : (draftWorkspaceIdRef.current ?? undefined),
+            // 分组工作区：新会话首条消息建会时锁定输入框下拉选择的工作区（convId 已存在时服务端忽略）
+            workspace_id: convId ? undefined : (newChatWorkspaceIdRef.current ?? undefined),
             infinite_mode: infiniteMode || undefined,
             language: i18n.language,
             device_id: getDeviceIdForRequest() || undefined,
@@ -1053,7 +1061,8 @@ export function useChat() {
     setPendingByConv({})
     setViewKey(null, null)
     setDraftType(null)
-    draftWorkspaceIdRef.current = null
+    newChatWorkspaceIdRef.current = null
+    setNewChatWorkspaceState(null)
     setConversations([])
     setWorkspaces([])
     unreadCountsRef.current = {}
@@ -1065,12 +1074,11 @@ export function useChat() {
 
   /** 新建会话（单聊）—— 只进入草稿态，不落库。
    *  会话记录在「发出第一条消息」时由服务端创建（侧边栏同步出现）。
-   *  workspaceId：目标工作区（在工作区内新建时传入）——创建时锁定，之后不可移动。
-   *  注意：不掐断其他会话正在进行的后台流（多会话并发的关键）。 */
-  const createConversation = useCallback((workspaceId?: string | null) => {
+   *  目标工作区取输入框下拉的当前选择（newChatWorkspaceId），创建时锁定，
+   *  之后不可移动。注意：不掐断其他会话正在进行的后台流（多会话并发的关键）。 */
+  const createConversation = useCallback(() => {
     const key = `${DRAFT_PREFIX}${++draftSeqRef.current}`
     ++loadGenRef.current // 作废在途的会话加载，防止慢响应覆盖新草稿
-    draftWorkspaceIdRef.current = asWorkspaceId(workspaceId)
     setViewKey(null, key)
     setDraftType('direct')
     // 草稿态无会话 ID，hash 归位
@@ -1081,17 +1089,18 @@ export function useChat() {
 
   /** 新建群聊草稿：由 useGroupChat 传入所选 Agent，先暂存组态。
    *  会话记录在「发出第一条消息」时由服务端创建。
-   *  workspaceId 同 createConversation——创建时锁定。 */
+   *  workspaceId 来自新工作流对话框的显式选择——同步为全局的「新会话工作区」，
+   *  使输入框下拉与首条消息建会路径读到同一个值。 */
   const startGroupDraft = useCallback((workspaceId?: string | null) => {
     const key = `${DRAFT_PREFIX}${++draftSeqRef.current}`
     ++loadGenRef.current // 作废在途的会话加载，防止慢响应覆盖新草稿
-    draftWorkspaceIdRef.current = asWorkspaceId(workspaceId)
+    setNewChatWorkspace(workspaceId ?? null)
     setViewKey(null, key)
     setDraftType('group')
     if (window.location.hash) {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
-  }, [setViewKey])
+  }, [setViewKey, setNewChatWorkspace])
 
   /** 归档会话（服务端软删除：deleted_at 置位，从列表移除、自动解绑 IM，数据保留） */
   const archiveConversation = useCallback(async (id: string) => {
@@ -1301,9 +1310,10 @@ export function useChat() {
     viewLoading,
     draftType,
     startGroupDraft,
-    /** 草稿的目标工作区（ref）——草稿态上传附件提前建会话时（App.ensureConversation）
-     *  读取，保证落库的 workspace_id 与首条消息路径一致 */
-    draftWorkspaceIdRef,
+    /** 新会话的工作区选择（输入框下拉）：草稿建会（含草稿态上传附件提前建会，
+     *  App.ensureConversation）时随请求锁定；已有会话不可移动 */
+    newChatWorkspaceId,
+    setNewChatWorkspace,
     sendMessage,
     selectConversation,
     createConversation,

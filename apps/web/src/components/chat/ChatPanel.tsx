@@ -5,7 +5,7 @@ import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { QuestionBar } from './QuestionBar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
-import type { Attachment, AskUserQuestion } from '@momoi/shared/types'
+import type { Attachment, AskUserQuestion, Workspace } from '@momoi/shared/types'
 
 interface AgentBrief {
   id: string
@@ -59,6 +59,12 @@ interface ChatPanelProps {
   /** Infinite mode */
   infiniteMode?: boolean
   onInfiniteModeChange?: (enabled: boolean) => void
+  /** 工作区下拉（输入框）：新会话目标工作区选择（null = 未分组） */
+  workspaces?: Workspace[]
+  newChatWorkspaceId?: string | null
+  onNewChatWorkspaceChange?: (id: string | null) => void
+  /** 当前会话归属的工作区（会话不可移动；草稿态无意义） */
+  conversationWorkspaceId?: string | null
   /** Ask user tool */
   pendingQuestion?: (import('@momoi/shared/types').ServerMessage & { type: 'ask_user' }) | null
   onSendAnswer?: (answer: string, selectedOptions?: string[]) => void
@@ -81,6 +87,7 @@ export function ChatPanel({
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
   isGroup, isQqGroup, isWorld, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
+  workspaces, newChatWorkspaceId, onNewChatWorkspaceChange, conversationWorkspaceId,
   pendingQuestion, onSendAnswer, onSkipAnswer,
   recommendedQuestions,
   followupQuestions,
@@ -100,7 +107,7 @@ export function ChatPanel({
   const scrollAccRef = useRef(0)
   const prevScrollTopRef = useRef(0)
   const [revertedText, setRevertedText] = useState<string>('')
-  const [thinkingMode, setThinkingMode] = useState<boolean>(true)
+  // 深度思考已移除开关、强制开启（服务端 thinking_mode 恒 true）
   const [inputCollapsed, setInputCollapsed] = useState(false)
   const inputCollapsedRef = useRef(false)
 
@@ -217,16 +224,16 @@ export function ChatPanel({
 
   const handleSend = useCallback((text: string, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => {
     if (isGroup && onSendGroup) {
-      onSendGroup(text, thinkingMode, attachments, infiniteMode)
+      onSendGroup(text, true, attachments, infiniteMode)
     } else {
-      onSend(text, thinkingMode, attachments, selectedAgentId, false, undefined, infiniteMode)
+      onSend(text, true, attachments, selectedAgentId, false, undefined, infiniteMode)
     }
-  }, [isGroup, onSendGroup, onSend, thinkingMode, selectedAgentId, infiniteMode])
+  }, [isGroup, onSendGroup, onSend, selectedAgentId, infiniteMode])
 
   const handleSuggestion = useCallback((text: string) => {
-    if (isGroup && onSendGroup) onSendGroup(text, thinkingMode, undefined, infiniteMode)
-    else onSend(text, thinkingMode, undefined, selectedAgentId, false, undefined, infiniteMode)
-  }, [isGroup, onSendGroup, onSend, thinkingMode, selectedAgentId, infiniteMode])
+    if (isGroup && onSendGroup) onSendGroup(text, true, undefined, infiniteMode)
+    else onSend(text, true, undefined, selectedAgentId, false, undefined, infiniteMode)
+  }, [isGroup, onSendGroup, onSend, selectedAgentId, infiniteMode])
 
   return (
     <div className="flex-1 flex flex-col min-h-0 relative">
@@ -283,10 +290,12 @@ export function ChatPanel({
                 disabled={loading}
                 externalValue={revertedText}
                 onExternalValueConsumed={handleExternalValueConsumed}
-                thinkingMode={thinkingMode}
-                onThinkingModeChange={setThinkingMode}
                 infiniteMode={infiniteMode}
                 onInfiniteModeChange={onInfiniteModeChange ?? NOOP}
+                workspaces={workspaces}
+                newChatWorkspaceId={newChatWorkspaceId}
+                onNewChatWorkspaceChange={onNewChatWorkspaceChange}
+                conversationWorkspaceId={conversationWorkspaceId}
                 supportAttachments={supportAttachments}
                 supportInfiniteMode={supportInfiniteMode}
                 noAgents={noAgents}
@@ -367,10 +376,12 @@ export function ChatPanel({
             disabled={loading || !!pendingQuestion}
             externalValue={revertedText}
             onExternalValueConsumed={handleExternalValueConsumed}
-            thinkingMode={thinkingMode}
-            onThinkingModeChange={setThinkingMode}
             infiniteMode={infiniteMode}
             onInfiniteModeChange={onInfiniteModeChange ?? NOOP}
+            workspaces={workspaces}
+            newChatWorkspaceId={newChatWorkspaceId}
+            onNewChatWorkspaceChange={onNewChatWorkspaceChange}
+            conversationWorkspaceId={conversationWorkspaceId}
             supportAttachments={supportAttachments}
             supportInfiniteMode={supportInfiniteMode}
             noAgents={noAgents}

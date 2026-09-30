@@ -182,7 +182,6 @@
     },
     "completed": "完成",
     "connectionTimeout": "连接超时，请重试",
-    "deepThinking": "深度思考",
     "downloadFailed": "附件下载失败：{{message}}",
     "errorMessage": "错误：{{message}}",
     "exportDefaultTitle": "对话",
@@ -225,6 +224,7 @@
     "unknownError": "未知错误",
     "uploadFailed": "附件上传失败：{{message}}",
     "uploadNoConversation": "没有可用的会话，无法上传文件",
+    "workspacePicker": "新会话将创建于所选工作区",
     "worldChangePlaceholder": "描述世界的变动……"
   },
   "sidebar": {
@@ -242,7 +242,6 @@
     "renameWorkspace": "重命名工作区",
     "deleteWorkspace": "删除工作区",
     "deleteWorkspaceConfirm": "确定要删除工作区「{{name}}」吗？其中的会话将变为未分组，文件会保留在服务器上。",
-    "newInWorkspace": "在此工作区新建会话",
     "rename": "重命名",
     "saveAsMd": "另存为 Markdown",
     "archive": "归档",

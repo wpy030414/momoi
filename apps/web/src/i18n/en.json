@@ -182,7 +182,6 @@
     },
     "completed": "Completed",
     "connectionTimeout": "Connection lost, please retry",
-    "deepThinking": "Deep Thinking",
     "downloadFailed": "Attachment download failed: {{message}}",
     "errorMessage": "Error: {{message}}",
     "exportDefaultTitle": "conversation",
@@ -225,6 +224,7 @@
     "unknownError": "Unknown error",
     "uploadFailed": "Attachment upload failed: {{message}}",
     "uploadNoConversation": "No conversation available for upload",
+    "workspacePicker": "New conversations will be created in the selected workspace",
     "worldChangePlaceholder": "Describe a change in the world…"
   },
   "sidebar": {
@@ -242,7 +242,6 @@
     "renameWorkspace": "Rename Workspace",
     "deleteWorkspace": "Delete Workspace",
     "deleteWorkspaceConfirm": "Delete workspace \"{{name}}\"? Its conversations will return to ungrouped. Workspace files are kept on the server.",
-    "newInWorkspace": "New conversation here",
     "rename": "Rename",
     "saveAsMd": "Save as Markdown",
     "archive": "Archive",

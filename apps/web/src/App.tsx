@@ -148,8 +148,8 @@ export function App() {
     if (chat.activeId) return chat.activeId
     // 草稿态（尚未发出首条消息）：上传附件需要真实会话 ID（workspace 落盘）。
     // 按当前草稿类型创建对应会话 —— 群聊草稿带 agent_ids，避免误建成单聊。
-    // 工作区跟随草稿的目标（创建时锁定），与首条消息路径保持一致。
-    const wsId = chat.draftWorkspaceIdRef.current
+    // 工作区跟随输入框下拉的当前选择，与首条消息建会路径保持一致。
+    const wsId = chat.newChatWorkspaceId
     if (chat.draftType === 'group') {
       const agentIds = chat.groupAgents.map((a: { id: string }) => a.id)
       const { conversation } = await api.createGroupConversation(agentIds, wsId)
@@ -159,7 +159,7 @@ export function App() {
     const { conversation } = await api.createConversation(undefined, wsId)
     await selectConversation(conversation.id)
     return conversation.id
-  }, [chat.activeId, chat.draftType, chat.groupAgents, chat.draftWorkspaceIdRef, selectConversation])
+  }, [chat.activeId, chat.draftType, chat.groupAgents, chat.newChatWorkspaceId, selectConversation])
 
   // When admin disables support_infinite_mode, force-disable any active infinite loop
   useEffect(() => {
@@ -565,10 +565,8 @@ export function App() {
   // 整树卸载 → 白屏，需手动刷新恢复。
   // Stable callbacks for Sidebar (prevent inline arrow re-creation on every render)
   const handleNewGroup = useCallback(() => setGroupDialogOpen(true), [])
-  /** 新建会话（未指定工作区）。必须包成零参回调再传给 Sidebar：
-   *  chat.createConversation 带可选 workspaceId 形参，直接作为 onClick 时
-   *  React 会把点击事件塞进形参，随首条消息进入请求体 → JSON.stringify
-   *  循环引用报错、会话创建失败（且 TS 对「带可选参函数 → () => void」不报错）。 */
+  /** 新建会话（进入草稿态）。目标工作区由输入框下拉的当前选择决定
+   *  （chat.newChatWorkspaceId，见 useChat），此处无需传参。 */
   const handleNewChat = useCallback(() => chat.createConversation(), [chat.createConversation])
   /** 打开会话搜索 */
   const handleOpenSearch = useCallback(() => setSearchOpen(true), [])
@@ -618,11 +616,6 @@ export function App() {
       setDeleteWsName('')
     }
   }, [deleteWsId, chat.refreshWorkspaces, chat.refreshConversations, toast])
-  /** 在工作区内新建会话：草稿锁定到该工作区（创建时锁定，之后不可移动） */
-  const handleNewInWorkspace = useCallback((wsId: string) => {
-    chat.createConversation(wsId)
-    if (isMobile) setSidebarOpen(false)
-  }, [chat.createConversation, isMobile])
   /** 搜索结果跳转 */
   const handleSelectFromSearch = useCallback((convId: string) => {
     chat.selectConversation(convId)
@@ -663,6 +656,13 @@ export function App() {
     () => chat.conversations.find((c) => c.id === chat.activeId)?.agent_id || null,
     [chat.conversations, chat.activeId]
   )
+
+  /** 当前会话归属的工作区（输入框下拉在已有会话下禁用并展示此值）。
+   *  悬空防御：指向已删除工作区的会话按未分组展示，与侧边栏渲染语义一致。 */
+  const conversationWorkspaceId = useMemo(() => {
+    const wsId = chat.conversations.find((c) => c.id === chat.activeId)?.workspace_id ?? null
+    return wsId && chat.workspaces.some((w) => w.id === wsId) ? wsId : null
+  }, [chat.conversations, chat.workspaces, chat.activeId])
 
   if (oauthRegisterInfo) {
     return (
@@ -722,7 +722,6 @@ export function App() {
             onNewWorkspace={handleOpenNewWorkspace}
             onRenameWorkspace={handleRenameWorkspace}
             onDeleteWorkspace={handleDeleteWorkspace}
-            onNewInWorkspace={handleNewInWorkspace}
             onMerge={handleMergeConversation}
             onManageGroupAgents={handleManageGroupAgents}
             onManageWorldMembers={handleManageGroupAgents}
@@ -822,6 +821,10 @@ export function App() {
               onSendGroup={chat.sendGroupMessage}
               infiniteMode={infiniteMode}
               onInfiniteModeChange={handleInfiniteModeChange}
+              workspaces={chat.workspaces}
+              newChatWorkspaceId={chat.newChatWorkspaceId}
+              onNewChatWorkspaceChange={chat.setNewChatWorkspace}
+              conversationWorkspaceId={conversationWorkspaceId}
               pendingQuestion={chat.pendingQuestion}
               onSendAnswer={(answer, selectedOptions) => chat.sendAnswer(chat.pendingQuestion?.question_id || '', answer, selectedOptions)}
               onSkipAnswer={() => chat.sendAnswer(chat.pendingQuestion?.question_id || '', '', [])}

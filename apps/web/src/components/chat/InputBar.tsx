@@ -3,8 +3,13 @@ import { useTranslation } from 'react-i18next'
 import { errT } from '../../i18n'
 import { handleAuthOn401 } from '../../lib/api'
 import { toApiError } from '../../lib/apiError'
-import { ArrowUp, Brain, Infinity, Loader2, Paperclip, X, Upload } from 'lucide-react'
+import { ArrowUp, Folder, Infinity, Loader2, Paperclip, X, Upload } from 'lucide-react'
 import { createPortal } from 'react-dom'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import type { Workspace } from '@momoi/shared/types'
+
+/** 未分组哨兵值：Radix Select 不接受空字符串 value，用保留前缀与工作区 UUID 隔离 */
+const UNGROUPED_VALUE = '__ungrouped__'
 
 interface Attachment {
   url: string
@@ -24,10 +29,15 @@ interface InputBarProps {
   disabled?: boolean
   externalValue?: string
   onExternalValueConsumed?: () => void
-  thinkingMode: boolean
-  onThinkingModeChange: (enabled: boolean) => void
   infiniteMode: boolean
   onInfiniteModeChange: (enabled: boolean) => void
+  /** 工作区下拉选项；空数组时整个下拉隐藏（只有未分组可选，无选择意义） */
+  workspaces?: Workspace[]
+  /** 新会话的目标工作区（null = 未分组）；仅在草稿态（无 conversationId）可选 */
+  newChatWorkspaceId?: string | null
+  onNewChatWorkspaceChange?: (id: string | null) => void
+  /** 当前会话的归属工作区（会话不可移动）：已有会话时下拉禁用并显示此值 */
+  conversationWorkspaceId?: string | null
   supportAttachments?: boolean
   /** Whether infinite mode button should be shown (controlled by admin config) */
   supportInfiniteMode?: boolean
@@ -63,7 +73,7 @@ function detectMention(text: string, cursorPos: number): { query: string; start:
   return null
 }
 
-export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, infiniteMode, onInfiniteModeChange, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation, collapsed = false, onExpand }: InputBarProps) {
+export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, infiniteMode, onInfiniteModeChange, workspaces, newChatWorkspaceId, onNewChatWorkspaceChange, conversationWorkspaceId, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation, collapsed = false, onExpand }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -433,16 +443,29 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
             />
             <div className="flex items-center justify-between pt-2">
               <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => onThinkingModeChange(!thinkingMode)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-                    thinkingMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                  }`}
-                  title={t('chat.deepThinking')}
-                >
-                  <Brain className="h-3.5 w-3.5" />
-                  <span>{t('chat.deepThinking')}</span>
-                </button>
+                {/* 工作区下拉（原深度思考按钮位）：草稿态选择新会话归属的工作区；
+                    已有会话锁定不可移动 → 禁用并展示其归属。无可选工作区时整体隐藏。 */}
+                {(workspaces?.length ?? 0) > 0 && (
+                  <Select
+                    value={conversationId != null ? (conversationWorkspaceId ?? UNGROUPED_VALUE) : (newChatWorkspaceId ?? UNGROUPED_VALUE)}
+                    onValueChange={(v) => onNewChatWorkspaceChange?.(v === UNGROUPED_VALUE ? null : v)}
+                    disabled={conversationId != null}
+                  >
+                    <SelectTrigger
+                      className="h-8 w-auto max-w-[200px] gap-1.5 rounded-md border-none px-3 py-1.5 text-sm font-normal text-muted-foreground shadow-none transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground [&>svg]:h-3.5 [&>svg]:w-3.5"
+                      title={conversationId != null ? t('sidebar.newWorkspaceHint') : t('chat.workspacePicker')}
+                    >
+                      <Folder className="h-3.5 w-3.5 flex-shrink-0" />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNGROUPED_VALUE}>{t('sidebar.ungrouped')}</SelectItem>
+                      {workspaces!.map((ws) => (
+                        <SelectItem key={ws.id} value={ws.id}>{ws.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 {supportInfiniteMode !== false && (
                 <button
                   onClick={() => onInfiniteModeChange(!infiniteMode)}

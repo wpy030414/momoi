@@ -28,8 +28,6 @@ interface SidebarProps {
   onRenameWorkspace: (id: string, name: string) => void
   /** 删除工作区：成员会话变为未分组（workspace_id 悬空），文件保留 */
   onDeleteWorkspace: (id: string) => void
-  /** 在指定工作区内新建会话（创建时锁定到该工作区） */
-  onNewInWorkspace: (wsId: string) => void
   onMerge?: (convId: string) => void
   onManageGroupAgents?: (convId: string) => void
   onManageWorldMembers?: (convId: string) => void
@@ -67,7 +65,7 @@ type MenuState =
 
 // ConversationTitle is now MarqueeText from ../ui/MarqueeText
 
-export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, activeId, onSelect, onNew, onNewGroup, onRename, onArchive, onExport, onOpenSearch, onNewWorkspace, onRenameWorkspace, onDeleteWorkspace, onNewInWorkspace, onMerge, onManageGroupAgents, onManageWorldMembers, onEditWorldLaws, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle, unreadCounts }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, activeId, onSelect, onNew, onNewGroup, onRename, onArchive, onExport, onOpenSearch, onNewWorkspace, onRenameWorkspace, onDeleteWorkspace, onMerge, onManageGroupAgents, onManageWorldMembers, onEditWorldLaws, onContinueOnIm, appName, currentUser, showGithub = true, onChangePin, onChangeUsername, onLinkAccount, onLogout, language, onLanguageChange, theme, onThemeChange, onAdminSettings, onDocs, onMemory, onShowIntro, standAlone, pushSupported, pushEnabled, onPushToggle, unreadCounts }: SidebarProps) {
   const LANGUAGE_OPTIONS = ['zh-CN', 'en', 'ja'] as const
   const { t, i18n } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -396,15 +394,6 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
                   )}
                   {renamingWsId !== ws.id && (
                     <span className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        title={t('sidebar.newInWorkspace')}
-                        onClick={(e) => { e.stopPropagation(); onNewInWorkspace(ws.id) }}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
