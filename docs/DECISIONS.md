@@ -1251,3 +1251,50 @@
 - 迁移：20 个路由文件 + 2 个中间件 + `provider`/`pi-adapter`/`group-orchestrator` + `config-transfer`（ImportIssue 换 code）+ `rateLimiter`（结构化秒数）；前端 16 个展示文件 + 5 处裸 fetch；三语 locale 增 `errors.*`（~150 键，约 60 条自 `serverSide` 平移）删 `serverSide` 整段
 - 修复顺带：`ChangePinDialog` 无视真实错误固定显示「PIN 不正确」；`workflow.lawsFailed` 单花括号
 - 详见 `docs/specs/module-errors.md`
+
+---
+
+## D49：会话文件下载路由 /api/workspace → /api/files 让路 + 永久别名
+
+**日期**：2026-09-30
+
+**背景**：新增「会话分组工作区」功能需要 `/api/workspaces` 命名空间，与既有「会话文件沙箱」下载路由 `/api/workspace/:conversationId/file/*` 存在词汇冲突。用户明确授权「必要时原 /api/workspace 要让路」。
+
+**决策**：旧路由迁移为 `GET /api/files/:conversationId/file/*`（`routes/files.ts`，前身为 `routes/workspace.ts`）；旧前缀 `/api/workspace` 作为**永久别名**挂载同一路由；新功能用 `WS_*` 错误码前缀（`WS_NAME_REQUIRED`/`WS_NOT_FOUND`），文件沙箱沿用 `WORKSPACE_*` 错误码**不改名**。
+
+**依据**：
+- 旧 URL 被持久化在用户数据里：`routes/upload.ts` 生成的 `/api/workspace/...` 存入 `messages.attachments` JSON，`document-tools.ts` 的 `downloadUrl` 随 tool_calls/trace 落库——直接改名不保留别名则历史消息里的图片/工具产物全部 404
+- 改写存量 JSON 列（REPLACE）违背「零数据迁移」哲学，且用户正文可能粘贴过该前缀字符串，误伤风险不可控
+- 前端零改动成本：全仓核实无任何前端硬编码 `/api/workspace`，只透传服务端返回的 downloadUrl
+- 错误码是 wire 契约标识符而非词汇表：改字符串值只产生 churn（errors.ts + 注册表 + 三语 ×3 + 一致性测试），无功能收益
+
+**影响**：
+- 新生成的 URL 一律 `/api/files/` 前缀；历史 URL 靠别名 + `parseWorkspaceUrl` 正则双前缀兼容
+- **移除别名前必须先做数据迁移**（此为永久承诺，见 `docs/specs/module-workspace.md`）
+- 顺带修复存量缺陷：`chat.ts` 的 `parseWorkspaceUrl` 旧实现按 `split('/')` 位置解析，与上传 URL 实际形态（`/file/__uploads__/`）自诞生起即不匹配、恒返回 null（AI 侧附件解析静默失败为「文件未找到」）——重写为显式正则并兼容新旧前缀
+
+---
+
+## D50：会话工作区——workspace_id 创建时锁定永不 UPDATE、删除悬空渲染、磁盘永不迁移
+
+**日期**：2026-09-30
+
+**背景**：需要会话分组（文件夹）能力，且**同一工作区内的会话共享文件沙箱**。会话是否可移动到工作区、删除工作区时文件怎么办，是本决策的核心权衡。
+
+**决策**：
+1. `conversations.workspace_id` **只在创建时写入，永不 UPDATE**——会话创建时锁定一个工作区（或未分组），之后不可移动（用户明确要求：「因为产生的文件都在工作区里」）
+2. 删除工作区 = 单行 `DELETE FROM workspaces`；成员会话的 `workspace_id` **悬空**（原样保留），前端按未分组渲染（防御性过滤）；沙箱仍锚定原 `ws-<id>` 目录——文件照旧可访问、旧共同体成员之间仍共享
+3. 沙箱根解析：`workspace_id` 非空 → `data/workspaces/ws-<id>/`（共享），NULL → `data/workspaces/<convId>/`（私有）；磁盘目录**永不删除、永不迁移**
+4. 会话「删除」在 UI/API 语义上改称**归档**（本就是 `deleted_at` 软删除，名实相符）
+
+**依据**：
+- **移动会话 = 文件迁移困境**：共享目录中的文件无法归属单一会话，迁移要么同名覆盖（灾难）、要么全量拷贝到每个成员（配额爆炸），且 sql.js 无事务、中途失败产生半迁移状态——「不可移动」从根上消灭了这一类问题
+- **删除工作区不置 NULL 会话行**：保持「单行 DELETE」的原子性（无事务下最安全）；悬空值 + 前端防御渲染达到与「UPDATE 置 NULL」相同的 UI 语义，却不触碰成员数据
+- **磁盘永不删**：避免不可逆数据丢失；重建同名工作区 = 新 id 新目录，无复活歧义
+- `ws-` 前缀隔离 workspace id 与 conversation id 两个 UUID 命名空间，人肉可辨可 grep
+
+**影响**：
+- 新增 `workspaces` 表 + `conversations.workspace_id` 列（双方言幂等迁移）；`/api/workspaces` CRUD + 三处会话创建链路注入（chat 首条消息 / worlds / conversations）+ `GET /api/conversations/search`
+- `SandboxFS` 构造函数私有化，改经 `forConversation()` 工厂解析沙箱根（6 个调用点全部切换）；配额（100MB/500 文件）语义变为**每共享目录一份**（全组共享额度，同名文件后写覆盖先写——共享文件夹的本意）
+- 草稿态（单聊/群聊）以 `draftWorkspaceIdRef` 随首条消息锁定工作区；草稿上传附件提前建会话时同样携带
+- 详见 `docs/specs/module-workspace.md`

@@ -76,6 +76,8 @@ if (fs.existsSync(dbPath)) {
 | `created_at` | INTEGER | NOT NULL, DEFAULT (unixepoch()) | Unix epoch 秒（SQLite 端有默认值；Drizzle 端无默认值，由代码写入） |
 | `updated_at` | INTEGER | NOT NULL, DEFAULT (unixepoch()) | Unix epoch 秒 |
 | `deleted_at` | INTEGER | nullable | 软删除时间戳（Unix epoch 秒），null 表示未删除 |
+| `last_read_at` | INTEGER | nullable | 已读水位（未读数计算基准），增量列迁移加入 |
+| `workspace_id` | TEXT | nullable | **创建时锁定**的分组工作区（→ workspaces.id，无外键）；null = 未分组；**永不 UPDATE**——悬空值（工作区已删）由前端按未分组渲染。增量列迁移加入 |
 
 **索引**：`idx_conversations_user` ON `(user_id, updated_at)` — 按用户排序查询
 
@@ -173,6 +175,20 @@ if (fs.existsSync(dbPath)) {
 | `updates_buf` | TEXT | NOT NULL, DEFAULT '' | 更新缓冲区（消息积压） |
 | `session_expired` | INTEGER (SQLite) / BOOLEAN (PG) | NOT NULL, DEFAULT 0 / FALSE | 会话是否过期 |
 | `created_at` | INTEGER | NOT NULL, DEFAULT (unixepoch()) | 绑定创建时间 Unix epoch 秒 |
+
+### workspaces — 会话分组工作区
+
+| 列名 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | UUID v4 |
+| `user_id` | TEXT | NOT NULL, DEFAULT '' | 用户名 |
+| `name` | TEXT | NOT NULL, DEFAULT '' | 工作区名称（trim 后 1-40 字符） |
+| `created_at` | INTEGER | NOT NULL | Unix epoch 秒（代码写入） |
+| `updated_at` | INTEGER | NOT NULL | Unix epoch 秒 |
+
+**索引**：`idx_workspaces_user` ON `(user_id)`。
+
+文件夹语义：会话创建时锁定一个工作区（`conversations.workspace_id`，无外键——与 `wechat_bindings` 同款无约束模式，避免 MIGRATION_SQL 建表顺序依赖）。删除工作区 = 单行 DELETE，成员会话的 workspace_id 悬空。详见 `docs/specs/module-workspace.md`。
 
 ### mcp_servers — MCP 服务器配置
 
@@ -315,6 +331,13 @@ PostgreSQL 版本（`schema.pg.ts`）与上面对应，差异点：
 | `voice_enabled` | INTEGER | 0 |
 | `voice_sample_url` | TEXT | '' |
 | `voice_settings` | TEXT | '{}' |
+
+`conversations` 的增量列以独立 try/catch 块追加在 `db/sqlite.ts`（`db.ts` 时期先例）：
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `last_read_at` | INTEGER | 已读水位 |
+| `workspace_id` | TEXT | 创建时锁定的分组工作区（2026-09 加入） |
 
 PostgreSQL 侧使用 `ADD COLUMN IF NOT EXISTS`，相同列定义但类型为 `BOOLEAN` / `TEXT`。
 

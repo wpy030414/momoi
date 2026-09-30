@@ -18,7 +18,7 @@
 
 ```typescript
 interface Attachment {
-  url: string    // /api/workspace/{convId}/file/__uploads__/{uuid}{ext}
+  url: string    // /api/files/{convId}/file/__uploads__/{uuid}{ext}
   name: string   // 用户看到的原始文件名
   size: number   // 字节
   type: string   // MIME
@@ -43,16 +43,16 @@ interface Attachment {
 
 **响应**：
 ```json
-{ "url": "/api/workspace/abc.../file/__uploads__/6f1a...c2.png", "name": "原文件名.png", "size": 20480, "type": "image/png" }
+{ "url": "/api/files/abc.../file/__uploads__/6f1a...c2.png", "name": "原文件名.png", "size": 20480, "type": "image/png" }
 ```
 
 **错误**：无文件 → 400 `No file provided`；无 conversation_id → 400；超限 → 400；无权限访问对话 → 403；未认证 → 401
 
-### GET /api/workspace/:conversationId/file/__uploads__/:filename
+### GET /api/files/:conversationId/file/__uploads__/:filename
 
 **需用户 JWT**（`workspaceRoute` 全局应用 `userAuthMiddleware`）。
 
-- 复用 workspace 路由的文件服务逻辑（`GET /api/workspace/:conversationId/file/*`）
+- 复用 workspace 路由的文件服务逻辑（`GET /api/files/:conversationId/file/*`）
 - `Content-Disposition: attachment; filename*=UTF-8''{原始名}`（支持中文名，可用 `?name=` 覆盖下载名）
 - `Cache-Control: private, max-age=3600`（对话工作区私有数据）
 - MIME 由 `guessMime` 扩展名映射表推断
@@ -80,7 +80,7 @@ interface Attachment {
 ```
 遍历 attachments:
   1. 从 url 解析 workspaceId 和 __uploads__/{filename}
-     （格式：/api/workspace/{convId}/file/__uploads__/{filename}）
+     （格式：/api/files/{convId}/file/__uploads__/{filename}）
   2. 通过 SandboxFS.exists 检查文件存在性；不存在 → textParts.push("[附件 {name}: 文件未找到]")
   3. 解析：
      kind=image  → 收入 imageParts，并 textParts.push("[图片: {name}]")

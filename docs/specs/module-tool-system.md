@@ -30,7 +30,7 @@
 
 **问题**：文件操作需要隔离，防止 AI 访问宿主系统。
 
-**决策**：使用目录级沙盒（`data/workspaces/{conversationId}/`），不使用 Docker 容器。
+**决策**：使用目录级沙盒（`data/workspaces/{conversationId}/`，会话锁定工作区时为共享目录 `data/workspaces/ws-{workspaceId}/`），不使用 Docker 容器。
 
 **依据**：
 - **Windows 部署复杂度**：Windows 11 上 Docker 需要 WSL2/Hyper-V，违背"轻量自托管"定位
@@ -544,8 +544,8 @@ export class SandboxFS {
 ### 创建
 
 - **时机**：首次调用任何工具时（`bash` 工具在 `execute()` 中调用 `ctx.workspace.ensureDir()`）
-- **位置**：`data/workspaces/{conversationId}/`
-- **方式**：`SandboxFS` 构造函数中解析路径，`ensureDir()` 中 `fs.mkdirSync(root, { recursive: true })`
+- **位置**：`data/workspaces/{conversationId}/`（会话锁定工作区时锚定共享目录 `data/workspaces/ws-{workspaceId}/`，见 `docs/specs/module-workspace.md`）
+- **方式**：`SandboxFS.forConversation()` 工厂解析路径（按 `conversations.workspace_id`），`ensureDir()` 中 `fs.mkdirSync(root, { recursive: true })`
 
 ### 清理
 
@@ -628,7 +628,7 @@ HTTP 工具在发起请求前：
 
 ## API 端点
 
-### GET /api/workspace/:conversationId/file/:filepath
+### GET /api/files/:conversationId/file/:filepath
 
 下载工作区内的文件（需认证）。
 
@@ -743,7 +743,7 @@ HTTP 工具在发起请求前：
 ### 下载流程
 
 1. 用户点击 `AttachmentCard`
-2. 调用 `GET /api/workspace/:conversationId/file/:filepath`（带 JWT）
+2. 调用 `GET /api/files/:conversationId/file/:filepath`（带 JWT）
 3. 接收文件流
 4. 触发浏览器下载（`Blob` + `createObjectURL`）
 

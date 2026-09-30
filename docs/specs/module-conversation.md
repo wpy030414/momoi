@@ -2,7 +2,7 @@
 
 ## 概述
 
-对话管理模块负责对话的 CRUD 操作，按用户隔离对话数据，支持对话的创建、列表、详情查看、重命名、删除，以及从任意消息处回退。
+对话管理模块负责对话的 CRUD 操作，按用户隔离对话数据，支持对话的创建、列表、详情查看、重命名、归档（软删除）、搜索，以及从任意消息处回退。会话分组（工作区）的完整契约见 `docs/specs/module-workspace.md`。
 
 ## 涉及文件
 
@@ -40,7 +40,11 @@
 }
 ```
 
-> 响应中不含 `user_id`（由 `Conversation` 类型约定），但 DB 行本身有该列。群聊对话的 `type` 为 `group`，`agent_count` 为群组成员数。
+> 响应中不含 `user_id`（由 `Conversation` 类型约定），但 DB 行本身有该列。群聊对话的 `type` 为 `group`，`agent_count` 为群组成员数。每条还含 `workspace_id`（创建时锁定的分组工作区；null = 未分组，悬空值 = 原工作区已删除、前端按未分组渲染）。
+
+### GET /api/conversations/search?q=
+
+按标题与消息内容搜索当前用户的会话（⚠️ 路由注册在 `GET /:id` 之前）。`q` trim 后截 64 字符；LIKE 通配符转义 + `lower(col) LIKE ... ESCAPE '\'`（双方言）；标题命中优先、内容命中（`role IN ('user','assistant')`，内层 limit 200）按会话去重补足 20；内容命中附带 snippet（前后各 ~40 字符，上限 140）。空 `q` → `{ "results": [] }`。契约细节见 `docs/specs/module-workspace.md`。
 
 ### GET /api/conversations/:id
 
@@ -78,8 +82,10 @@
 
 **请求**：
 ```json
-{ "title": "可选标题", "agent_id": "可选-Agent ID", "type": "direct | group", "agent_ids": ["可选-群聊Agent ID列表"] }
+{ "title": "可选标题", "agent_id": "可选-Agent ID", "type": "direct | group", "agent_ids": ["可选-群聊Agent ID列表"], "workspace_id": "可选-目标工作区（创建时锁定，之后不可移动）" }
 ```
+
+**workspace_id**：缺省 / null = 未分组；非空时校验归属，不存在或非本人所有 → 404 `WS_NOT_FOUND`（防探测）。同一入口还有 `POST /api/chat`（草稿首条消息落库）与 `POST /api/worlds`。
 
 **响应**（状态码 **201**）：
 ```json
@@ -100,7 +106,7 @@
 
 ### DELETE /api/conversations/:id
 
-删除对话（级联删除所有消息）。
+**归档**对话（软删除：置 `deleted_at`，数据保留；UI 文案与确认框均为「归档」）。同时自动解除微信/QQ 绑定。
 
 **响应**：`{ "success": true }`
 **权限**：删除条件含 `user_id`，越权删除不生效。
@@ -132,7 +138,8 @@ CREATE TABLE conversations (
   type TEXT NOT NULL DEFAULT 'direct',    -- 对话类型：'direct' 或 'group'
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  deleted_at INTEGER                     -- 软删除时间戳，null 表示未删除
+  deleted_at INTEGER,                     -- 软删除时间戳，null 表示未删除
+  workspace_id TEXT                       -- 创建时锁定的分组工作区；null = 未分组；永不 UPDATE
 );
 CREATE INDEX idx_conversations_user ON conversations(user_id, updated_at);
 

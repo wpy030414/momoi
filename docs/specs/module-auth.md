@@ -282,7 +282,7 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 1. 用户 PIN 明文、`JWT_SECRET`、JWT 本体**永不**通过任何 API 响应体或 localStorage 暴露给前端；`ADMIN` 名单也不下发（客户端只能通过 `/me` 得知**自己**是否管理员）
 2. 管理员判定即 `env.ADMIN.includes(username)`，逐请求执行——停机改 `.env` 重启后立即生效（含撤销），不存在残留的管理员 token
 3. PIN 校验一律 `^\d{4,8}$`，前后端一致
-4. 受保护资源：`/api/chat/*`、`/api/conversations/*`、`/api/upload/*`、`/api/workspace/*` 需用户 JWT；`/api/admin/*` 需用户 JWT 且用户名在 `ADMIN` 名单内（401 未认证 / 403 非管理员）
+4. 受保护资源：`/api/chat/*`、`/api/conversations/*`、`/api/upload/*`、`/api/files/*`（旧前缀 `/api/workspace/*` 为其永久别名）、`/api/workspaces/*` 需用户 JWT；`/api/admin/*` 需用户 JWT 且用户名在 `ADMIN` 名单内（401 未认证 / 403 非管理员）
 5. 管理员端点的保护通过 `adminRoute.use('<path>', adminAuthMiddleware)` 按路径挂载
    - Hono 的 `use('/stats', mw)` 只精确匹配 `/stats`，不覆盖 `/stats/conversations` 等子路径；保护一组端点须同时挂载精确路径与 `/*` 通配（本项目 `skills/*`、`stats` + `stats/*` 均已如此）。这是曾经踩过的坑：`/stats/conversations` 一度完全未鉴权，匿名即可拖取全站对话
 6. **认证 ≠ 授权**：JWT 只证明「是谁」，不证明「有权访问这条数据」。所有涉及具体资源的端点必须在 handler 内二次校验 `user_id` 归属（见 `chat.ts`、`conversations.ts` 的 `and(eq(id), eq(user_id, userId))` 查询），越权一律返回 404 而非 403（不泄露资源是否存在）

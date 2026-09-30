@@ -80,7 +80,9 @@
 │  │  │  conversations | messages | settings | agents                 │    │  │
 │  │  │  group_conversation_agents | mcp_servers | users              │    │  │
 │  │  │  user_oauth_bindings | wechat_bindings | qq_bindings           │    │  │
-│  │  │  + data/workspaces/{conversationId}/ (工具沙盒)                 │    │  │
+│  │  │  workspaces (会话分组)                                          │    │  │
+│  │  │  + data/workspaces/{conversationId}/ (会话私有工具沙盒)         │    │  │
+│  │  │  + data/workspaces/ws-{workspaceId}/ (工作区共享沙盒)           │    │  │
 │  │  │  + data/voice/{agentId}/{messageId}/ (TTS 音频缓存)            │    │  │
 │  │  └────────────────────────────────────────────────────────────────┘    │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
@@ -325,7 +327,8 @@ routes/admin.ts
   └── skills/loader.ts（技能注册表）
 
 routes/app.ts → config.ts
-routes/workspace.ts → tools/workspace.ts + db.ts + middleware/userAuth.ts
+routes/files.ts（会话文件下载；/api/workspace 为兼容历史 URL 的永久别名）→ tools/workspace.ts + db.ts + middleware/userAuth.ts
+routes/workspaces.ts（会话分组工作区 CRUD）→ db.ts + middleware/userAuth.ts
 routes/upload.ts → middleware/userAuth.ts
 routes/user.ts → auth.ts + db.ts + schema.ts + rateLimiter.ts
 
