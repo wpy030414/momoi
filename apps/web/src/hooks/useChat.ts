@@ -111,10 +111,10 @@ export function useChat() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   /** 草稿会话标记：新建会话在发出第一条消息前不落库、不建记录。
-   *  direct / group 表示当前处于「新会话草稿」状态（activeId 为 null），
+   *  direct / group / world 表示当前处于「新会话草稿」状态（activeId 为 null），
    *  首条消息发送时服务端按 conversation_type + agent_ids 建会，收到
    *  conversation_id 事件后分区迁移至真实 ID，转为真实会话。 */
-  const [draftType, setDraftType] = useState<'direct' | 'group' | null>(null)
+  const [draftType, setDraftType] = useState<'direct' | 'group' | 'world' | null>(null)
   /** 当前草稿的分区 key（唯一 draft:N）；activeId 与其互斥，二者合称视图 key */
   const [draftKey, setDraftKey] = useState<string | null>(null)
   /** 新会话的工作区选择（输入框下拉；null = 未分组）。
@@ -192,6 +192,12 @@ export function useChat() {
   const activeKeyRef = useRef<string | null>(null)
   const draftKeyRef = useRef<string | null>(null)
   const draftSeqRef = useRef(0)
+  /** 草稿类型镜像 ref：供 sendMessage 闭包稳定读取当前草稿类型（区分 world/group），
+   *  避免 useCallback 依赖链导致每次重建。 */
+  const draftTypeRef = useRef<'direct' | 'group' | 'world' | null>(null)
+  /** 世界草稿法则 ref：由 useGroupChat.createWorldDraft 写入，sendMessage 首条消息
+   *  建会时作为 world_laws 字段携带。 */
+  const worldLawsRef = useRef<string | null>(null)
   /** 视图加载世代：mount 恢复 / hashchange / 主动切换共用，乱序响应按世代丢弃 */
   const loadGenRef = useRef(0)
   /** 本地流注册表（含 abort 与模式标记），key = 分区 key */
@@ -204,6 +210,10 @@ export function useChat() {
   useEffect(() => {
     conversationsRef.current = conversations
   }, [conversations])
+
+  useEffect(() => {
+    draftTypeRef.current = draftType
+  }, [draftType])
 
   /** 视图 key 唯一写入口：三个 ref 同步更新 + 两个 state 镜像。
    *  所有「切换 activeId / 草稿」的站点必须经此——setActiveId 的 effect
@@ -552,9 +562,12 @@ export function useChat() {
             thinking_mode: thinkingMode,
             attachments: attachments || undefined,
             // 世界模拟走群聊编排 —— conversation_type 以会话真实类型为准（'world' 会话在
-            // 载入时已写入 convTypesRef），服务端据此注入「世界模拟」块而非群组规则块
-            conversation_type: groupMode ? (convTypeOf(streamKey) === 'world' ? 'world' : 'group') : undefined,
+            // 载入时已写入 convTypesRef）。草稿态 convTypeOf 对 draft:N 返回 'direct'，
+            // 故需要 draftTypeRef fallback 判断世界草稿。
+            conversation_type: groupMode ? (convTypeOf(streamKey) === 'world' || draftTypeRef.current === 'world' ? 'world' : 'group') : undefined,
             agent_ids: groupMode && groupAgentIds ? groupAgentIds : undefined,
+            // 世界法则：世界草稿首条消息建会时携带，服务端据此创建 worlds 侧表行
+            world_laws: (groupMode && draftTypeRef.current === 'world') ? (worldLawsRef.current ?? undefined) : undefined,
             // 分组工作区：新会话首条消息建会时锁定输入框下拉选择的工作区（convId 已存在时服务端忽略）
             workspace_id: convId ? undefined : (newChatWorkspaceIdRef.current ?? undefined),
             infinite_mode: infiniteMode || undefined,
@@ -613,7 +626,7 @@ export function useChat() {
                   if (msg.id && msg.id !== streamKey) {
                     const oldKey = streamKey
                     renamePartition(oldKey, msg.id)
-                    convTypesRef.current.set(msg.id, groupMode ? 'group' : 'direct')
+                    convTypesRef.current.set(msg.id, groupMode ? (draftTypeRef.current === 'world' ? 'world' : 'group') : 'direct')
                     if (activeKeyRef.current === oldKey) {
                       setViewKey(msg.id, null)
                       setDraftType(null)
@@ -1140,6 +1153,25 @@ export function useChat() {
     }
   }, [setViewKey, setNewChatWorkspace])
 
+  /** 新建世界草稿：由 useGroupChat 传入所选 Agent + 法则，先暂存组态与法则。
+   *  会话记录在「发出第一条消息」时由服务端创建（一并写入 worlds 侧表）。 */
+  const startWorldDraft = useCallback((workspaceId?: string | null) => {
+    const key = `${DRAFT_PREFIX}${++draftSeqRef.current}`
+    ++loadGenRef.current // 作废在途的会话加载，防止慢响应覆盖新草稿
+    setNewChatWorkspace(workspaceId ?? null)
+    setViewKey(null, key)
+    setDraftType('world')
+    if (window.location.hash) {
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }, [setViewKey, setNewChatWorkspace])
+
+  /** 世界草稿法则写入：供 useGroupChat.createWorldDraft 存储法则到 ref，
+   *  以便 sendMessage 首条消息建会时携带 world_laws 字段。 */
+  const setWorldLaws = useCallback((laws: string) => {
+    worldLawsRef.current = laws
+  }, [])
+
   /** 归档会话（服务端软删除：deleted_at 置位，从列表移除、自动解绑 IM，数据保留） */
   const archiveConversation = useCallback(async (id: string) => {
     try {
@@ -1348,6 +1380,8 @@ export function useChat() {
     viewLoading,
     draftType,
     startGroupDraft,
+    startWorldDraft,
+    setWorldLaws,
     /** 新会话的工作区选择（输入框下拉）：草稿建会（含草稿态上传附件提前建会，
      *  App.ensureConversation）时随请求锁定；已有会话不可移动 */
     newChatWorkspaceId,

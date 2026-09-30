@@ -157,6 +157,13 @@ export function App() {
       await selectConversation(conversation.id)
       return conversation.id
     }
+    if (chat.draftType === 'world') {
+      const agentIds = chat.groupAgents.map((a: { id: string }) => a.id)
+      const laws = chat.worldInfo?.laws ?? ''
+      const { conversation } = await api.createWorld(laws, agentIds, wsId)
+      await selectConversation(conversation.id)
+      return conversation.id
+    }
     const { conversation } = await api.createConversation(undefined, wsId)
     await selectConversation(conversation.id)
     return conversation.id
@@ -623,12 +630,10 @@ export function App() {
     chat.selectConversation(convId)
     if (isMobile) setSidebarOpen(false)
   }, [chat.selectConversation, isMobile])
-  /** 世界模拟确认：对话框提交 → 创生世界 → 停留在新会话视图（侧边栏不自动收回） */
+  /** 世界模拟确认：对话框提交 → 进入草稿态（不落库），首条消息时服务端建会 */
   const handleConfirmWorld = useCallback(async (agentIds: string[], draft: WorldDraft) => {
-    const { conversation } = await api.createWorld(draft.laws, agentIds, null)
-    await chat.refreshConversations()
-    await chat.selectConversation(conversation.id)
-  }, [chat.refreshConversations, chat.selectConversation])
+    await chat.createWorldDraft(draft.laws, agentIds)
+  }, [chat.createWorldDraft])
   /** 世界法则编辑：顶栏法则按钮与 ChatPanel 法则入口共用（防内联箭头每渲染重建） */
   const handleOpenLawsEditor = useCallback(() => setLawsEditorOpen(true), [])
   /** 世界法则保存： LawsEditor 提交 → PATCH /api/worlds/:id */

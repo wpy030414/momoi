@@ -25,6 +25,8 @@ export function useGroupChat() {
     draftType,
     selectConversation: selectInnerConversation,
     startGroupDraft,
+    startWorldDraft,
+    setWorldLaws,
     refreshConversations,
     sendMessage,
     revertMessage,
@@ -102,6 +104,12 @@ export function useGroupChat() {
         }
         lastGroupSyncRef.current = activeId
       }).catch(console.error)
+    } else if (draftType === 'world') {
+      // 世界草稿态（activeId 为 null）：保持世界模式与已选成员+法则，等待首条消息。
+      // worldInfo 已由 createWorldDraft 设置，此处不覆盖。
+      lastGroupSyncRef.current = null
+      setIsGroupMode(true)
+      setIsWorldMode(true)
     } else if (draftType === 'group') {
       // 群聊草稿态（activeId 为 null）：保持群聊模式与已选成员，等待首条消息
       lastGroupSyncRef.current = null
@@ -190,6 +198,26 @@ export function useGroupChat() {
       return null
     }
   }, [allAgents, startGroupDraft])
+
+  // Create a new world simulation draft (laws + agents — record created on first message)
+  const createWorldDraft = useCallback(async (laws: string, agentIds: string[]) => {
+    try {
+      const agentBriefs = agentIds
+        .map((id) => allAgents.find((a) => a.id === id))
+        .filter((a): a is AgentBrief => !!a)
+      setGroupAgents(agentBriefs)
+      setIsWorldMode(true)
+      setWorldInfo({ laws })
+      // 法则写入 ref，供 sendMessage 首条消息建会时携带 world_laws 字段
+      setWorldLaws(laws)
+      // 进入世界草稿态：不落库，选好 Agent + 法则后即就位，首条消息发出时由服务端建会
+      startWorldDraft(null)
+      return null
+    } catch (err) {
+      console.error('Failed to create world draft:', err)
+      return null
+    }
+  }, [allAgents, startWorldDraft, setWorldLaws])
 
   // Add an agent to the current group conversation
   const addAgentToGroup = useCallback(async (agentId: string) => {
@@ -287,6 +315,7 @@ export function useGroupChat() {
     worldInfo,
     isQqGroup,
     createGroupConversation,
+    createWorldDraft,
     addAgentToGroup,
     removeAgentFromGroup,
     sendGroupMessage,

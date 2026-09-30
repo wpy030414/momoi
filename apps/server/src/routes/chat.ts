@@ -102,7 +102,7 @@ chatRoute.post('/', async (c) => {
   }
 
   const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string; workspace_id?: string | null }>()
-  const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id, workspace_id } = body
+  const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id, workspace_id, world_laws } = body
   const requestedAgentId = body.agent_id
   // 本轮实际采用的 Agent：新建会话取请求 agent_id；已有单聊会话锚定到
   // conversations.agent_id（见下方归属校验分支）。
@@ -192,12 +192,6 @@ chatRoute.post('/', async (c) => {
       let worldInfo: { laws: string } | undefined
       let groupAgentIds = ((isGroup || isWorld) && agent_ids && agent_ids.length > 0) ? agent_ids : []
 
-      if (isWorld && !convId) {
-        // 世界会话必须经 POST /api/worlds 创建（那里会一并写入 worlds 行）
-        send({ type: 'error', code: ErrCode.CONV_WORLD_CREATE_ONLY })
-        return
-      }
-
       if (!convId) {
         convId = randomUUID()
         // 分组工作区：创建时锁定（永不 UPDATE）。草稿态的 workspace_id 随首条消息
@@ -216,7 +210,7 @@ chatRoute.post('/', async (c) => {
         await db.insert(conversations).values({
           id: convId, user_id: userId, title,
           agent_id: agentId || '',
-          type: isGroup ? 'group' : 'direct',
+          type: isWorld ? 'world' : (isGroup ? 'group' : 'direct'),
           workspace_id: workspaceAnchor,
           created_at: now, updated_at: now,
         }).run()
@@ -224,8 +218,8 @@ chatRoute.post('/', async (c) => {
         // 新会话由「首条消息」创建 —— 同账号其他设备侧边栏需实时出现该记录
         broadcastConversationSync(userId)
 
-        // Insert group agent associations
-        if (isGroup && groupAgentIds.length > 0) {
+        // Insert group/world agent associations
+        if ((isGroup || isWorld) && groupAgentIds.length > 0) {
           // Batch insert instead of N individual queries
           const rows = groupAgentIds.map((aid, idx) => ({
             conversation_id: convId,
@@ -233,6 +227,18 @@ chatRoute.post('/', async (c) => {
             sort_order: idx,
           }))
           await db.insert(groupConversationAgents).values(rows).run()
+        }
+
+        // World draft first message: create worlds side-table row + set worldInfo for orchestrator
+        if (isWorld) {
+          const laws = (world_laws ?? '').trim().slice(0, 2000)
+          await db.insert(worlds).values({
+            conversation_id: convId,
+            laws,
+            created_at: now,
+            updated_at: now,
+          }).run()
+          worldInfo = { laws }
         }
       } else {
         // Verify conversation belongs to user
