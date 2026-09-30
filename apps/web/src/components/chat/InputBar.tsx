@@ -393,7 +393,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
           动画由 .ai-active 门控（见 globals.css）。盒子的 overflow-hidden 会把子元素的外
           发光裁掉，所以光环必须住在盒子外层；盒子自身一行未改，避免重排。 */}
       <div className={`relative ${disabled ? 'ai-active' : ''}`}>
-      <div className={`rounded-xl border bg-background/[.66] overflow-hidden`}>
+      <div className={`rounded-xl border bg-background/60 backdrop-blur-sm overflow-hidden`}>
       {/* Collapsed row: single truncated line（稳态展开时 invisible，动画期间保持可见参与交叉过渡） */}
       <div
         ref={collapsedRowRef}

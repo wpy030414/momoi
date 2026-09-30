@@ -83,7 +83,7 @@ export const MessageBubble = React.memo(function MessageBubble({ message, onSugg
             </>
           ) : !isUser ? (
             /* Streaming placeholder — content not yet arrived */
-            <div className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-card/75 border`}>
+            <div className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-card/60 backdrop-blur-sm border`}>
               {message.streaming && !message.content ? (
                 <div className="flex gap-1">
                   <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -117,8 +117,8 @@ export const MessageBubble = React.memo(function MessageBubble({ message, onSugg
           {isUser && (
             <div className="mb-1">
               <div
-                className={`inline-block max-w-full rounded-lg px-4 py-2.5 text-left ${
-                  isWorld ? 'border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-100' : 'bg-primary/75 text-primary-foreground'
+                className={`inline-block max-w-full rounded-lg px-4 py-2.5 text-left backdrop-blur-sm ${
+                  isWorld ? 'border border-amber-500/30 bg-amber-500/60 text-amber-900 dark:text-amber-100' : 'bg-primary/60 text-primary-foreground'
                 }`}
               >
               {message.streaming && !message.content ? (
@@ -252,7 +252,7 @@ function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?:
     } else {
       // text
       elements.push(
-        <div key={`text-${i}`} className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-card/75 border mb-1`}>
+        <div key={`text-${i}`} className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-card/60 backdrop-blur-sm border mb-1`}>
           <MessageContent content={entry.text} streaming={streaming && i === trace.length - 1} isUser={false} />
         </div>
       )
@@ -263,7 +263,7 @@ function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?:
   // This bridges the gap between thinking blocks and the first real response.
   if (streaming && !trace.some((e) => e.type === 'text')) {
     elements.push(
-      <div key="loading-dots" className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-card/75 border mb-1`}>
+      <div key="loading-dots" className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-card/60 backdrop-blur-sm border mb-1`}>
         <div className="flex gap-1">
           <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
           <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -290,7 +290,7 @@ function ToolCallStack({ entries, streaming }: { entries: TraceEntry[]; streamin
     <div className="mb-1">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0 hover:bg-muted/80 transition-colors w-full text-left"
+        className="text-xs bg-muted/60 backdrop-blur-sm rounded-md px-3 py-1.5 flex items-center gap-2 min-w-0 hover:bg-muted/80 transition-colors w-full text-left"
       >
         <ChevronRight className={`h-3 w-3 transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`} />
         <span className="font-medium">
@@ -318,7 +318,7 @@ function ToolCallDetail({ tc }: { tc: Extract<TraceEntry, { type: 'tool_call' }>
   return (
     <div>
       <div
-        className="text-xs bg-muted/50 rounded-md px-3 py-1.5 min-w-0 cursor-pointer"
+        className="text-xs bg-muted/60 backdrop-blur-sm rounded-md px-3 py-1.5 min-w-0 cursor-pointer"
         onClick={() => tc.result && setShowFull(!showFull)}
       >
         <div className="flex items-center gap-2">

@@ -103,6 +103,8 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
   const prevFirstIdRef = useRef<number | undefined>(undefined)
   // Track whether the user is scrolled near the bottom — updated by onScroll.
   // Stored in a ref so useLayoutEffect can read it before the browser paints
@@ -159,6 +161,10 @@ export function ChatPanel({
   const handleScroll = useCallback(() => {
     const el = containerRef.current
     if (!el) return
+    // 格子背景视差：背景跟随滚动，速度 0.2× 内容
+    if (gridRef.current) {
+      gridRef.current.style.backgroundPositionY = `${el.scrollTop * -0.2}px`
+    }
     // Always track the scroll position so delta calculation stays accurate
     // even when the current event is programmatic.
     const delta = Math.abs(el.scrollTop - prevScrollTopRef.current)
@@ -184,6 +190,32 @@ export function ChatPanel({
     }
   }, [])
 
+  // 底部悬浮区（问题条 + 追问 chips + 输入框）高度 → 消息区 padding-bottom。
+  // 消息滚动层是 absolute 全面板覆盖，底部留白必须动态等于悬浮区实际高度：
+  // 输入框展开/收起（300ms 高度动画）、统计条、追问 chips 增减都实时跟随。
+  // 直接写 DOM style 而非 state——动画期间 ResizeObserver 每帧回调，
+  // 走 state 会连着 MessageList 一起逐帧重渲染。
+  useLayoutEffect(() => {
+    const bottom = bottomRef.current
+    const scroller = containerRef.current
+    if (!bottom || !scroller) return
+    const sync = () => {
+      // +24px 呼吸空间：最新消息与建议不贴输入框上沿
+      scroller.style.paddingBottom = `${bottom.offsetHeight + 24}px`
+      // 用户本就在底部时，底部悬浮区高度变化（输入框展开/收起动画、问题条
+      // 弹出、多行输入撑高）期间逐帧钉住底部——最新消息始终贴着悬浮区上沿
+      // 被撑到上面，而不是留在原地被逐渐长高的输入框盖住。
+      if (atBottomRef.current && scroller.scrollTop < scroller.scrollHeight - scroller.clientHeight) {
+        programmaticScrollRef.current = true
+        scroller.scrollTop = scroller.scrollHeight
+      }
+    }
+    sync()
+    const ro = new ResizeObserver(sync)
+    ro.observe(bottom)
+    return () => ro.disconnect()
+  }, [])
+
   // Pin to bottom instantly. Two cases:
   // 1. Conversation switch → always scroll to bottom.
   // 2. Messages changed (streaming / user sent) → only scroll if the
@@ -200,6 +232,10 @@ export function ChatPanel({
     if (isSwitch || atBottomRef.current) {
       programmaticScrollRef.current = true
       el.scrollTop = el.scrollHeight
+      // 程序化滚动后同步格子背景视差
+      if (gridRef.current) {
+        gridRef.current.style.backgroundPositionY = `${el.scrollTop * -0.2}px`
+      }
     }
     // Reset scroll accumulator on conversation switch
     if (isSwitch) {
@@ -243,7 +279,14 @@ export function ChatPanel({
   }, [isGroup, onSendGroup, onSend, selectedAgentId, infiniteMode])
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 relative">
+    <div className="flex-1 flex flex-col min-h-0 relative justify-end">
+      {/* Grid background layer — covers entire chat panel (messages + input + question bar) */}
+      {!backgroundImage && (
+        <div
+          ref={gridRef}
+          className="chat-grid-bg absolute inset-0 pointer-events-none z-0"
+        />
+      )}
       {/* Background image layer */}
       {backgroundImage && (
         <div
@@ -258,7 +301,7 @@ export function ChatPanel({
       )}
 
       {/* Messages area */}
-      <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 pb-4 pt-[76px] relative z-10">
+      <div ref={containerRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto px-4 pt-[76px] z-10">
         {!hasMessages && viewLoading ? (
           // 会话切换中：快照未落分区——显示加载态，而非误触发「新会话」空态
           <Loading className="h-full" size="lg" />
@@ -354,73 +397,76 @@ export function ChatPanel({
         )}
       </div>
 
-      {/* Ask user question bar */}
-      {pendingQuestion && pendingQuestion.questions.length > 0 && (
-        <QuestionBar
-          questions={pendingQuestion.questions}
-          onAnswer={(answer, selectedOptions) => onSendAnswer?.(answer, selectedOptions)}
-          onSkip={() => onSkipAnswer?.()}
-        />
-      )}
-
-      {/* Input area — hidden in QQ group (read-only: messages only come from QQ) */}
-      {hasMessages && !isQqGroupChat && (
-        <div className="relative z-10">
-          {/* Follow-up chips (admin-configured) — above the input bar, only in
-              non-empty conversations (the empty state shows recommendedQuestions instead) */}
-          {followupQuestions && followupQuestions.length > 0 && (
-            <div className="max-w-3xl mx-auto w-full px-4 pt-2 pb-1 flex flex-wrap gap-2">
-              {followupQuestions.map((q, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleSend(q)}
-                  disabled={loading || !!pendingQuestion}
-                  className="suggestion-chip disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-          )}
-          <InputBar
-            onSend={handleSend}
-            disabled={loading || !!pendingQuestion}
-            externalValue={revertedText}
-            onExternalValueConsumed={handleExternalValueConsumed}
-            infiniteMode={infiniteMode}
-            onInfiniteModeChange={onInfiniteModeChange ?? NOOP}
-            workspaces={workspaces}
-            newChatWorkspaceId={newChatWorkspaceId}
-            onNewChatWorkspaceChange={onNewChatWorkspaceChange}
-            conversationWorkspaceId={conversationWorkspaceId}
-            supportAttachments={supportAttachments}
-            supportInfiniteMode={supportInfiniteMode}
-            noAgents={noAgents}
-            agents={isGroup ? groupAgents : undefined}
-            isWorld={isWorld}
-            conversationId={conversationId}
-            onEnsureConversation={onEnsureConversation}
-            collapsed={inputCollapsed}
-            onExpand={() => {
-              inputCollapsedRef.current = false
-              setInputCollapsed(false)
-              expandedByUserRef.current = true
-              scrollAccRef.current = 0
-              // Release the guard after the expand animation completes
-              setTimeout(() => { expandedByUserRef.current = false }, 350)
-            }}
-            stats={stats}
-            contextWindow={contextWindow}
-            conversationWorkspaceName={conversationWorkspaceName}
-            onCancel={onCancel}
+      {/* 底部悬浮区：始终渲染（内容条件挂载），供 ResizeObserver 测量整体高度 */}
+      <div ref={bottomRef} className="relative z-10">
+        {/* Ask user question bar */}
+        {pendingQuestion && pendingQuestion.questions.length > 0 && (
+          <QuestionBar
+            questions={pendingQuestion.questions}
+            onAnswer={(answer, selectedOptions) => onSendAnswer?.(answer, selectedOptions)}
+            onSkip={() => onSkipAnswer?.()}
           />
-        </div>
-      )}
-      {hasMessages && isQqGroupChat && (
-        <div className="text-center text-xs text-muted-foreground py-2 border-t">
-          {t('chat.qqGroupReadonly')}
-        </div>
-      )}
+        )}
+
+        {/* Input area — hidden in QQ group (read-only: messages only come from QQ) */}
+        {hasMessages && !isQqGroupChat && (
+          <>
+            {/* Follow-up chips (admin-configured) — above the input bar, only in
+                non-empty conversations (the empty state shows recommendedQuestions instead) */}
+            {followupQuestions && followupQuestions.length > 0 && (
+              <div className="max-w-3xl mx-auto w-full px-4 pt-2 pb-1 flex flex-wrap gap-2">
+                {followupQuestions.map((q, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSend(q)}
+                    disabled={loading || !!pendingQuestion}
+                    className="suggestion-chip disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            )}
+            <InputBar
+              onSend={handleSend}
+              disabled={loading || !!pendingQuestion}
+              externalValue={revertedText}
+              onExternalValueConsumed={handleExternalValueConsumed}
+              infiniteMode={infiniteMode}
+              onInfiniteModeChange={onInfiniteModeChange ?? NOOP}
+              workspaces={workspaces}
+              newChatWorkspaceId={newChatWorkspaceId}
+              onNewChatWorkspaceChange={onNewChatWorkspaceChange}
+              conversationWorkspaceId={conversationWorkspaceId}
+              supportAttachments={supportAttachments}
+              supportInfiniteMode={supportInfiniteMode}
+              noAgents={noAgents}
+              agents={isGroup ? groupAgents : undefined}
+              isWorld={isWorld}
+              conversationId={conversationId}
+              onEnsureConversation={onEnsureConversation}
+              collapsed={inputCollapsed}
+              onExpand={() => {
+                inputCollapsedRef.current = false
+                setInputCollapsed(false)
+                expandedByUserRef.current = true
+                scrollAccRef.current = 0
+                // Release the guard after the expand animation completes
+                setTimeout(() => { expandedByUserRef.current = false }, 350)
+              }}
+              stats={stats}
+              contextWindow={contextWindow}
+              conversationWorkspaceName={conversationWorkspaceName}
+              onCancel={onCancel}
+            />
+          </>
+        )}
+        {hasMessages && isQqGroupChat && (
+          <div className="text-center text-xs text-muted-foreground py-2 border-t">
+            {t('chat.qqGroupReadonly')}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -46,7 +46,7 @@ export function ThinkingBlock({ content, segments, done, verbose }: ThinkingBloc
           {resolved.map((seg, idx) => (
             <div
               key={idx}
-              className="text-xs text-muted-foreground bg-muted/50 p-2 rounded max-h-60 overflow-y-auto whitespace-pre-wrap break-words"
+              className="text-xs text-muted-foreground bg-muted/60 backdrop-blur-sm p-2 rounded max-h-60 overflow-y-auto whitespace-pre-wrap break-words"
             >
               <div className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
                 <span>{t('chat.thinkingSegment', { n: idx + 1 })}</span>
@@ -64,7 +64,7 @@ export function ThinkingBlock({ content, segments, done, verbose }: ThinkingBloc
           ))}
         </div>
       ) : (
-        <pre className="text-xs text-muted-foreground bg-muted/50 p-2 rounded max-h-60 overflow-y-auto whitespace-pre-wrap break-words">
+        <pre className="text-xs text-muted-foreground bg-muted/60 backdrop-blur-sm p-2 rounded max-h-60 overflow-y-auto whitespace-pre-wrap break-words">
           {resolved[0]?.text.replace(THINKING_TRUNCATED_MARK, '') ?? content.replace(THINKING_TRUNCATED_MARK, '')}
         </pre>
       )}

@@ -120,7 +120,8 @@
 .suggestion-chip {
   @apply inline-flex items-center rounded-lg border px-4 py-1 text-xs text-card-foreground
          transition-colors hover:bg-accent hover:text-accent-foreground cursor-pointer;
-  background-color: hsl(var(--background) / 0.66);
+  background-color: hsl(var(--background) / 0.60);
+  backdrop-filter: blur(4px);
 }
 
 /* ---- Sidebar conversation list ---- */
@@ -210,4 +211,15 @@
 @media (prefers-reduced-motion: reduce) {
   .ai-active .ai-glow,
   .ai-active .ai-aura { animation: none; }
+}
+
+/* ---- 聊天区默认格子线条背景（视差）----
+   仅在无自定义背景图时启用，作为独立图层覆盖整个聊天面板；
+   JS 驱动 background-position-y 实现 0.2x 视差。 */
+.chat-grid-bg {
+  background-image:
+    linear-gradient(to right, hsl(var(--border) / 0.60) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--border) / 0.60) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-repeat: repeat;
 }

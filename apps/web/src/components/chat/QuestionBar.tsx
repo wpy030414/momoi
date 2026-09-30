@@ -53,7 +53,7 @@ export function QuestionBar({ questions, onAnswer, onSkip }: QuestionBarProps) {
   const canSubmit = hasSelection || freeText.trim().length > 0
 
   return (
-    <div className="border-t bg-card/80 backdrop-blur-sm px-4 py-3 animate-slide-up">
+    <div className="border-t bg-card/60 backdrop-blur-sm px-4 py-3 animate-slide-up">
       <div className="max-w-3xl mx-auto">
         {questions.map((q, qi) => (
           <div key={qi} className="mb-3 last:mb-0">
