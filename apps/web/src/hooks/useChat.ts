@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, getUser, handleAuthOn401, getDeviceIdForRequest, subscribeRealtime, connectRealtime } from '../lib/api'
 import { errT } from '../i18n'
 import { errFromEnvelope, toApiError } from '../lib/apiError'
-import type { Conversation, Attachment, TraceEntry } from '@momoi/shared/types'
+import type { Conversation, Workspace, Attachment, TraceEntry } from '@momoi/shared/types'
 import { THINKING_SEGMENT_OPEN } from '@momoi/shared/constants'
 
 interface ChatMessage {
@@ -100,6 +100,8 @@ interface LocalStream {
 export function useChat() {
   const { t, i18n } = useTranslation()
   const [conversations, setConversations] = useState<Conversation[]>([])
+  /** 会话分组工作区（侧边栏文件夹）；会话创建时锁定一个（或未分组） */
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   /** 草稿会话标记：新建会话在发出第一条消息前不落库、不建记录。
    *  direct / group 表示当前处于「新会话草稿」状态（activeId 为 null），
@@ -108,6 +110,9 @@ export function useChat() {
   const [draftType, setDraftType] = useState<'direct' | 'group' | null>(null)
   /** 当前草稿的分区 key（唯一 draft:N）；activeId 与其互斥，二者合称视图 key */
   const [draftKey, setDraftKey] = useState<string | null>(null)
+  /** 草稿的目标工作区（ref，无渲染需求）：工作区内新建会话时锁定，
+   *  随草稿的首条消息发给服务端建会（创建后永不移动）。 */
+  const draftWorkspaceIdRef = useRef<string | null>(null)
 
   // ---- 按会话分区的状态（渲染派生）；ref 镜像同步最新值供事件处理器读取 ----
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({})
@@ -318,10 +323,9 @@ export function useChat() {
     clearPendingFor(key)
   }, [clearPendingFor])
 
-  // Load conversations on mount
-  useEffect(() => {
-    api.listConversations()
-      .then((res) => setConversations(res.conversations))
+  const refreshWorkspaces = useCallback(() => {
+    api.listWorkspaces()
+      .then((res) => setWorkspaces(res.workspaces))
       .catch(console.error)
   }, [])
 
@@ -346,6 +350,12 @@ export function useChat() {
       })
       .catch(console.error)
   }, [markConversationRead])
+
+  // Load conversations & workspaces on mount
+  useEffect(() => {
+    refreshConversations()
+    refreshWorkspaces()
+  }, [refreshConversations, refreshWorkspaces])
 
   /**
    * 会话视图加载公共入口（mount 恢复 / hashchange / 主动切换共用）。
@@ -498,6 +508,8 @@ export function useChat() {
             // 载入时已写入 convTypesRef），服务端据此注入「世界模拟」块而非群组规则块
             conversation_type: groupMode ? (convTypeOf(streamKey) === 'world' ? 'world' : 'group') : undefined,
             agent_ids: groupMode && groupAgentIds ? groupAgentIds : undefined,
+            // 分组工作区：草稿态首条消息建会时锁定（convId 已存在时服务端忽略）
+            workspace_id: convId ? undefined : (draftWorkspaceIdRef.current ?? undefined),
             infinite_mode: infiniteMode || undefined,
             language: i18n.language,
             device_id: getDeviceIdForRequest() || undefined,
@@ -1033,7 +1045,9 @@ export function useChat() {
     setPendingByConv({})
     setViewKey(null, null)
     setDraftType(null)
+    draftWorkspaceIdRef.current = null
     setConversations([])
+    setWorkspaces([])
     unreadCountsRef.current = {}
     setUnreadCounts({})
     if (window.location.hash.startsWith('#/c/')) {
@@ -1043,10 +1057,12 @@ export function useChat() {
 
   /** 新建会话（单聊）—— 只进入草稿态，不落库。
    *  会话记录在「发出第一条消息」时由服务端创建（侧边栏同步出现）。
+   *  workspaceId：目标工作区（在工作区内新建时传入）——创建时锁定，之后不可移动。
    *  注意：不掐断其他会话正在进行的后台流（多会话并发的关键）。 */
-  const createConversation = useCallback(() => {
+  const createConversation = useCallback((workspaceId?: string | null) => {
     const key = `${DRAFT_PREFIX}${++draftSeqRef.current}`
     ++loadGenRef.current // 作废在途的会话加载，防止慢响应覆盖新草稿
+    draftWorkspaceIdRef.current = workspaceId ?? null
     setViewKey(null, key)
     setDraftType('direct')
     // 草稿态无会话 ID，hash 归位
@@ -1056,10 +1072,12 @@ export function useChat() {
   }, [setViewKey])
 
   /** 新建群聊草稿：由 useGroupChat 传入所选 Agent，先暂存组态。
-   *  会话记录在「发出第一条消息」时由服务端创建。 */
-  const startGroupDraft = useCallback(() => {
+   *  会话记录在「发出第一条消息」时由服务端创建。
+   *  workspaceId 同 createConversation——创建时锁定。 */
+  const startGroupDraft = useCallback((workspaceId?: string | null) => {
     const key = `${DRAFT_PREFIX}${++draftSeqRef.current}`
     ++loadGenRef.current // 作废在途的会话加载，防止慢响应覆盖新草稿
+    draftWorkspaceIdRef.current = workspaceId ?? null
     setViewKey(null, key)
     setDraftType('group')
     if (window.location.hash) {
@@ -1067,23 +1085,24 @@ export function useChat() {
     }
   }, [setViewKey])
 
-  const deleteConversation = useCallback(async (id: string) => {
+  /** 归档会话（服务端软删除：deleted_at 置位，从列表移除、自动解绑 IM，数据保留） */
+  const archiveConversation = useCallback(async (id: string) => {
     try {
-      await api.deleteConversation(id)
-      ++loadGenRef.current // 作废在途加载——防止慢响应在删除后复活会话
+      await api.archiveConversation(id)
+      ++loadGenRef.current // 作废在途加载——防止慢响应在归档后复活会话
       setConversations((prev) => prev.filter((c) => c.id !== id))
       clearPartition(id)
       clearUnreadFor(id)
       if (activeIdRef.current === id) {
         setViewKey(null, null)
         setDraftType(null)
-        // Clear hash since we deleted the active conversation
+        // Clear hash since we archived the active conversation
         if (window.location.hash) {
           history.replaceState(null, '', window.location.pathname + window.location.search)
         }
       }
     } catch (err) {
-      console.error('Failed to delete conversation:', err)
+      console.error('Failed to archive conversation:', err)
     }
   }, [clearPartition, clearUnreadFor, setViewKey])
 
@@ -1199,8 +1218,9 @@ export function useChat() {
     const unsubscribe = subscribeRealtime((payload) => {
       switch (payload.type) {
         case 'conv_sync':
-          // 会话列表变更（新建 / 删除 / 重命名 / 群成员数）—— 侧边栏刷新
+          // 会话列表变更（新建 / 归档 / 重命名 / 群成员数 / 工作区 CRUD）—— 侧边栏刷新
           refreshConversations()
+          refreshWorkspaces()
           break
         case 'conv_changed':
           // 其他设备回退了某会话的消息 —— 分区存在则整条重拉对齐（含后台会话）
@@ -1250,7 +1270,7 @@ export function useChat() {
       unsubscribe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshConversations, refetchConversation, handleRemoteStreamEvent, getUser(), clearUnreadFor, setUnreadCountFor, markConversationRead])
+  }, [refreshConversations, refreshWorkspaces, refetchConversation, handleRemoteStreamEvent, getUser(), clearUnreadFor, setUnreadCountFor, markConversationRead])
 
   // ---- 派生导出（签名与旧版一致，视图只是当前分区 key 的投影） ----
   const activeKey = activeId ?? draftKey
@@ -1266,20 +1286,25 @@ export function useChat() {
 
   return {
     conversations,
+    workspaces,
     activeId,
     messages,
     loading,
     viewLoading,
     draftType,
     startGroupDraft,
+    /** 草稿的目标工作区（ref）——草稿态上传附件提前建会话时（App.ensureConversation）
+     *  读取，保证落库的 workspace_id 与首条消息路径一致 */
+    draftWorkspaceIdRef,
     sendMessage,
     selectConversation,
     createConversation,
     resetChat,
     renameConversation,
-    deleteConversation,
+    archiveConversation,
     exportConversation,
     refreshConversations,
+    refreshWorkspaces,
     cancel,
     revertMessage,
     forceComplianceRetry,

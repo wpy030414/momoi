@@ -256,12 +256,20 @@ export const api = {
   // 时调用——「浏览中即已读」，推进 last_read_at，避免切走后被服务端权威
   // 计数补上红点。与 getConversation(id, true) 的区别：不拉取消息，可高频调用。
   markConversationRead: (id: string) => request<{ success: boolean }>(`/api/conversations/${id}/read`, { method: 'POST' }),
-  createConversation: (title?: string) => request<{ conversation: import('@momoi/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title }) }),
-  createGroupConversation: (agentIds: string[]) => request<{ conversation: import('@momoi/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: '群组对话', type: 'group', agent_ids: agentIds }) }),
-  deleteConversation: (id: string) => request<{ success: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' }),
+  createConversation: (title?: string, workspaceId?: string | null) => request<{ conversation: import('@momoi/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title, workspace_id: workspaceId ?? null }) }),
+  createGroupConversation: (agentIds: string[], workspaceId?: string | null) => request<{ conversation: import('@momoi/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: '群组对话', type: 'group', agent_ids: agentIds, workspace_id: workspaceId ?? null }) }),
+  // 归档 = 服务端软删除（deleted_at 置位）；从列表移除、自动解绑 IM，数据保留
+  archiveConversation: (id: string) => request<{ success: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   renameConversation: (id: string, title: string) => request<{ conversation: import('@momoi/shared/types').Conversation }>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   mergeConversations: (sourceIds: string[]) => request<{ conversation: import('@momoi/shared/types').Conversation }>('/api/conversations/merge', { method: 'POST', body: JSON.stringify({ source_ids: sourceIds }) }),
   revertMessages: (conversationId: string, messageId: number) => request<{ success: boolean }>(`/api/conversations/${conversationId}/messages/${messageId}`, { method: 'DELETE' }),
+  searchConversations: (q: string) => request<{ results: import('@momoi/shared/types').ConversationSearchResult[] }>(`/api/conversations/search?q=${encodeURIComponent(q)}`),
+
+  // Workspaces（会话分组工作区：创建时锁定到会话，之后不可移动）
+  listWorkspaces: () => request<{ workspaces: import('@momoi/shared/types').Workspace[] }>('/api/workspaces'),
+  createWorkspace: (name: string) => request<{ workspace: import('@momoi/shared/types').Workspace }>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameWorkspace: (id: string, name: string) => request<{ workspace: import('@momoi/shared/types').Workspace }>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteWorkspace: (id: string) => request<{ success: boolean }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
 
   // Group Chat
   getGroupAgents: (convId: string) => request<{ agents: Array<{ id: string; name: string; avatar: string }> }>(`/api/group/${convId}/agents`),
@@ -269,8 +277,8 @@ export const api = {
   removeGroupAgent: (convId: string, agentId: string) => request<{ success: boolean }>(`/api/group/${convId}/agents/${agentId}`, { method: 'DELETE' }),
 
   // World Simulation（世界模拟 —— 纯文本群聊的变体）
-  createWorld: (laws: string, agentIds: string[]) =>
-    request<{ conversation: import('@momoi/shared/types').Conversation; world: import('@momoi/shared/types').WorldInfo }>('/api/worlds', { method: 'POST', body: JSON.stringify({ laws, agent_ids: agentIds }) }),
+  createWorld: (laws: string, agentIds: string[], workspaceId?: string | null) =>
+    request<{ conversation: import('@momoi/shared/types').Conversation; world: import('@momoi/shared/types').WorldInfo }>('/api/worlds', { method: 'POST', body: JSON.stringify({ laws, agent_ids: agentIds, workspace_id: workspaceId ?? null }) }),
   getWorld: (convId: string) => request<{ world: import('@momoi/shared/types').WorldInfo; agents: Array<{ id: string; name: string; avatar: string }> }>(`/api/worlds/${convId}`),
   updateWorldLaws: (convId: string, laws: string) => request<{ world: import('@momoi/shared/types').WorldInfo }>(`/api/worlds/${convId}`, { method: 'PATCH', body: JSON.stringify({ laws }) }),
 

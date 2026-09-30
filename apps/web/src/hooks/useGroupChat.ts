@@ -174,7 +174,8 @@ export function useGroupChat() {
   }, [conversations, selectInnerConversation])
 
   // Create a new group conversation (draft — record created on first message)
-  const createGroupConversation = useCallback(async (agentIds: string[]) => {
+  // workspaceId：目标工作区（NewWorkflowDialog 选择）——创建时锁定，之后不可移动
+  const createGroupConversation = useCallback(async (agentIds: string[], workspaceId?: string | null) => {
     try {
       // Load the agents we just added
       const agentBriefs = agentIds
@@ -182,7 +183,7 @@ export function useGroupChat() {
         .filter((a): a is AgentBrief => !!a)
       setGroupAgents(agentBriefs)
       // 进入群聊草稿态：不落库，选好 Agent 后即就位，首条消息发出时由服务端建会
-      startGroupDraft()
+      startGroupDraft(workspaceId)
       return null
     } catch (err) {
       console.error('Failed to create group conversation:', err)

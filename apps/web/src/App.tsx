@@ -16,8 +16,10 @@ import { ImBindDialog } from './components/chat/ImBindDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
 import { Button } from './components/ui/button'
+import { Input } from './components/ui/input'
 import { useToast } from './components/ui/toast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './components/ui/dialog'
+import { ConversationSearchDialog } from './components/sidebar/ConversationSearchDialog'
 import { PanelLeft, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 import { ensureLocale, errT } from './i18n'
@@ -122,6 +124,13 @@ export function App() {
   const [deleteConvId, setDeleteConvId] = useState<string | null>(null)
   const [deleteConvTitle, setDeleteConvTitle] = useState('')
 
+  // Workspace dialogs（搜索 / 新建 / 删除确认）
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [newWsOpen, setNewWsOpen] = useState(false)
+  const [newWsName, setNewWsName] = useState('')
+  const [deleteWsId, setDeleteWsId] = useState<string | null>(null)
+  const [deleteWsName, setDeleteWsName] = useState('')
+
   // Merge group chats
   const [mergeSourceId, setMergeSourceId] = useState<string | null>(null)
   const [mergeSelectedIds, setMergeSelectedIds] = useState<string[]>([])
@@ -139,16 +148,18 @@ export function App() {
     if (chat.activeId) return chat.activeId
     // 草稿态（尚未发出首条消息）：上传附件需要真实会话 ID（workspace 落盘）。
     // 按当前草稿类型创建对应会话 —— 群聊草稿带 agent_ids，避免误建成单聊。
+    // 工作区跟随草稿的目标（创建时锁定），与首条消息路径保持一致。
+    const wsId = chat.draftWorkspaceIdRef.current
     if (chat.draftType === 'group') {
       const agentIds = chat.groupAgents.map((a: { id: string }) => a.id)
-      const { conversation } = await api.createGroupConversation(agentIds)
+      const { conversation } = await api.createGroupConversation(agentIds, wsId)
       await selectConversation(conversation.id)
       return conversation.id
     }
-    const { conversation } = await api.createConversation()
+    const { conversation } = await api.createConversation(undefined, wsId)
     await selectConversation(conversation.id)
     return conversation.id
-  }, [chat.activeId, chat.draftType, chat.groupAgents, selectConversation])
+  }, [chat.activeId, chat.draftType, chat.groupAgents, chat.draftWorkspaceIdRef, selectConversation])
 
   // When admin disables support_infinite_mode, force-disable any active infinite loop
   useEffect(() => {
@@ -177,8 +188,8 @@ export function App() {
     setGroupManageOpen(true)
   }
 
-  // Delete conversation with confirmation
-  const handleDeleteConversation = (id: string) => {
+  // Archive conversation with confirmation（归档 = 服务端软删除，数据保留）
+  const handleArchiveConversation = (id: string) => {
     const conv = chat.conversations.find((c) => c.id === id)
     setDeleteConvId(id)
     setDeleteConvTitle(conv?.title || '')
@@ -190,9 +201,9 @@ export function App() {
     setImBindOpen(true)
   }
 
-  const confirmDeleteConversation = async () => {
+  const confirmArchiveConversation = async () => {
     if (!deleteConvId) return
-    await chat.deleteConversation(deleteConvId)
+    await chat.archiveConversation(deleteConvId)
     setDeleteConvId(null)
     setDeleteConvTitle('')
   }
@@ -554,9 +565,67 @@ export function App() {
   // 整树卸载 → 白屏，需手动刷新恢复。
   // Stable callbacks for Sidebar (prevent inline arrow re-creation on every render)
   const handleNewGroup = useCallback(() => setGroupDialogOpen(true), [])
+  /** 打开会话搜索 */
+  const handleOpenSearch = useCallback(() => setSearchOpen(true), [])
+  /** 打开新建工作区对话框 */
+  const handleOpenNewWorkspace = useCallback(() => { setNewWsName(''); setNewWsOpen(true) }, [])
+  /** 新建工作区 */
+  const handleCreateWorkspace = useCallback(async () => {
+    const name = newWsName.trim()
+    if (!name) return
+    try {
+      await api.createWorkspace(name)
+      chat.refreshWorkspaces()
+      setNewWsOpen(false)
+      setNewWsName('')
+    } catch (err) {
+      toast({ title: errT(err), variant: 'error' })
+    }
+  }, [newWsName, chat.refreshWorkspaces, toast])
+  /** 重命名工作区（失败时重拉服务端权威回滚行内编辑） */
+  const handleRenameWorkspace = useCallback(async (id: string, name: string) => {
+    try {
+      await api.renameWorkspace(id, name)
+      chat.refreshWorkspaces()
+    } catch (err) {
+      console.error('Failed to rename workspace:', err)
+      chat.refreshWorkspaces()
+      toast({ title: errT(err), variant: 'error' })
+    }
+  }, [chat.refreshWorkspaces, toast])
+  /** 删除工作区（先确认）：成员会话变为未分组，文件保留在服务器 */
+  const handleDeleteWorkspace = useCallback((id: string) => {
+    const ws = chat.workspaces.find((w) => w.id === id)
+    setDeleteWsId(id)
+    setDeleteWsName(ws?.name || '')
+  }, [chat.workspaces])
+  const confirmDeleteWorkspace = useCallback(async () => {
+    if (!deleteWsId) return
+    try {
+      await api.deleteWorkspace(deleteWsId)
+      // 成员会话 workspace_id 悬空——刷新两个列表使前端按未分组渲染
+      chat.refreshWorkspaces()
+      chat.refreshConversations()
+    } catch (err) {
+      toast({ title: errT(err), variant: 'error' })
+    } finally {
+      setDeleteWsId(null)
+      setDeleteWsName('')
+    }
+  }, [deleteWsId, chat.refreshWorkspaces, chat.refreshConversations, toast])
+  /** 在工作区内新建会话：草稿锁定到该工作区（创建时锁定，之后不可移动） */
+  const handleNewInWorkspace = useCallback((wsId: string) => {
+    chat.createConversation(wsId)
+    if (isMobile) setSidebarOpen(false)
+  }, [chat.createConversation, isMobile])
+  /** 搜索结果跳转 */
+  const handleSelectFromSearch = useCallback((convId: string) => {
+    chat.selectConversation(convId)
+    if (isMobile) setSidebarOpen(false)
+  }, [chat.selectConversation, isMobile])
   /** 世界模拟确认：对话框提交 → 创生世界 → 停留在新会话视图（侧边栏不自动收回） */
-  const handleConfirmWorld = useCallback(async (agentIds: string[], draft: WorldDraft) => {
-    const { conversation } = await api.createWorld(draft.laws, agentIds)
+  const handleConfirmWorld = useCallback(async (agentIds: string[], draft: WorldDraft, workspaceId: string | null) => {
+    const { conversation } = await api.createWorld(draft.laws, agentIds, workspaceId)
     await chat.refreshConversations()
     await chat.selectConversation(conversation.id)
   }, [chat.refreshConversations, chat.selectConversation])
@@ -636,14 +705,20 @@ export function App() {
           : (
           <Sidebar
             conversations={chat.conversations}
+            workspaces={chat.workspaces}
             activeId={chat.activeId}
             onSelect={chat.selectConversation}
             onNew={chat.createConversation}
             onNewGroup={handleNewGroup}
             onRename={chat.renameConversation}
-            onDelete={handleDeleteConversation}
-            onMerge={handleMergeConversation}
+            onArchive={handleArchiveConversation}
             onExport={chat.exportConversation}
+            onOpenSearch={handleOpenSearch}
+            onNewWorkspace={handleOpenNewWorkspace}
+            onRenameWorkspace={handleRenameWorkspace}
+            onDeleteWorkspace={handleDeleteWorkspace}
+            onNewInWorkspace={handleNewInWorkspace}
+            onMerge={handleMergeConversation}
             onManageGroupAgents={handleManageGroupAgents}
             onManageWorldMembers={handleManageGroupAgents}
             onEditWorldLaws={handleOpenLawsEditor}
@@ -810,7 +885,7 @@ export function App() {
         />
       </Suspense>
 
-      {/* 新工作流：模式选择（群组会话 / 世界模拟）+ Agent 选择 + 世界描述/法则 */}
+      {/* 新工作流：模式选择（群组会话 / 世界模拟）+ 目标工作区 + Agent 选择 + 世界法则 */}
       <NewWorkflowDialog
         open={groupDialogOpen}
         onOpenChange={(open) => {
@@ -819,9 +894,10 @@ export function App() {
         }}
         agents={agents}
         agentsLoading={agentsLoading}
-        onConfirmGroup={async (agentIds) => {
+        workspaces={chat.workspaces}
+        onConfirmGroup={async (agentIds, workspaceId) => {
           // 侧边栏不自动收回：选好 Agent 后停留在群聊新会话视图
-          await chat.createGroupConversation(agentIds)
+          await chat.createGroupConversation(agentIds, workspaceId)
         }}
         onConfirmWorld={handleConfirmWorld}
       />
@@ -915,25 +991,78 @@ export function App() {
         </div>
       )}
 
-      {/* Delete conversation confirmation dialog */}
+      {/* Archive conversation confirmation dialog（归档 = 软删除，数据保留） */}
       <Dialog open={!!deleteConvId} onOpenChange={(open) => { if (!open) { setDeleteConvId(null); setDeleteConvTitle('') } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t('sidebar.delete')}</DialogTitle>
+            <DialogTitle>{t('sidebar.archive')}</DialogTitle>
             <DialogDescription>
-              {t('sidebar.deleteConfirm', { name: deleteConvTitle })}
+              {t('sidebar.archiveConfirm', { name: deleteConvTitle })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setDeleteConvId(null); setDeleteConvTitle('') }}>
               {t('common.cancel')}
             </Button>
-            <Button variant="destructive" onClick={confirmDeleteConversation}>
-              {t('sidebar.delete')}
+            <Button variant="destructive" onClick={confirmArchiveConversation}>
+              {t('sidebar.archive')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* New workspace dialog */}
+      <Dialog open={newWsOpen} onOpenChange={(open) => { if (!open) { setNewWsOpen(false); setNewWsName('') } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('sidebar.addWorkspace')}</DialogTitle>
+            <DialogDescription>{t('sidebar.newWorkspaceHint')}</DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={newWsName}
+            maxLength={40}
+            placeholder={t('sidebar.workspaceNamePlaceholder')}
+            onChange={(e) => setNewWsName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleCreateWorkspace() }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setNewWsOpen(false); setNewWsName('') }}>
+              {t('common.cancel')}
+            </Button>
+            <Button disabled={!newWsName.trim()} onClick={handleCreateWorkspace}>
+              {t('common.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete workspace confirmation（成员会话变为未分组，文件保留） */}
+      <Dialog open={!!deleteWsId} onOpenChange={(open) => { if (!open) { setDeleteWsId(null); setDeleteWsName('') } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('sidebar.deleteWorkspace')}</DialogTitle>
+            <DialogDescription>
+              {t('sidebar.deleteWorkspaceConfirm', { name: deleteWsName })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDeleteWsId(null); setDeleteWsName('') }}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteWorkspace}>
+              {t('sidebar.deleteWorkspace')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 会话搜索（标题 + 消息内容） */}
+      <ConversationSearchDialog
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onSelect={handleSelectFromSearch}
+      />
 
       {/* Merge group conversations dialog */}
       <Dialog open={!!mergeSourceId} onOpenChange={(open) => { if (!open) { setMergeSourceId(null); setMergeSelectedIds([]) } }}>
