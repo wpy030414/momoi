@@ -100,11 +100,20 @@ export async function getConversedAgents(userId: string): Promise<string[]> {
 // ---- Web Push ----
 
 /**
- * 向用户的所有已注册设备（订阅行）发送 Web Push。
+ * 向用户已注册的设备（订阅行）发送 Web Push。
  * 返回实际成功送达的设备数——调用方据此打日志，
  * 避免「零订阅/发送即失败」也被记为 Sent。
+ *
+ * deviceId 缺省 = 该用户的**全部**设备（离线催回：用户全离线，谁醒着谁弹）；
+ * 传入 deviceId = **仅该设备**（上线招呼：只推给刚刚上线的那台，
+ * 否则没上线的设备也会莫名其妙弹一条「欢迎回来」）。
  */
-export async function sendWebPush(userId: string, title: string, body: string): Promise<number> {
+export async function sendWebPush(
+  userId: string,
+  title: string,
+  body: string,
+  deviceId?: string,
+): Promise<number> {
   let sent = 0
   try {
     const { publicKey, privateKey } = await getVapidKeys()
@@ -115,11 +124,20 @@ export async function sendWebPush(userId: string, title: string, body: string): 
     const subs = await db
       .select()
       .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.user_id, userId))
+      .where(
+        deviceId
+          ? and(
+              eq(pushSubscriptions.user_id, userId),
+              eq(pushSubscriptions.device_id, deviceId),
+            )
+          : eq(pushSubscriptions.user_id, userId),
+      )
       .all()
 
     if (subs.length === 0) {
-      console.warn(`[push] No subscriptions for user ${userId} — nothing sent`)
+      console.warn(
+        `[push] No subscriptions for user ${userId}${deviceId ? ` device ${deviceId}` : ''} — nothing sent`,
+      )
       return 0
     }
 

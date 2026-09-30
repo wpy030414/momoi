@@ -7,8 +7,8 @@
 // 间隔很短 = 用户在反复刷新，Agent 会自然察觉并假装生气吐槽。
 //
 // 触发点：routes/events.ts（首设备连接后 fire-and-forget）
-// 复用：push-scheduler 的 getConversedAgents / sendWebPush
-// 产出：仅 Web Push 浏览器通知（不落库）
+// 复用：push-scheduler 的 getConversedAgents / sendWebPush（可按设备定向）
+// 产出：仅 Web Push 浏览器通知（不落库），且**只推给刚刚上线的那台设备**
 
 import { getAgent } from '../lib/config.js'
 import { streamChatCompletion } from '../ai/provider.js'
@@ -53,7 +53,10 @@ function describeSince(ms: number): string {
   return `${Math.round(s / 3600)} 小时前`
 }
 
-export async function triggerVisitGreeting(userId: string): Promise<void> {
+/** deviceId：本次上线的设备（SSE 的 device_id 与 push_subscriptions.device_id
+ *  同源）。传入则招呼只推给该设备——否则没上线的设备也会弹「欢迎回来」。
+ *  缺省 = 不限定设备（兼容旧调用）。 */
+export async function triggerVisitGreeting(userId: string, deviceId?: string): Promise<void> {
   try {
     // 0. 读取上次问候时间并立刻占位（并发上线时，至多一个读到旧值）
     const last = lastGreetedAt.get(userId)
@@ -106,8 +109,8 @@ export async function triggerVisitGreeting(userId: string): Promise<void> {
     if (!title) title = agent.name
     if (!body) body = `欢迎回来～`
 
-    // 4. Web Push 发送（不落库）
-    const sent = await sendWebPush(userId, title, body)
+    // 4. Web Push 发送（不落库）——只推给刚刚上线的那台设备
+    const sent = await sendWebPush(userId, title, body, deviceId)
     if (sent > 0) {
       console.log(`[visit-greeting] Sent web push to ${sent} device(s) for user ${userId} agent ${agent.name}: title="${title}" body="${body}"`)
     } else {

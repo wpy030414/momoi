@@ -27,7 +27,11 @@ eventsRoute.get('/', async (c) => {
     throw new ApiError(ErrCode.UNAUTHORIZED)
   }
 
-  const deviceId = c.req.query('device_id') || randomUUID()
+  // 原始 query 值（客户端总带 device_id）与兜底值分开：订阅总线需要非空
+  // 字符串，而上线招呼按 push_subscriptions.device_id 定向——拿原始值，
+  // 缺省时回退为不限定设备（对不合规客户端保持旧的广播行为）。
+  const rawDeviceId = c.req.query('device_id')
+  const deviceId = rawDeviceId || randomUUID()
 
   // SSE 防缓冲响应头：阻止 Nginx/CDN 对长连接做缓冲/聚合（否则事件被攒到
   // 缓冲区满才一次性下发，表现为「没有立刻出现」）。
@@ -55,8 +59,9 @@ eventsRoute.get('/', async (c) => {
     // If this is the first active device, user just came back online
     if (getActiveDeviceCount(userId) === 1) {
       cancelOfflineNotifications(userId)
-      // Fire-and-forget visit greeting; don't block SSE setup on AI generation
-      triggerVisitGreeting(userId).catch((err) => {
+      // Fire-and-forget visit greeting; don't block SSE setup on AI generation.
+      // 定向到刚上线的这台设备（device_id 与 push_subscriptions.device_id 同源）
+      triggerVisitGreeting(userId, rawDeviceId || undefined).catch((err) => {
         console.error(`[visit-greeting] Failed for user ${userId}:`, (err as Error).message)
       })
     }
