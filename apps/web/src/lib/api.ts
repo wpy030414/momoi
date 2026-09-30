@@ -247,6 +247,8 @@ export const api = {
   ),
 
   // Conversations
+  // 列表**不含** conversation.stats（状态条快照只随会话详情下发）——别在这里读它，
+  // 那会让状态条多出「第二个来源」，客户端就得替服务端判新旧。
   listConversations: () => request<{ conversations: import('@momoi/shared/types').Conversation[] }>('/api/conversations'),
   // markRead=true 仅限用户主动打开会话（loadConversation）——服务端据此推进
   // last_read_at 并广播 unread_update(0)。后台对账（conv_changed / 流收尾）、
@@ -289,7 +291,7 @@ export const api = {
   answerQuestion: (conversationId: string, questionId: string, answer: string, selectedOptions?: string[]) => request<{ success: boolean }>(`/api/chat/${conversationId}/answer`, { method: 'POST', body: JSON.stringify({ question_id: questionId, answer, selected_options: selectedOptions }) }),
 
   // App config
-  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; support_infinite_mode: boolean; show_github: boolean; use_external_image_hosting: boolean; allow_im_conversations: boolean; recommended_questions: string[]; followup_questions: string[]; stand_alone?: boolean; agents: Array<{ id: string; name: string; avatar: string }> }>('/api/app-name'),
+  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; support_infinite_mode: boolean; show_github: boolean; use_external_image_hosting: boolean; allow_im_conversations: boolean; recommended_questions: string[]; followup_questions: string[]; context_window?: number; stand_alone?: boolean; agents: Array<{ id: string; name: string; avatar: string }> }>('/api/app-name'),
 
   // User-Agent Memories (current user, cross-agent — memory management view)
   listMemories: () => request<{ memories: import('@momoi/shared/types').UserAgentMemory[] }>('/api/memories'),

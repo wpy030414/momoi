@@ -337,6 +337,7 @@
     "supportInfiniteMode": "支持无限演算",
     "allowImConversations": "允许在 IM 上对话",
     "useExternalImageHosting": "使用外部图床服务",
+    "contextWindow": "模型上下文窗口（tokens）",
     "agentName": "智能体名称",
     "agentModel": "模型",
     "agentAvatar": "头像",

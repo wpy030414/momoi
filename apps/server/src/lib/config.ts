@@ -87,6 +87,14 @@ export async function updateTtsConfig(partial: Partial<{ endpoint: string; provi
 let configCache: { data: AppConfig; ts: number } | null = null
 const CONFIG_TTL_MS = 5_000
 
+/** 上下文窗口（tokens）解析：仅接受正整数，其余（0 / 负数 / NaN / 空）回落 128000。
+ *  该值是状态条「上下文（已用）%」的分母，也是 Pi 循环里 model.contextWindow 的
+ *  取值——非正数会让百分比出现 Infinity/负值，必须在读取这一个点上收口。 */
+function parseContextWindow(raw: string | undefined): number {
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 128000
+}
+
 function buildConfig(map: Map<string, string>): AppConfig {
   return {
     app_name: map.get('app_name') || DEFAULT_APP_NAME,
@@ -99,6 +107,7 @@ function buildConfig(map: Map<string, string>): AppConfig {
     allow_im_conversations: map.get('allow_im_conversations') !== 'false',
     show_github: map.get('show_github') !== 'false',
     use_external_image_hosting: map.get('use_external_image_hosting') === 'true',
+    context_window: parseContextWindow(map.get('context_window')),
     recommended_questions: JSON.parse(map.get('recommended_questions') || '[]'),
     followup_questions: JSON.parse(map.get('followup_questions') || '[]'),
     oauth_providers: JSON.parse(map.get('oauth_providers') || '[]'),
@@ -119,10 +128,13 @@ export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConf
   for (const [key, value] of Object.entries(partial)) {
     if (value !== undefined) {
       const boolKeys = ['support_attachments', 'support_infinite_mode', 'allow_im_conversations', 'show_github', 'use_external_image_hosting']
+      const numberKeys = ['context_window']
       const jsonKeys = ['recommended_questions', 'followup_questions', 'oauth_providers']
       let stored: string
       if (jsonKeys.includes(key)) {
         stored = JSON.stringify(value)
+      } else if (numberKeys.includes(key)) {
+        stored = String(value)
       } else if (boolKeys.includes(key)) {
         stored = value ? 'true' : 'false'
       } else {

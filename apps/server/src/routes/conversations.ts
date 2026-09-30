@@ -93,6 +93,8 @@ conversationsRoute.get('/', async (c) => {
     deleted_at: conversations.deleted_at,
     last_read_at: conversations.last_read_at,
     workspace_id: conversations.workspace_id,
+    // 注意：列表**不**携带 stats（状态条随会话上下文下发，见详情端点）——
+    // 列表刷新频繁，若把快照塞进来就得让客户端判定新旧，权威性会漏到客户端
     agent_count: sql<number>`COALESCE((SELECT COUNT(*) FROM group_conversation_agents WHERE group_conversation_agents.conversation_id = conversations.id), 0)`,
     wechat_bound: sql<number>`EXISTS (SELECT 1 FROM wechat_bindings WHERE wechat_bindings.user_id = conversations.user_id AND wechat_bindings.conversation_id = conversations.id)`,
     qq_bound: sql<number>`EXISTS (SELECT 1 FROM qq_bindings WHERE qq_bindings.user_id = conversations.user_id AND qq_bindings.conversation_id = conversations.id) OR EXISTS (SELECT 1 FROM qq_group_conversations WHERE qq_group_conversations.conversation_id = conversations.id)`,
@@ -250,7 +252,7 @@ conversationsRoute.get('/:id', async (c) => {
   }
 
   return c.json({
-    conversation: conv,
+    conversation: { ...conv, stats: (conv as any).stats ? JSON.parse((conv as any).stats) : null },
     messages: msgs.map((m: typeof messages.$inferSelect) => ({
       ...m,
       tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : null,

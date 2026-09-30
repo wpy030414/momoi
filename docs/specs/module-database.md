@@ -78,6 +78,7 @@ if (fs.existsSync(dbPath)) {
 | `deleted_at` | INTEGER | nullable | 软删除时间戳（Unix epoch 秒），null 表示未删除 |
 | `last_read_at` | INTEGER | nullable | 已读水位（未读数计算基准），增量列迁移加入 |
 | `workspace_id` | TEXT | nullable | **创建时锁定**的分组工作区（→ workspaces.id，无外键）；null = 未分组；**永不 UPDATE**——悬空值（工作区已删）由前端按未分组渲染。增量列迁移加入 |
+| `stats` | TEXT | nullable | 会话状态条统计（`ConversationStats` 的 JSON 串）；每轮生成后**覆盖写**，其中会话累计 `totalTokens`（账单口径）在同一列内**只增不减**；null = 尚未生成过。读出时反序列化后上 wire（仅会话详情端点，列表不返回），见 `module-chat.md`〈会话状态条〉。增量列迁移加入 |
 
 **索引**：`idx_conversations_user` ON `(user_id, updated_at)` — 按用户排序查询
 
@@ -214,6 +215,9 @@ export const conversations = sqliteTable('conversations', {
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
   deleted_at: integer('deleted_at'),
+  last_read_at: integer('last_read_at'),
+  workspace_id: text('workspace_id'),
+  stats: text('stats'),
 })
 
 export const messages = sqliteTable('messages', {
@@ -338,6 +342,7 @@ PostgreSQL 版本（`schema.pg.ts`）与上面对应，差异点：
 |---|---|---|
 | `last_read_at` | INTEGER | 已读水位 |
 | `workspace_id` | TEXT | 创建时锁定的分组工作区（2026-09 加入） |
+| `stats` | TEXT | 会话状态条统计 JSON（2026-09 加入） |
 
 PostgreSQL 侧使用 `ADD COLUMN IF NOT EXISTS`，相同列定义但类型为 `BOOLEAN` / `TEXT`。
 
@@ -448,3 +453,4 @@ await db.update(conversations)
 8. 设置 `DATABASE_URL` + `DATABASE_USER` + `DATABASE_SECRET` 后自动切换到 PostgreSQL
 9. 旧 SQLite 数据库启动时，增量列迁移（`ALTER TABLE agents ADD COLUMN voice_*`）不报错
 10. 用户名重命名级联更新所有关联表
+11. 旧库启动补列（`last_read_at` / `workspace_id` / `stats`）幂等不报错；`conversations.stats` 写入 JSON 后读回可直接反序列化，null 会话不报错

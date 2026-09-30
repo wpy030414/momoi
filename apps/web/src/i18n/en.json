@@ -337,6 +337,7 @@
     "supportInfiniteMode": "Support Infinite Mode",
     "allowImConversations": "Allow IM Conversations",
     "useExternalImageHosting": "Use External Image Hosting",
+    "contextWindow": "Model Context Window (tokens)",
     "agentName": "Agent Name",
     "agentModel": "Model",
     "agentAvatar": "Avatar",

@@ -337,6 +337,7 @@
     "supportInfiniteMode": "無限モードを有効化",
     "allowImConversations": "IM での会話を許可",
     "useExternalImageHosting": "外部画像ホスティングを使用",
+    "contextWindow": "モデルコンテキストウィンドウ（トークン）",
     "agentName": "エージェント名",
     "agentModel": "モデル",
     "agentAvatar": "アバター",

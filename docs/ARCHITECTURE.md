@@ -227,6 +227,7 @@ type ServerMessage =
   | { type: 'follow_up'; text: string }
   | { type: 'infinite_mode_off' }
   | { type: 'done'; reply: string; suggestions: string[]; agent_id?: string; agent_name?: string; infinite?: boolean }
+  | { type: 'stats'; stats: ConversationStats }
   | { type: 'error'; code: string; params?: Record<string, string | number>; agent_id?: string; agent_name?: string }
 
 // 实时事件（GET /api/events）—— 以 type 字段区分
@@ -235,6 +236,9 @@ type ServerMessage =
 | { type: 'conv_changed'; conversation_id: string }
 | { type: 'group_members'; conversation_id: string }
 ```
+
+> 此处为常用事件速览（非穷举）；**权威事件表**见 `docs/specs/module-chat.md` 的 SSE 事件表。
+> `ConversationStats`（状态条快照：轮/步/tok·s/上下文占用）的契约见同文档〈会话状态条〉。
 
 ### 配置数据流
 
@@ -251,6 +255,7 @@ getConfig() → 运行时配置（优先使用 DB 值）
 AppConfig 字段：
   app_name, app_favicon, app_background            — 体验（应用外观定制）
   api_endpoint, api_key                             — LLM 连接
+  context_window                                    — 模型上下文窗口（tokens，缺省 128000）
   support_attachments                               — 附件开关
   support_infinite_mode                             — 无限模式开关
   show_github                                       — 显示 GitHub 链接

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, getUser, handleAuthOn401, getDeviceIdForRequest, subscribeRealtime, connectRealtime } from '../lib/api'
 import { errT } from '../i18n'
 import { errFromEnvelope, toApiError } from '../lib/apiError'
-import type { Conversation, Workspace, Attachment, TraceEntry } from '@momoi/shared/types'
+import type { Conversation, ConversationStats, Workspace, Attachment, TraceEntry } from '@momoi/shared/types'
 import { THINKING_SEGMENT_OPEN } from '@momoi/shared/constants'
 
 interface ChatMessage {
@@ -133,6 +133,10 @@ export function useChat() {
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({})
   const [loadingByConv, setLoadingByConv] = useState<Record<string, boolean>>({})
   const [pendingByConv, setPendingByConv] = useState<Record<string, PendingQuestion | null>>({})
+
+  // 会话状态条统计：服务端权威发放（SSE stats 事件 + 会话详情响应），客户端原样采用
+  const [statsByConv, setStatsByConv] = useState<Record<string, ConversationStats | null>>({})
+  const statsByConvRef = useRef<Record<string, ConversationStats | null>>({})
 
   const messagesByConvRef = useRef<Record<string, ChatMessage[]>>({})
   const loadingRef = useRef<Record<string, boolean>>({})
@@ -274,6 +278,15 @@ export function useChat() {
     })
   }, [updateMessages])
 
+  /** 服务端权威状态快照落位：**原样采用**，不比较、不合并、不判新旧。
+   *  两个发放点——SSE `stats` 事件（生成结束）与会话详情响应（打开会话 / 对账），
+   *  都是由服务端在会话上下文里给出的同一份权威值。 */
+  const storeServerStats = useCallback((id: string, conv: { stats?: ConversationStats | null } | null | undefined) => {
+    const s = conv?.stats ?? null
+    statsByConvRef.current = { ...statsByConvRef.current, [id]: s }
+    setStatsByConv((prev) => ({ ...prev, [id]: s }))
+  }, [])
+
   /** 分区重命名（conversation_id 到达、草稿转正）：消息 / loading / pending / 流注册表 / 远程戳整体迁移 */
   const renamePartition = useCallback((oldKey: string, newKey: string) => {
     const all = { ...messagesByConvRef.current }
@@ -299,6 +312,16 @@ export function useChat() {
       if (!(newKey in q)) q[newKey] = v
       pendingRef.current = q
       setPendingByConv(q)
+    }
+    // 状态条统计：草稿转正时若 stats 已落在草稿 key 上（事件早于 conversation_id
+    // 到达的时序），一并迁移——否则那份统计会永远挂在已废弃的草稿 key 下
+    if (oldKey in statsByConvRef.current) {
+      const s = { ...statsByConvRef.current }
+      const v = s[oldKey]
+      delete s[oldKey]
+      if (!(newKey in s)) s[newKey] = v
+      statsByConvRef.current = s
+      setStatsByConv(s)
     }
     const entry = streamsRef.current.get(oldKey)
     if (entry) {
@@ -353,6 +376,10 @@ export function useChat() {
         // 仍有计数（如 SSE 断线期间错过了 unread_update），推进已读水位
         // 自愈，且不写入本地计数，避免切走时旧值点亮红点。
         const counts: Record<string, number> = {}
+        // 注意：状态条统计**不在**这条路径上。列表端点不返回 stats，状态快照只随
+        // 会话上下文下发（SSE stats 事件 / 会话详情），客户端一律原样采用、不做
+        // 判新旧——发放权威完全在服务端（见 docs/specs/module-chat.md〈会话状态条〉）。
+        // 列表刷新频繁，若在这里塞一份快照，客户端就得替服务端裁决谁更新。
         for (const conv of res.conversations) {
           const uc = (conv as any).unread_count as number | undefined
           if (uc && uc > 0) {
@@ -398,6 +425,8 @@ export function useChat() {
       if (loadGenRef.current !== gen) return null
       const type = ((res.conversation as Conversation).type as 'direct' | 'group' | 'world') || 'direct'
       convTypesRef.current.set(id, type)
+      // 状态条：服务端权威快照随会话详情一起到达，原样落位
+      storeServerStats(id, res.conversation)
       applySnapshot(id, res.messages.map(mapServerMessage))
       clearUnreadFor(id)
       return res
@@ -409,7 +438,7 @@ export function useChat() {
       history.replaceState(null, '', window.location.pathname + window.location.search)
       return null
     }
-  }, [applySnapshot, clearUnreadFor, setViewKey])
+  }, [applySnapshot, clearUnreadFor, setViewKey, storeServerStats])
 
   // Restore conversation from URL hash on mount (#/c/{id})
   useEffect(() => {
@@ -443,11 +472,13 @@ export function useChat() {
     if (!res) return
     const type = ((res.conversation as Conversation).type as 'direct' | 'group' | 'world') || 'direct'
     convTypesRef.current.set(id, type)
+    // 状态条：对账同时把服务端权威快照带回来（他端生成过 → 本端在此收敛）
+    storeServerStats(id, res.conversation)
     if (messagesByConvRef.current[id] !== undefined) {
       // conv_changed = 他端改动 DB（回退等）：DB 权威对账，绝不复活已删消息
       applySnapshot(id, res.messages.map(mapServerMessage), 'reconcile')
     }
-  }, [applySnapshot])
+  }, [applySnapshot, storeServerStats])
 
   /** 每次渲染后刷新 ref：让 useCallback 包裹的入口始终调到最新闭包（t 随语言变化等）。
    *  声明在 sendMessage 之前：其闭包经 ref 调用 handleSSEEvent——handleSSEEvent
@@ -675,6 +706,7 @@ export function useChat() {
       const res = await api.getConversation(convId).catch(() => null)
       if (res) {
         // 流已结束（gotDoneEvent）：DB 权威对账——不复活他端已删的消息
+        storeServerStats(streamKey, res.conversation)
         applySnapshot(streamKey, res.messages.map(mapServerMessage), 'reconcile')
       }
     }
@@ -683,7 +715,7 @@ export function useChat() {
     if (!streamsRef.current.has(streamKey)) {
       updateLastMessage(streamKey, { streaming: false })
     }
-  }, [updateMessages, updateLastMessage, setLoadingFor, renamePartition, applySnapshot, refreshConversations, setViewKey, t, i18n])
+  }, [updateMessages, updateLastMessage, setLoadingFor, renamePartition, applySnapshot, refreshConversations, setViewKey, storeServerStats, t, i18n])
 
   /** 实时中继事件入口：他设备流事件写入其会话自己的分区 */
   const handleRemoteStreamEvent = useCallback((msg: import('@momoi/shared/types').ServerMessage, conversationId: string) => {
@@ -857,6 +889,12 @@ export function useChat() {
             streaming: false,
           }]
         })
+        break
+
+      case 'stats':
+        // 会话状态条：服务端在生成结束时权威下发的一份快照——原样落位，
+        // 不判新旧（发放权威在服务端；这里只是接收）
+        if (msg.stats) storeServerStats(key, { stats: msg.stats as ConversationStats })
         break
 
       case 'error':
@@ -1330,5 +1368,7 @@ export function useChat() {
     sendAnswer,
     // 未读计数（侧边栏红点）
     unreadCounts,
+    // 会话状态条统计（按分区 key 映射；null = 尚未产生统计）
+    statsByConv,
   }
 }

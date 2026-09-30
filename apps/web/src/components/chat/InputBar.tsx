@@ -6,7 +6,8 @@ import { toApiError } from '../../lib/apiError'
 import { ArrowUp, Folder, Infinity, Loader2, Paperclip, X, Upload } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
-import type { Workspace } from '@momoi/shared/types'
+import type { ConversationStats, Workspace } from '@momoi/shared/types'
+import { formatDuration, formatTokenCount } from '../../lib/format'
 
 /** 未分组哨兵值：Radix Select 不接受空字符串 value，用保留前缀与工作区 UUID 隔离 */
 const UNGROUPED_VALUE = '__ungrouped__'
@@ -55,6 +56,12 @@ interface InputBarProps {
   collapsed?: boolean
   /** Called when user clicks the collapsed bar to restore it */
   onExpand?: () => void
+  /** 会话状态条统计（SSE stats 事件 + DB 快照；已有对话输入框底部显示） */
+  stats?: ConversationStats | null
+  /** 模型上下文窗口大小（tokens）：管理端网关设置，缺省 128000 */
+  contextWindow?: number
+  /** 当前工作区名称（已有会话用——状态条首字段） */
+  conversationWorkspaceName?: string
 }
 
 /** Scan backwards from cursorPos to find the last active @mention trigger */
@@ -73,7 +80,7 @@ function detectMention(text: string, cursorPos: number): { query: string; start:
   return null
 }
 
-export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, infiniteMode, onInfiniteModeChange, workspaces, newChatWorkspaceId, onNewChatWorkspaceChange, conversationWorkspaceId, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation, collapsed = false, onExpand }: InputBarProps) {
+export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, infiniteMode, onInfiniteModeChange, workspaces, newChatWorkspaceId, onNewChatWorkspaceChange, conversationWorkspaceId, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation, collapsed = false, onExpand, stats, contextWindow = 128000, conversationWorkspaceName }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -374,7 +381,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
   }
 
   return (
-    <div ref={containerRef} className="max-w-3xl mx-auto w-full px-4 pb-4">
+    <div ref={containerRef} className={`max-w-3xl mx-auto w-full px-4 ${!collapsed && conversationId != null && stats ? 'pb-1' : 'pb-4'}`}>
       <div className={`rounded-xl border bg-background/[.66] overflow-hidden ${collapsed ? '' : 'focus-within:ring-2 focus-within:ring-ring transition-shadow'}`}>
       {/* Collapsed row: single truncated line（稳态展开时 invisible，动画期间保持可见参与交叉过渡） */}
       <div
@@ -445,7 +452,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
               <div className="flex items-center gap-1.5">
                 {/* 工作区下拉（原深度思考按钮位）：草稿态选择新会话归属的工作区；
                     已有会话锁定不可移动 → 禁用并展示其归属。无可选工作区时整体隐藏。 */}
-                {(workspaces?.length ?? 0) > 0 && (
+                {!collapsed && conversationId == null && (workspaces?.length ?? 0) > 0 && (
                   <Select
                     value={conversationId != null ? (conversationWorkspaceId ?? UNGROUPED_VALUE) : (newChatWorkspaceId ?? UNGROUPED_VALUE)}
                     onValueChange={(v) => onNewChatWorkspaceChange?.(v === UNGROUPED_VALUE ? null : v)}
@@ -508,6 +515,42 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
           </div>
         </div>
       </div>
+
+      {/* 会话状态条（已有会话：输入框下方一行，不显工作区下拉） */}
+      {!collapsed && conversationId != null && stats && (
+        <div className="mt-1.5 text-xs text-muted-foreground text-center truncate">
+          <span className="font-medium">
+            {conversationWorkspaceName || t('sidebar.ungrouped')}
+          </span>
+          {/* 本轮耗时 · tok/s（存量快照没有 durationMs → 与分隔符整簇隐藏，
+              避免留下孤立竖线）。轮/步 不上状态条：步与工具气泡数重合、
+              轮与「思考片段」编号口径不同反而引起疑问（见 module-chat.md〈会话状态条〉） */}
+          {(stats.durationMs != null || stats.tokensPerSecond > 0) && (
+            <>
+              <span className="mx-1.5 text-border">|</span>
+              {stats.durationMs != null && <span>{formatDuration(stats.durationMs)}</span>}
+              {stats.durationMs != null && stats.tokensPerSecond > 0 && <span className="mx-1.5 text-border">·</span>}
+              {stats.tokensPerSecond > 0 && <span>{stats.tokensPerSecond} tok/s</span>}
+            </>
+          )}
+          {/* 累计消耗：账单口径——Σ 每次 LLM 调用的输入+输出，含每轮重发的上下文。
+              存量快照（该字段上线前）没有 totalTokens → 整簇隐藏。
+              状态条只列裸数字（无中文标签、无 ≈）：估算标记仍在快照数据里
+              （estimated / totalEstimated），留给工具提示或详情视图。 */}
+          {stats.totalTokens != null && (
+            <>
+              <span className="mx-1.5 text-border">|</span>
+              <span>{formatTokenCount(stats.totalTokens)} tok</span>
+            </>
+          )}
+          <span className="mx-1.5 text-border">|</span>
+          {/* 上下文占用（分母 = 管理端配置的窗口大小，与 Pi 循环同源）。
+              绝对值让位给累计消耗，这里只留百分比——它才是驱动动作的那个数。 */}
+          <span>
+            {contextWindow > 0 ? Math.round((stats.contextTokens / contextWindow) * 100) : 0}%
+          </span>
+        </div>
+      )}
 
       {/* Mention dropdown portal */}
       {mentionOpen && filteredAgents.length > 0 && menuPosition && createPortal(

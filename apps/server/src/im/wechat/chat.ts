@@ -8,6 +8,7 @@ import { runPiAgentLoop } from '../../ai/pi-adapter.js'
 import { sendMessage, WECHAT_BASE_URL, type WechatCredentials } from './ilink.js'
 import { broadcastStream, broadcastConversationChanged, broadcastConversationSync, broadcastUnreadUpdate } from '../../lib/realtime.js'
 import { countUnread } from '../../lib/unread.js'
+import { persistConversationStats } from '../../lib/stats-store.js'
 import { withUserImLock } from '../locks.js'
 
 export interface WechatChatOptions {
@@ -123,7 +124,7 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
   //   1. 将流事件实时中继到同账号其他设备（网页端 SSE 通道）
   //   2. 收集完整回复用于后续落库（reply / thinking / suggestions 仍由
   //      runPiAgentLoop 返回，此处仅广播）
-  const { reply, suggestions, thinking } = await runPiAgentLoop({
+  const { reply, suggestions, thinking, stats, genUsage } = await runPiAgentLoop({
     userMessage: text,
     history,
     send: (msg) => {
@@ -153,6 +154,10 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
     }).run()
     // 未读广播：web 端侧边栏红点实时点亮（与 web 聊天路径对齐）
     broadcastUnreadUpdate(userId, convId, await countUnread(convId))
+    // 状态条：IM 侧的生成同样计入会话消耗（账单口径）——先中继给网页端让状态条
+    // 实时更新，再落库（顺序与 routes/chat.ts 一致）
+    broadcastStream(userId, '', { conversation_id: convId, event: { type: 'stats', stats } })
+    await persistConversationStats(convId, stats, genUsage)
   }
 
   // ---- Realtime: 会话内容落库完毕，通知其他设备对齐（兜底重拉）----

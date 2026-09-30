@@ -13,7 +13,8 @@ export const MIGRATION_SQL = `
     updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
     deleted_at INTEGER,
     last_read_at INTEGER,
-    workspace_id TEXT
+    workspace_id TEXT,
+    stats TEXT
   );
 
   CREATE TABLE IF NOT EXISTS messages (

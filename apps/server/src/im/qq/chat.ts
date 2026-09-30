@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto'
 import { runPiAgentLoop } from '../../ai/pi-adapter.js'
 import { broadcastStream, broadcastConversationChanged, broadcastConversationSync, broadcastUnreadUpdate } from '../../lib/realtime.js'
 import { countUnread } from '../../lib/unread.js'
+import { persistConversationStats } from '../../lib/stats-store.js'
 import { withUserImLock } from '../locks.js'
 import { sendC2CText, sendGroupText, type QqCredentials } from './api.js'
 import { listAgents } from '../../lib/config.js'
@@ -184,7 +185,7 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
 
   // ---- Run AI (broadcast to web clients; no QQ streaming — send full text on completion) ----
   // send 回调仅承担实时中继到同账号其他设备（网页端 SSE 通道）
-  const { reply, suggestions, thinking } = await runPiAgentLoop({
+  const { reply, suggestions, thinking, stats, genUsage } = await runPiAgentLoop({
     userMessage: text,
     history,
     send: (msg) => {
@@ -212,6 +213,10 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
     }).run()
     // 未读广播：web 端侧边栏红点实时点亮（与 web 聊天路径对齐）
     broadcastUnreadUpdate(userId, convId, await countUnread(convId))
+    // 状态条：IM 侧的生成同样计入会话消耗（账单口径）——先中继给网页端让状态条
+    // 实时更新，再落库（顺序与 routes/chat.ts 一致）
+    broadcastStream(userId, '', { conversation_id: convId, event: { type: 'stats', stats } })
+    await persistConversationStats(convId, stats, genUsage)
   }
 
   // ---- Realtime: 会话内容落库完毕，通知其他设备对齐（兜底重拉）----
@@ -452,7 +457,7 @@ async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void
   const lastGroupMessageAt = lastGroupAgentMsg?.created_at
 
   // 跑 AI（send 回调仅 broadcastStream，QQ 群不支持流式回发）
-  const { reply, suggestions, thinking } = await runPiAgentLoop({
+  const { reply, suggestions, thinking, stats, genUsage } = await runPiAgentLoop({
     userMessage: displayContent,
     history,
     send: (msg) => {
@@ -482,6 +487,10 @@ async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void
     }).run()
     // 未读广播：web 端侧边栏红点实时点亮（与 web 聊天路径对齐）
     broadcastUnreadUpdate(userId, convId, await countUnread(convId))
+    // 状态条：IM 侧的生成同样计入会话消耗（账单口径）——先中继给网页端让状态条
+    // 实时更新，再落库（顺序与 routes/chat.ts 一致）
+    broadcastStream(userId, '', { conversation_id: convId, event: { type: 'stats', stats } })
+    await persistConversationStats(convId, stats, genUsage)
   }
 
   broadcastConversationChanged(userId, convId)

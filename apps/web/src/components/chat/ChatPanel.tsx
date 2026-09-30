@@ -5,7 +5,7 @@ import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { QuestionBar } from './QuestionBar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
-import type { Attachment, AskUserQuestion, Workspace } from '@momoi/shared/types'
+import type { Attachment, AskUserQuestion, ConversationStats, Workspace } from '@momoi/shared/types'
 
 interface AgentBrief {
   id: string
@@ -78,6 +78,12 @@ interface ChatPanelProps {
   onEnsureConversation?: () => Promise<string>
   /** Show thinking details in messages (controlled by App.tsx) */
   verbose?: boolean
+  /** 会话状态条统计（SSE stats 事件；已有会话传参） */
+  stats?: ConversationStats | null
+  /** 模型上下文窗口大小（tokens） */
+  contextWindow?: number
+  /** 当前工作区名称（已有会话用——状态条首字段） */
+  conversationWorkspaceName?: string
 }
 
 const NOOP = () => {}
@@ -93,6 +99,7 @@ export function ChatPanel({
   followupQuestions,
   conversationId, onEnsureConversation,
   verbose,
+  stats, contextWindow, conversationWorkspaceName,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -304,6 +311,9 @@ export function ChatPanel({
                 onEnsureConversation={onEnsureConversation}
                 collapsed={false}
                 onExpand={NOOP}
+                stats={stats}
+                contextWindow={contextWindow}
+                conversationWorkspaceName={conversationWorkspaceName}
               />
 
               {/* Recommended questions */}
@@ -398,6 +408,9 @@ export function ChatPanel({
               // Release the guard after the expand animation completes
               setTimeout(() => { expandedByUserRef.current = false }, 350)
             }}
+            stats={stats}
+            contextWindow={contextWindow}
+            conversationWorkspaceName={conversationWorkspaceName}
           />
         </div>
       )}

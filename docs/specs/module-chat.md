@@ -11,6 +11,9 @@
 | `apps/server/src/routes/chat.ts` | SSE 流式端点 `POST /api/chat`、附件拼装、对话创建、无限模式开关 |
 | `apps/server/src/ai/pi-adapter.ts` | Pi Agent Core 适配层：系统提示词构建 + 工具适配 + 流式映射 + Agent 循环入口 |
 | `apps/server/src/ai/provider.ts` | OpenAI 兼容 API 流式客户端（含多模态与 thinking 参数） |
+| `apps/server/src/ai/tokens.ts` | 字符级 token 估算：上游不回 usage 时状态条与累计消耗的退化路径 |
+| `apps/server/src/ai/conversation-stats.ts` | 会话累计口径（纯函数）：增量合并、历史账单粗估、脏数据解析 |
+| `apps/server/src/lib/stats-store.ts` | 状态条快照 + 会话累计的落库口（网页 / QQ / 微信共用） |
 | `apps/server/src/ai/group-orchestrator.ts` | 群聊编排：发言调度 + 多 Agent 串行回复 + @mention 处理 + 无限模式 |
 | `apps/server/src/ai/neutral-agent.ts` | 中立 Agent：无限模式追问 + 回复后追问建议 + 群聊发言调度 |
 | `apps/server/src/ai/tools.ts` | 工具注册表（委托到内置工具 registry） |
@@ -22,6 +25,7 @@
 | `packages/shared/src/types.ts` | ServerMessage 联合类型、RealtimeEvent、AskUserQuestion 等 |
 | `apps/web/src/hooks/useChat.ts` | 客户端聊天状态管理 + SSE 解析 + 重试 + 哈希路由 |
 | `apps/web/src/hooks/useGroupChat.ts` | 群聊状态管理 |
+| `apps/web/src/lib/format.ts` | 状态条展示格式化：token 数缩写、耗时（ms/s） |
 
 ## 接口契约
 
@@ -77,6 +81,7 @@
 | `follow_up` | `{ text: string }` | 无限模式：中立 Agent 生成的追问 |
 | `infinite_mode_off` | `{}` | 无限模式已关闭 |
 | `done` | `{ reply: string, suggestions: string[], agent_id?, agent_name?, infinite? }` | 对话完成（终止事件） |
+| `stats` | `{ stats: ConversationStats }` | 本轮生成的状态条统计快照（轮/步/上下文/tok·s）；紧随 `done` / `group_done` 之后下发，见〈会话状态条〉 |
 | `voice_segment` | `{ message_id: number, index: number, audio_url: string, text: string, duration_seconds: number }` | TTS 语音合成片段（逐句流式下发） |
 | `voice_done` | `{ message_id: number, total_segments: number }` | 该消息全部 TTS 片段合成完毕 |
 | `error` | `{ message: string, agent_id?, agent_name? }` | 错误（终止事件） |
@@ -217,6 +222,7 @@ Voice 参数从 Agent 的 `voice_settings` JSON 中读取：`speakerId`（必选
 14. **Voice 语音合成**：当 Agent `voice_enabled` 为 true 时，每次 assistant 消息持久化后异步逐句 TTS 合成；按标点 + 长度（`[。！？.!?\n]` 或 40 字符）拆句，每句完成发送 `voice_segment` 事件，全部完成（或 30s 超时）后发送 `voice_done`
 15. **ask_user 工具集成**：Agent 调用 ask_user 时，服务端通过 SSE 下发 `ask_user` 事件（含 questionId、questions 数据）；用户回答经 `POST /api/chat/:id/answer` 端点递交，`resolveQuestion()` 唤醒 Promise 并将回答作为工具结果回传 LLM；超时 120s 或 SSE 断开则 `rejectQuestion()`
 16. **实时中继广播**：`send()` 内每次写入 SSE 事件后（除 `conversation_id` 和 `user_message_id`），调用 `broadcastStream` 中继到同账号其他设备的 `/api/events` 连接，跳过源 `device_id`；`user_message` 在 `streamConvId` 确立后单独广播
+17. **状态条落库**：每轮生成后先下发 `stats` 事件，**随即**把同一份快照写入 `conversations.stats`（写失败只记日志，不影响本轮回复）——契约见〈会话状态条〉
 
 ### 服务端（pi-adapter.ts）
 
@@ -241,6 +247,7 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 8. **多轮思考链分段**：每一轮的第一条 thinking 前注入「思考片段 N」分隔符，`thinking` SSE 事件带 `round` 字段
 9. **统一收口**：`agent_end` 事件中 flush pending buffer，发送 `done` 事件。兜底为空时固定提示
 10. **取消**：`signal.aborted` 时发送 `error` 并返回
+11. **状态条计数**：`GenUsageAcc` 累计每次 LLM 调用的 usage（上游回传时）与纯流式耗时，`buildStats()` 产出 `ConversationStats`——轮/步的计数点、重试作废规则与退化估算见〈会话状态条〉。空回复搬迁重试时整体清零，作废轮的用量不得并入
 
 ### 群聊编排（group-orchestrator.ts）
 
@@ -251,6 +258,7 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 5. **@mention 检测**：Agent 调用 `at_mention` 工具后，被点名者插入队首立即应答，其余 Agent 照常发言。最多 5 次重定向
 6. **事件标记**：所有 SSE 事件附加 `agent_id` 和 `agent_name` 字段，`agent_start` / `agent_done` 标记 Agent 回复边界
 7. **无限模式**：所有 Agent 回复完毕后，中立 Agent 生成追问
+8. **状态条聚合**：各成员 run 的轮/步累加、tok/s 按 Σ输出/Σ流式时长、上下文与 `estimated` 取末位发言人（同源）——`orchestrateGroupChat` 返回聚合体，由 chat.ts 下发 `stats` 并落库，见〈会话状态条〉
 
 ### 客户端（useChat.ts）
 
@@ -282,6 +290,7 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
     - 事件源 `EventSource` 携带 Cookie 认证（HttpOnly JWT），用户名经查询参数传递（EventSource 无法附加自定义请求头）；断线由浏览器自动重连
     - 源设备自跳过：聊天流中继携带发起方 `device_id`，源设备不重复接收（已通过自己的 fetch 流渲染）
 16. **发送请求体**：`POST /api/chat` 新增可选 `device_id`（来源设备标识，服务端据此跳过对源设备的实时中继）
+17. **状态条统计（`statsByConv`）**：只**接收**服务端发放的快照——SSE `stats` 事件与会话详情响应里的那一份，经 `storeServerStats` 原样覆盖，不比较、不合并、不判新旧；草稿转正时随分区迁移。见〈会话状态条〉
 
 ### 客户端（useGroupChat.ts）
 
@@ -299,6 +308,63 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 1. **进程内事件总线**：`Map<userId, Set<subscriber>>`，每个订阅持有 `device_id` 与串行化写入链。聊天流事件经 `broadcastStream` 跳过源设备后实时中继到同账号其他设备；会话列表 / 内容变更 / 群成员变更经 `broadcastConversationSync` / `broadcastConversationChanged` / `broadcastGroupMembers` 广播
 2. **事件通道路由**：`GET /api/events?device_id=xxx`（`userAuthMiddleware` 认证）→ SSE 长连接，每 15s 心跳；客户端断开时 `onAbort` 清理订阅。订阅按 `deviceId` 幂等（同设备重连先移除旧订阅，避免事件双发）
 3. **仅限单实例**：多实例 / 横向扩容需把内存总线替换为 Redis pub/sub（超出当前范围，见 `AGENTS.md` 非目标）
+
+## 会话状态条（ConversationStats）
+
+输入框下方一行：`<工作区> | 3.4s · 128 tok/s | 1.2M tok | 35%`——**只列裸数字**（无中文标签、无 `≈` 标记）。仅在**已有会话**渲染（草稿态不显示）。数据源是服务端每次生成后算出的一份快照——**发放权威完全在服务端**，客户端只接收。
+
+### 契约
+
+| 字段 | 语义 |
+|---|---|
+| `totalTokens` | 本会话**累计消耗**（账单口径）：Σ 每一次 LLM 调用的（输入 + 输出），跨所有生成、所有轮次累加。agent 每轮都把整个上下文重发一次，**重复投喂也计入**。快照每次覆盖写，而该值**只增不减**。缺省 = 该字段上线前写入的存量快照 |
+| `totalEstimated` | true = 累计中含估算部分（存量会话的历史回填，或某次生成整轮未回 usage）。一旦置位**永不回退**——估算进来了就不能再假装精确。**状态条不渲染该标记**，留给工具提示 / 详情视图 |
+| `durationMs` | 本轮**生成耗时**（服务端墙钟）。单聊 = AI 循环段（含工具执行与空回复重试），**不含**路由层准备（历史加载 / 建会 / 附件复制 / 落库）；群聊 = 整轮编排（含发言裁决与各成员串行回复） |
+| `tokensPerSecond` | 本轮**输出**速度：`Σ completionTokens ÷ Σ 纯流式时长`（首事件 → 流尾，不含工具执行间隙）；为 0 时前端整段隐藏 |
+| `contextTokens` | **当前上下文占用**（与累计无关）：优先上游最后一次 usage 的 `promptTokens + completionTokens`（≈「下一次调用将携带的规模」）；上游不回 usage 时退化为字符估算 |
+| `estimated` | true = `contextTokens` 来自字符估算而非上游 usage。**状态条不渲染该标记**，同上 |
+| `rounds` / `steps` | **不上状态条**（诊断字段，保留在快照里）。`rounds` = LLM 调用次数（`streamFn` 被调用一次计一轮，纯文本轮与工具轮同权）；`steps` = 工具执行次数（每个 `tool_execution_start` 计一步，无工具调用的会话恒为 0）。保留的理由：将来做「生成中实时进度」或诊断面板时要这两个数；不上 UI 的理由见下方*为什么显示耗时而不是轮/步* |
+
+#### 累计消耗（账单口径）
+
+- **口径**：Σ 每次 LLM 调用的（输入 + 输出）。**输入侧包含每轮重发的整个上下文**（system + 全量历史 + 工具定义 + 本轮输入），这是网关真正计费的口径；一轮里调 3 次工具再回答，上下文就被计 4 遍
+- **真值优先**：上游回 usage 时累加 `promptTokens + completionTokens`（含思考——思考属 completion）
+- **估算后备**：整轮生成一次 usage 都没拿到时，按「**每轮实际发送的输入** + 每轮实际产出」字符估算（结构与真值一致，只是字符估算）。真值与估算**不混用**：有 usage 用真值，完全没有才用估算
+- **首次回填**：累计是该能力上线后才开始记录的，存量会话从 0 起算会明显偏小 → 首次落库（快照里还没有 `totalTokens`）时用 `estimateHistoricalBill` 粗估历史起点，并让该会话的累计**永久标记为含估算**（`totalEstimated`——状态条不渲染该标记）。粗估的已知偏差：全部为字符估算；`history` 不带 thinking（历史思考未计入，偏小）；系统提示词取**当前**值（含日期等易变部分）
+- **各渠道共用**：网页 / QQ / 微信三条路径都调同一个落库入口（`lib/stats-store.ts`）——「整个会话消耗」必须覆盖所有渠道，否则绑定 IM 的会话在网页端会显示偏小的数
+- **已知取舍（并发）**：累计是「读旧值 → 加增量 → 写回」。同一会话真并发两个生成（网页双设备同时发；IM 侧有 `im/locks.ts` 的会话锁，网页侧无锁）理论上会丢一次增量——概率极低且只影响一个会话的累计数值。彻底的解法是改成「每次生成追加一行用量流水、总额读时求和」
+
+- **快照口径 = 「最近一次生成」**（`durationMs` / `contextTokens` / `tokensPerSecond` / `rounds` / `steps` 每轮覆盖写，同一会话连发两条消息不累加）；**唯一例外是 `totalTokens`——它跨生成累加、只增不减**（见〈累计消耗〉）
+- **计数点**：轮在 `createStreamFn` 入口自增（每次 LLM 调用一次）；步在事件发射器的 `tool_execution_start` 分支自增。两者都不看 `turn_end` / `tool_execution_end`——被**执行到**就是一步，成败不改变计数
+- **空回复搬迁重试**：上一轮完全作废，轮/步/用量（`GenUsageAcc`）**整体**清零后从头上计。作废轮的轮数与 prompt/completion 一律不得并入，否则轮数偏大、tok/s 虚高、上下文取到作废值且丢掉估算标记
+- **群聊聚合**：轮/步**累加**；tok/s = Σ输出 ÷ Σ流式时长；`contextTokens` 与 `estimated` 取**最后一名发言人**的 run（成员间上下文高度重叠，末位最接近全貌）——两者必须同源，不能一处取 last、一处取 some，否则真值会被错标成估算；`durationMs` 取**整轮编排墙钟**而非各成员之和（用户等的是整轮）
+- **哪些是「当场捕获」、哪些可重算**：`tokensPerSecond`（分母是每轮纯流式时长）、`durationMs` 与 `contextTokens` 的真值（上游 usage）在 DB 里没有任何别的痕迹，**只能当场捕获**；`steps` 事后可从 `messages.trace` 精确数出，`rounds` 只能靠 `thinking` 里的「思考片段 N」近似（没产生思考的轮会漏）。整份落库的理由不是「算不出来」，而是口径是「最近一次生成」——这个边界只有当场知道；且列表/详情要 O(1) 读出，重算得把每条会话的消息与 trace 全拉出来聚合
+
+#### 为什么显示耗时而不是轮/步
+
+- `steps` 与界面**重合**：它等于本轮工具气泡的数量（`tool_execution_start` 与气泡一对一），用户能自己数
+- `rounds` 反而**制造疑问**：界面上没有它的对应物；唯一沾边的是 `thinking` 里的「思考片段 N」，而那只是近似——**没产生思考的轮不落 header**，于是会出现「4轮 vs 片段 1..3」的自相矛盾。群聊下它是各成员之和（3 个 Agent 各 2 轮 → `6轮`），但用户并未经历「6 轮」
+- 两者都**不能当进度用**：快照只在生成**结束**时发放一次，生成中显示的是上一轮的数
+- `durationMs` 自解释、零歧义、不冗余，并与上下文占用%一起回答「为什么等这么久 / 花了多少」
+
+### 持久化与发放（权威在服务端）
+
+1. `POST /api/chat` 每轮生成后下发一次 `stats` SSE 事件，**并随即** `persistConversationStats()`（`lib/stats-store.ts`）把「快照 + 累计增量」写回 `conversations.stats`（JSON 字符串）
+2. 群聊在 `group_done` 之后下发（`orchestrateGroupChat` 返回聚合体）
+3. **IM 渠道（QQ / 微信）**：回复落库后广播同一个 `stats` 事件（网页端状态条实时更新）并走**同一个落库入口**——累计必须覆盖所有渠道的生成
+4. `GET /api/conversations/:id` 返回**已反序列化**的 `stats`（null = 尚未生成过）。**列表 `GET /api/conversations` 不返回**——列表刷新频繁（`conv_sync` / `unread_update`），若把快照塞进去，客户端就得替服务端判定新旧，「权威发放」就漏到客户端了
+5. **客户端只接收、不裁决**（useChat `storeServerStats`）：SSE `stats` 事件与会话详情（打开会话 / `conv_changed` 对账 / 流收尾对账）里的快照一律**原样覆盖**——不比较、不合并、不判新旧。两条通道都是服务端在会话上下文里给出的权威值
+6. **有序性由服务端负责**：客户端不纠正乱序（例如迟到的详情响应带着上一代快照），等下一次发放收敛。这是「客户端不替服务端裁决」的代价
+7. 草稿转正（`renamePartition`）时 `statsByConv` 分区一并迁移
+
+### 展示
+
+- 首字段：会话归属工作区名（未分组 / 悬空值渲染为「未分组」）
+- **状态条只列裸数字**：没有中文标签，也不渲染 `≈` 之类的估算标记（估算标记 `estimated` / `totalEstimated` 仍在快照数据里，留给工具提示 / 详情视图）。用户能读懂的靠顺序与单位：秒/毫秒、`tok/s`、`tok`、`%`
+- 累计消耗：`formatTokenCount`（<1000 精确 / <10K `x.xK` / <1M `xK` / ≥1M `x.xM`——百万级是常态，`1200K` 不可读）。**存量快照（无 `totalTokens`）→ 与分隔符整簇隐藏**，不留孤立竖线
+- 耗时格式化（`formatDuration`）：<1s → 整数毫秒（`640ms`）；<10s → 一位小数秒（`3.4s`）；≥10s → 整数秒（`12s`）。`durationMs` 缺省 → 同样整簇隐藏
+- 上下文只显示**百分比**（绝对值让位给累计消耗——百分比才是驱动「该开新会话了」的那个数）：`contextTokens ÷ contextWindow × 100`（四舍五入取整）
+- `contextWindow` 取管理端「模型上下文窗口（tokens）」（`GET /api/app-name` 的 `context_window`，缺省 128000），与 Pi 循环的 `model.contextWindow` **同源**——两处不一致会让条上写着 45% 而循环按另一套窗口判断
 
 ## 上游 API 客户端（provider.ts）
 
@@ -322,3 +388,42 @@ POST {api_endpoint}/chat/completions
 - OpenAI 兼容的 Chat Completions API（流式 + function calling + 可选多模态）
 - Pi Agent Core（`@earendil-works/pi-agent-core`）：多轮工具调用循环框架
 - 附件解析能力见 `module-file-attachment.md`
+
+## 验收标准
+
+**会话状态条（自动化：`pnpm --filter @momoi/server test`）**
+
+`test/stats.test.ts`（伪造 fetch 驱动真实 `runPiAgentLoop`）
+
+- 单轮纯文本 → `1轮0步`；一次工具往返 + 收尾轮 → `2轮1步`；同一轮内两个工具调用 → `2轮2步`（轮/步为诊断字段，仍按此契约计数）
+- 账单增量：两轮（输入 100 / 250、输出 12 / 40）→ `billTokens = 402`——**两轮的输入都算**，且大于「最后一轮的输入+输出」（上下文只看最后一轮，两者不混）
+- 整轮无 usage → 走估算（`billEstimated=true`），多轮的账单大于单轮（重发的上下文也计入）
+- 空回复搬迁重试 → 作废轮的轮/步/用量/账单全部不并入（`hasUsage` 不残留）
+- `history` 非空 → 回填起点 > 0，但**不进**本次生成的账单增量（由落库时合并）
+- 耗时墙钟 **⊇** 各轮流式时段；流帧更多 → 耗时更长
+- 上游回 usage → 上下文取最后一轮 `prompt+completion` 且 `estimated=false`；不回 usage → `estimated=true`（估算标记只进数据，不上状态条）
+- `tok/s` 的分母是纯流式时长：同一输出量下，流帧更多的 tok/s 更低
+
+`test/conversation-stats.test.ts`（纯函数）
+
+- 首次落库 → 采纳回填起点并**永久**标记含估算；`seed=0`（history 为空）不得误标
+- 非首次 → 只累加，回填起点不再参与；估算标记**只升不降**
+- 脏数据（非法 JSON / 缺字段 / 非数字）一律按「尚未记录」处理
+- 历史粗估：空历史 / 只有用户消息 → 0；多次生成时每次都要算上「重发全部历史」
+
+**状态条展示（手工 / 端到端）**
+
+- 状态条显示 `工作区 | 3.4s · 128 tok/s | 1.2M tok | 35%`——**不出现轮/步，也没有中文标签或 `≈`**
+- 同一会话连发两条消息 → 累计**只增不减**（第二条后 ≥ 第一条 + 第二条的账单）
+- 存量会话（有历史、无 `totalTokens`）首次生成 → 累计含历史回填且 `totalEstimated=true`，此后该会话一直为 true
+- IM 渠道（QQ / 微信）回复后 → 网页端状态条同样实时更新，累计同样增大
+- 打开已有会话 → 状态条立即显示服务端权威快照；刷新页面后同样从详情端点恢复
+- 生成结束 → 本端随 `stats` 事件更新；他端随实时中继或 `conv_changed` 对账收敛到同一组数字
+- 格式化：累计 ≥1M 显示 `x.xM`；秒级以下耗时显示毫秒；存量快照不显示对应簇且不留孤立分隔符
+- 上下文百分比与管理端「模型上下文窗口」一致（改小窗口 → 百分比上升）
+- 列表端点 `GET /api/conversations` **不返回** `stats`；客户端不持有任何判新旧的逻辑（无时间戳、无比较）
+- 群聊：耗时为整轮编排墙钟；累计为各成员之和；`tok/s` 与 `contextTokens` 均有值
+
+**原有链路**
+
+- `POST /api/chat` 各终止路径（`done` / `group_done` / `error`）仍保证下发终止事件；`stats` 缺失（如生成失败）不影响前端渲染

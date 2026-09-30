@@ -345,6 +345,7 @@ const delay = Math.pow(2, attempt) * 1000
 16. **Per-user busyUsers Set**：防止同一用户的 pollUser 重叠执行。
 17. **游标保存时机**：消息全部处理成功后才保存 `updates_buf`，防止处理失败丢消息。
 18. **服务端生成 QR Code**：`qrcode_img_content`（liteapp URL）由服务端用 `qrcode` 库生成 Data URI，浏览器无需直接访问 liteapp.weixin.qq.com。
+19. **状态条统计**：回复落库后广播 `stats` 事件（网页端状态条实时更新）并写入会话累计（账单口径，`lib/stats-store.ts`）——IM 侧的消耗同样计入「整个会话」，否则绑定 IM 的会话在网页端会显示偏小的数。见 `module-chat.md`〈会话状态条〉。
 
 ## 内部命令
 

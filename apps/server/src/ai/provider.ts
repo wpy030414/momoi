@@ -28,6 +28,9 @@ export interface StreamEvent {
   text?: string
   toolCalls?: Array<{ id: string; name: string; arguments: string }>
   finishReason?: string
+  /** 本轮流式响应携带的 usage（多数 OpenAI 兼容网关在流尾 chunk 附带；
+   *  不携带时为 undefined——调用方退化到字符估算）。随 finish/tool_call 透传。 */
+  usage?: { promptTokens: number; completionTokens: number }
 }
 
 interface PendingToolCall {
@@ -185,6 +188,8 @@ export async function* streamChatCompletion(
   const pendingToolCalls = new Map<number, PendingToolCall>()
   let receivedDone = false
   let receivedFinish = false
+  // 流内 usage（OpenAI 兼容网关常在流尾 chunk 携带；可能无 choices 字段独立成帧）
+  let lastUsage: { promptTokens: number; completionTokens: number } | undefined
 
   while (true) {
     const { done, value } = await reader.read()
@@ -213,6 +218,7 @@ export async function* streamChatCompletion(
       //「坏 JSON 行」静默吞掉，真实上游错误就永远不可见。
       let json: {
         error?: { message?: string }
+        usage?: { prompt_tokens?: number; completion_tokens?: number }
         choices?: Array<{
           delta?: {
             content?: string
@@ -243,6 +249,15 @@ export async function* streamChatCompletion(
           { log: `API error (in-stream): ${msg}` },
         )
       }
+      // usage 可能在无 choices 的独立 chunk 出现（include_usage 场景）——
+      // 必须先于 choice 判定提取，否则会被 continue 跳过
+      if (json.usage && (json.usage.prompt_tokens != null || json.usage.completion_tokens != null)) {
+        lastUsage = {
+          promptTokens: json.usage.prompt_tokens ?? 0,
+          completionTokens: json.usage.completion_tokens ?? 0,
+        }
+      }
+
       const choice = json.choices?.[0]
       if (!choice) continue
 
@@ -285,9 +300,9 @@ export async function* streamChatCompletion(
           const calls = [...pendingToolCalls.values()]
             .sort((a, b) => a.index - b.index)
             .map((c) => ({ id: c.id, name: c.name, arguments: c.arguments }))
-          yield { type: 'tool_call', toolCalls: calls, finishReason }
+          yield { type: 'tool_call', toolCalls: calls, finishReason, usage: lastUsage }
         } else {
-          yield { type: 'finish', finishReason }
+          yield { type: 'finish', finishReason, usage: lastUsage }
         }
         return
       }

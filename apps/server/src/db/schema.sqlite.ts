@@ -12,6 +12,8 @@ export const conversations = sqliteTable('conversations', {
   last_read_at: integer('last_read_at'),
   // 创建时锁定的分组工作区；NULL = 未分组。值永不 UPDATE——悬空值（工作区已删）按未分组渲染，沙箱仍锚定 ws-<id>
   workspace_id: text('workspace_id'),
+  // 会话状态条统计（JSON: ConversationStats）；NULL = 尚未生成过
+  stats: text('stats'),
 })
 
 export const messages = sqliteTable('messages', {

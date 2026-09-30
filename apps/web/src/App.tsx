@@ -57,6 +57,7 @@ export function App() {
   const [showGithub, setShowGithub] = useState(true)
   const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>([])
   const [followupQuestions, setFollowupQuestions] = useState<string[]>([])
+  const [contextWindow, setContextWindow] = useState(128000)
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
   // Admin status of the logged-in user (ADMIN usernames from server .env)
   const [isAdminUser, setIsAdminUser] = useState(false)
@@ -390,6 +391,7 @@ export function App() {
       setShowGithub(r.show_github !== false)
       setRecommendedQuestions(r.recommended_questions || [])
       setFollowupQuestions(r.followup_questions || [])
+      setContextWindow(r.context_window || 128000)
       if (r.agents?.length > 0) {
         setAgents(r.agents)
         setSelectedAgentId((prev) => prev && r.agents.some((a) => a.id === prev) ? prev : r.agents[0].id)
@@ -664,6 +666,20 @@ export function App() {
     return wsId && chat.workspaces.some((w) => w.id === wsId) ? wsId : null
   }, [chat.conversations, chat.workspaces, chat.activeId])
 
+  /** 当前会话的归属工作区名称（状态条首字段显示）。 */
+  const conversationWorkspaceName = useMemo(() => {
+    const wsId = chat.conversations.find((c) => c.id === chat.activeId)?.workspace_id ?? null
+    if (!wsId) return null
+    return chat.workspaces.find((w) => w.id === wsId)?.name ?? null
+  }, [chat.conversations, chat.workspaces, chat.activeId])
+
+  /** 当前会话的 stats */
+  const activeStats = useMemo(() => {
+    const key = chat.activeId ?? null
+    if (!key) return null
+    return chat.statsByConv[key] ?? null
+  }, [chat.activeId, chat.statsByConv])
+
   if (oauthRegisterInfo) {
     return (
       <OAuthRegisterScreen
@@ -825,6 +841,9 @@ export function App() {
               newChatWorkspaceId={chat.newChatWorkspaceId}
               onNewChatWorkspaceChange={chat.setNewChatWorkspace}
               conversationWorkspaceId={conversationWorkspaceId}
+              stats={activeStats}
+              contextWindow={contextWindow}
+              conversationWorkspaceName={conversationWorkspaceName ?? undefined}
               pendingQuestion={chat.pendingQuestion}
               onSendAnswer={(answer, selectedOptions) => chat.sendAnswer(chat.pendingQuestion?.question_id || '', answer, selectedOptions)}
               onSkipAnswer={() => chat.sendAnswer(chat.pendingQuestion?.question_id || '', '', [])}

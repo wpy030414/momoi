@@ -7,8 +7,9 @@ import { eq, and, count, sql, desc } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
 import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutral-agent.js'
+import { persistConversationStats } from '../lib/stats-store.js'
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
-import type { ServerMessage, Attachment, TraceEntry } from '@momoi/shared/types'
+import type { ServerMessage, Attachment, ConversationStats, TraceEntry } from '@momoi/shared/types'
 import { randomUUID } from 'crypto'
 import { getConfig, listAgents, getAgent } from '../lib/config.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
@@ -489,6 +490,10 @@ chatRoute.post('/', async (c) => {
       let lastAssistantAgentId: string | undefined
       let lastAssistantHadSuggestions = false
 
+      // 状态条快照与会话累计（账单口径）的落库入口是 lib/stats-store.ts 的
+      // persistConversationStats——网页 / QQ / 微信三条渠道共用同一实现（累计必须
+      // 覆盖所有渠道的生成，否则绑定 IM 的会话在网页端会显示偏小的数）。
+
       // Helper: save assistant message to DB
       const saveAssistantMsg = async (content: string, thinking: string | null, suggestionsList: string[], artifactsLocal?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }>, agentId?: string, trace?: TraceEntry[]) => {
         const replyNow = Math.floor(Date.now() / 1000)
@@ -626,7 +631,7 @@ chatRoute.post('/', async (c) => {
 
       // First iteration always runs (even without infinite mode)
       if ((isGroup || isWorld) && groupAgentIds.length > 0) {
-        await orchestrateGroupChat({
+        const result = await orchestrateGroupChat({
           userMessage: currentPrompt,
           history: currentHistory,
           send,
@@ -642,8 +647,12 @@ chatRoute.post('/', async (c) => {
             await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId, trace)
           },
         })
+        if (result.stats) {
+          send({ type: 'stats', stats: result.stats })
+          persistConversationStats(convId, result.stats, result.genUsage)
+        }
       } else {
-        const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId, trace } = await runPiAgentLoop({
+        const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId, trace, stats, genUsage } = await runPiAgentLoop({
           userMessage: currentPrompt,
           history: currentHistory,
           send,
@@ -657,6 +666,8 @@ chatRoute.post('/', async (c) => {
           forceCompliance: _force_compliance === true,
         })
         if (reply) {
+          send({ type: 'stats', stats })
+          persistConversationStats(convId, stats, genUsage)
           await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)
         }
       }
@@ -681,7 +692,7 @@ chatRoute.post('/', async (c) => {
         currentPrompt = followUp
 
         if ((isGroup || isWorld) && groupAgentIds.length > 0) {
-          await orchestrateGroupChat({
+          const infiniteResult = await orchestrateGroupChat({
             userMessage: currentPrompt,
             history: currentHistory,
             send,
@@ -697,8 +708,12 @@ chatRoute.post('/', async (c) => {
               await saveAssistantMsg(reply, thinking, suggestions, artifacts, agentId, trace)
             },
           })
+          if (infiniteResult.stats) {
+            send({ type: 'stats', stats: infiniteResult.stats })
+            persistConversationStats(convId, infiniteResult.stats, infiniteResult.genUsage)
+          }
         } else {
-          const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId, trace } = await runPiAgentLoop({
+          const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId, trace, stats, genUsage } = await runPiAgentLoop({
             userMessage: currentPrompt,
             history: currentHistory,
             send,
@@ -712,6 +727,8 @@ chatRoute.post('/', async (c) => {
             forceCompliance: false,
           })
           if (reply) {
+            send({ type: 'stats', stats })
+            persistConversationStats(convId, stats, genUsage)
             await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)
           } else {
             // Agent returned empty reply — stop

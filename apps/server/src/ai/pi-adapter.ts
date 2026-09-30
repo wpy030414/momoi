@@ -37,7 +37,7 @@ import type {
 import { Type } from '@sinclair/typebox'
 import type { TSchema } from '@sinclair/typebox'
 
-import type { AppConfig, Agent, ServerMessage, ToolDefinition, TraceEntry } from '@momoi/shared/types'
+import type { AppConfig, Agent, ConversationStats, ServerMessage, ToolDefinition, TraceEntry } from '@momoi/shared/types'
 import { ErrCode } from '@momoi/shared/errors'
 import { ApiError } from '../lib/apiError.js'
 import {
@@ -48,6 +48,8 @@ import {
 	NEUTRAL_AGENT_ID,
 } from '@momoi/shared/constants'
 import { getConfig, getAgent, listAgents, getUserAgentMemories } from '../lib/config.js'
+import { estimateTokensOfParts, contentToEstimateParts } from './tokens.js'
+import { estimateHistoricalBill } from './conversation-stats.js'
 import { getAllTools } from './tools.js'
 import { resolveTool } from '../tools/registry.js'
 import { getMcpTools, callMcpTool } from '../tools/mcp-client.js'
@@ -71,6 +73,48 @@ const ZERO_USAGE: Usage = {
   input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
   totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+}
+
+// ---- 生成用量累计器（会话状态条数据源）----
+// 由 runPiAgentLoop 创建、注入 createStreamFn：每次 LLM 调用（agent 循环一轮）
+// 的 usage（上游返回时）与纯流式耗时在此累计；重试轮（空回复搬迁）自然并入。
+export interface GenUsageAcc {
+  /** 累计 prompt tokens（各轮之和；仅上游回 usage 时有意义） */
+  promptTokens: number
+  /** 累计 completion tokens */
+  completionTokens: number
+  /** 最后一轮的 usage（contextTokens 优先取它的 prompt+completion——
+   *  即「下一次调用将携带的上下文规模」的最好近似） */
+  lastUsage: { promptTokens: number; completionTokens: number } | null
+  /** 上游至少回过一次 usage */
+  hasUsage: boolean
+  /** 累计纯流式输出时长 ms（首事件→流尾，不含工具执行间隙） */
+  streamMs: number
+  /** LLM 调用次数（streamFn 每被调用一次计一轮——含纯文本轮与工具轮） */
+  llmCalls: number
+  /** 账单口径的**估算**后备：Σ 每轮实际发送的输入 / Σ 每轮实际产出。
+   *  仅当整轮生成一次 usage 都没拿到时启用（真值与估算不混用）。 */
+  billPromptEst: number
+  billCompletionEst: number
+}
+
+function newGenUsageAcc(): GenUsageAcc {
+  return {
+    promptTokens: 0, completionTokens: 0, lastUsage: null, hasUsage: false,
+    streamMs: 0, llmCalls: 0, billPromptEst: 0, billCompletionEst: 0,
+  }
+}
+
+/** 清空累计器（空回复搬迁重试：上一轮完全作废，从头计数）。 */
+function resetGenUsageAcc(acc: GenUsageAcc): void {
+  acc.promptTokens = 0
+  acc.completionTokens = 0
+  acc.lastUsage = null
+  acc.hasUsage = false
+  acc.streamMs = 0
+  acc.llmCalls = 0
+  acc.billPromptEst = 0
+  acc.billCompletionEst = 0
 }
 
 // ---- 空回复重试上限（上游敏感词审查 → 搬迁历史重试，agent_end 判定与重试循环共用）----
@@ -326,9 +370,13 @@ function piMessagesToChatMessages(msgs: Message[]): ChatMessage[] {
 }
 
 // ---- StreamFn：包装 provider.ts 为 Pi 兼容格式 ----
-function createStreamFn(agentModel: string, config: AppConfig, thinkingMode: boolean): StreamFn {
+function createStreamFn(agentModel: string, config: AppConfig, thinkingMode: boolean, usageAcc: GenUsageAcc): StreamFn {
   return async (model: Model<any>, context: Context, options?: SimpleStreamOptions): Promise<ReturnType<typeof createAssistantMessageEventStream>> => {
     const stream = createAssistantMessageEventStream()
+
+    // 一轮 = 一次 LLM 调用：agent 循环每进入新一轮就调一次 streamFn
+    // （纯文本轮与工具轮都算），这里就是「轮数」的唯一计数点。
+    usageAcc.llmCalls++
 
     // 构建 system prompt → 作为 messages 的第一条
     const systemPrompt = context.systemPrompt || ''
@@ -370,6 +418,8 @@ function createStreamFn(agentModel: string, config: AppConfig, thinkingMode: boo
         let hasText = false
         let hasThinking = false
         const pendingToolCalls: Array<{ id: string; name: string; arguments: string }> = []
+        // 本轮流式输出的计时起点（首事件时刻——不含建连等待）
+        let streamStart = 0
 
         // 构建 partial AssistantMessage
         const makePartial = (): AssistantMessage => ({
@@ -393,6 +443,14 @@ function createStreamFn(agentModel: string, config: AppConfig, thinkingMode: boo
         })
 
         for await (const event of streamChatCompletion(config, agentModel, chatMessages, ourTools, thinkingMode)) {
+          if (!streamStart) streamStart = Date.now()
+          // usage 随 finish / tool_call 事件透传（provider 从流尾 chunk 提取）
+          if (event.usage) {
+            usageAcc.promptTokens += event.usage.promptTokens
+            usageAcc.completionTokens += event.usage.completionTokens
+            usageAcc.lastUsage = event.usage
+            usageAcc.hasUsage = true
+          }
           switch (event.type) {
             case 'token': {
               const delta = event.text || ''
@@ -461,6 +519,24 @@ function createStreamFn(agentModel: string, config: AppConfig, thinkingMode: boo
           }
         }
 
+        // 累计本轮流式输出时长（首事件 → 流尾；不含工具执行的等待间隙）
+        if (streamStart) usageAcc.streamMs += Date.now() - streamStart
+
+        // 账单口径的估算后备（仅当整轮生成至今一次 usage 都没拿到时累积——真值与
+        // 估算不混用）：本轮**输入** = 实际发送的 system + 消息 + 工具定义；
+        // 本轮**输出** = 本轮实际产出的正文与思考。结构与真值一致
+        // （Σ 每轮 输入+输出，含重复投喂的上下文），只是字符估算。
+        if (!usageAcc.hasUsage) {
+          const roundParts: string[] = [systemPrompt]
+          if (ourTools.length > 0) roundParts.push(JSON.stringify(ourTools))
+          for (const m of piMessagesToChatMessages(context.messages)) {
+            contentToEstimateParts(m.content, roundParts)
+            if (m.tool_calls) roundParts.push(JSON.stringify(m.tool_calls))
+          }
+          usageAcc.billPromptEst += estimateTokensOfParts(roundParts)
+          usageAcc.billCompletionEst += estimateTokensOfParts([textContent, thinkingContent])
+        }
+
         // 结束文本和思考流
         if (hasText) {
           stream.push({ type: 'text_end', contentIndex: 0, content: textContent, partial: makePartial() })
@@ -517,6 +593,8 @@ interface SSEState {
   lastRoundHadThinking: boolean
   producedArtifacts: ToolArtifact[]
   toolCallCount: number
+  /** 工具执行步数（状态条「N步」）——每个 tool_execution_start 计一步 */
+  steps: number
   trace: TraceEntry[]
   emptyRetryCount: number
   needsRetry: boolean
@@ -587,6 +665,7 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
       }
 
       case 'tool_execution_start': {
+        state.steps++
         const input = typeof event.args === 'object' && event.args !== null ? event.args as Record<string, unknown> : {}
         state.send({ type: 'tool_execution_start', id: event.toolCallId, name: event.toolName, input })
         state.trace.push({ type: 'tool_call', id: event.toolCallId, name: event.toolName, input, status: 'running' })
@@ -707,6 +786,26 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
   }
 }
 
+// ---- 上下文规模估算（上游无 usage 时的退化路径）----
+// 把「下一次 LLM 调用将携带的上下文」序列化为可估算文本段：system + 全量历史
+// （含 tool_calls JSON）+ 本轮输入 + 本轮输出。图片折算规则见 tokens.ts。
+function contextEstimateParts(
+  systemPrompt: string,
+  history: ChatMessage[],
+  userMessage: string | ContentPart[],
+  reply: string,
+  thinking: string,
+): string[] {
+  const parts: string[] = [systemPrompt]
+  for (const m of history) {
+    contentToEstimateParts(m.content, parts)
+    if (m.tool_calls) parts.push(JSON.stringify(m.tool_calls))
+  }
+  contentToEstimateParts(userMessage, parts)
+  parts.push(reply, thinking)
+  return parts
+}
+
 // ---- ChatMessage 历史 → Pi AgentMessage 初始化 ----
 function chatHistoryToAgentMessages(history: ChatMessage[], systemPrompt: string): AgentMessage[] {
   const result: AgentMessage[] = []
@@ -803,7 +902,10 @@ function buildLoopConfig(agentModel: string, config: AppConfig): AgentLoopConfig
       baseUrl: config.api_endpoint,
       input: ['text', 'image'] as const,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 128000,
+      // 与管理端「模型上下文窗口」同源（缺省 128000，见 lib/config.ts 的
+      // parseContextWindow）——前端状态条的占用百分比用的就是这个分母，
+      // 两处必须一致，否则条上写着 45% 而循环按另一套窗口判断。
+      contextWindow: config.context_window,
       maxTokens: 100000,
       reasoning: false,
     } as Model<any>,
@@ -849,7 +951,31 @@ export interface RunPiAgentLoopOptions {
 }
 
 // ---- 入口函数 ----
-export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[]; agentId?: string; trace?: TraceEntry[] }> {
+/** runPiAgentLoop 返回值：stats 上 wire（会话状态条）；genUsage 为服务端
+ *  内部聚合用原始值（群聊编排器跨 Agent 汇总 tok/s 与账单增量），不进 SSE。 */
+export interface RunPiAgentLoopResult {
+  reply: string
+  suggestions: string[]
+  thinking: string
+  artifacts?: ToolArtifact[]
+  agentId?: string
+  trace?: TraceEntry[]
+  stats: ConversationStats
+  genUsage: {
+    /** Σ 输出 token（含思考；真值或估算）——tok/s 与群聊聚合用 */
+    outputTokens: number
+    /** Σ 纯流式时长 ms */
+    streamMs: number
+    /** 账单口径的本次生成消耗：Σ 每轮（输入 + 输出），含重复投喂的上下文 */
+    billTokens: number
+    /** true = billTokens 来自字符估算（整轮一次 usage 都没拿到） */
+    billEstimated: boolean
+    /** 存量会话的历史账单粗估——**不属于**本次生成，仅供调用方在首次落库时回填起点 */
+    priorBillEstimate: number
+  }
+}
+
+export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<RunPiAgentLoopResult> {
   const {
     userMessage, history, send, signal,
     thinkingMode = true, conversationId, userId, agentId,
@@ -929,8 +1055,9 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
   // 6. 构建 AgentLoopConfig
   const loopConfig = buildLoopConfig(agentModel, config)
 
-  // 7. 创建 StreamFn
-  const streamFn = createStreamFn(agentModel, config, thinkingMode)
+  // 7. 创建 StreamFn（注入用量累计器——会话状态条数据源）
+  const usageAcc = newGenUsageAcc()
+  const streamFn = createStreamFn(agentModel, config, thinkingMode, usageAcc)
 
   // 8. 强制合规重试：在首次模型调用前，将原始提问预搬迁至对话历史
   //    （上游不检查历史内容），当前提问替换为合规占位符。
@@ -967,6 +1094,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     lastRoundHadThinking: false,
     producedArtifacts: [],
     toolCallCount: 0,
+    steps: 0,
     trace: [],
     emptyRetryCount: 0,
     upstreamError: false,
@@ -976,6 +1104,44 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
 
   // 9. 事件发射器
   const emit = createEventEmitter(sseState, convId)
+
+  /** 本轮耗时起点：进入生成（AI 循环启动前）那一刻。**不含**路由层的准备工作
+   *  （历史加载 / 建会 / 附件复制 / 落库）；群聊口径见 group-orchestrator（整轮编排）。 */
+  const loopStartedAt = Date.now()
+
+  /** 会话状态条统计：耗时 = 本轮墙钟；轮/步（诊断用，不上 UI）；tok/s 与上下文优先
+   *  上游 usage，缺失退化字符估算；账单增量（genUsage.billTokens）供会话累计。 */
+  const buildStats = (): Pick<RunPiAgentLoopResult, 'stats' | 'genUsage'> => {
+    const outputTokens = usageAcc.hasUsage
+      ? usageAcc.completionTokens
+      : estimateTokensOfParts([sseState.fullText, sseState.fullThinking])
+    const contextTokens = usageAcc.hasUsage && usageAcc.lastUsage
+      ? usageAcc.lastUsage.promptTokens + usageAcc.lastUsage.completionTokens
+      : estimateTokensOfParts(contextEstimateParts(systemPrompt, history, userMessage, sseState.fullText, sseState.fullThinking))
+    // 账单口径：有 usage 用 Σ(输入+输出) 真值；一轮都没拿到才用全轮估算（不混用）
+    const billEstimated = !usageAcc.hasUsage
+    const billTokens = billEstimated
+      ? usageAcc.billPromptEst + usageAcc.billCompletionEst
+      : usageAcc.promptTokens + usageAcc.completionTokens
+    return {
+      stats: {
+        durationMs: Date.now() - loopStartedAt,
+        rounds: usageAcc.llmCalls,
+        steps: sseState.steps,
+        tokensPerSecond: usageAcc.streamMs > 0 ? Math.round((outputTokens / usageAcc.streamMs) * 1000) : 0,
+        contextTokens,
+        estimated: !usageAcc.hasUsage,
+      },
+      genUsage: {
+        outputTokens,
+        streamMs: usageAcc.streamMs,
+        billTokens,
+        billEstimated,
+        // 存量会话回填起点：只在调用方首次落库（快照里还没有 totalTokens）时被采纳
+        priorBillEstimate: estimateHistoricalBill(history, systemPrompt),
+      },
+    }
+  }
 
   // 10. 启动 Pi Agent 循环（含空回复重试——敏感词规避）
   try {
@@ -991,6 +1157,12 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     while (sseState.needsRetry && sseState.emptyRetryCount < MAX_EMPTY_RETRIES) {
       sseState.needsRetry = false
       sseState.emptyRetryCount++
+      // 重试轮不计入统计：上一轮空回复的轮/步/用量全部废弃，
+      // retry 是上轮的完全替换，从头计数（含 usage——否则上一轮的
+      // prompt/completion 会残留，让 tok/s 虚高、上下文取到作废值）
+      sseState.toolCallCount = 0
+      sseState.steps = 0
+      resetGenUsageAcc(usageAcc)
 
       // 将原始提问 + "..." 回复搬迁到对话历史中——
       // 上游 LLM 对当前提问做敏感词审查但不检查历史内容，
@@ -1038,7 +1210,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
         send({ type: 'error', code: ErrCode.CHAT_INTERNAL_ERROR })
       }
     }
-    return { reply: '', suggestions: [], thinking: sseState.fullThinking, agentId: resolvedAgentId, trace: sseState.trace.length > 0 ? sseState.trace : undefined }
+    return { reply: '', suggestions: [], thinking: sseState.fullThinking, agentId: resolvedAgentId, trace: sseState.trace.length > 0 ? sseState.trace : undefined, ...buildStats() }
   }
 
   // 11. 解析最终回复
@@ -1051,5 +1223,6 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
     artifacts: sseState.producedArtifacts.length > 0 ? sseState.producedArtifacts : undefined,
     agentId: resolvedAgentId,
     trace: sseState.trace.length > 0 ? sseState.trace : undefined,
+    ...buildStats(),
   }
 }

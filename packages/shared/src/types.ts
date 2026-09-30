@@ -29,6 +29,42 @@ export interface Conversation {
   /** 创建时锁定的分组工作区；null/缺省 = 未分组（独享会话级沙箱）。
    *  值永不 UPDATE——悬空值（工作区已删除）按未分组渲染，但沙箱仍锚定 ws-<id>。 */
   workspace_id?: string | null
+  /** 会话状态条统计——**服务端权威快照**。仅会话详情 `GET /api/conversations/:id`
+   *  携带（列表端点不返回：状态条随会话上下文下发）；null/缺省 = 尚未生成过。
+   *  契约见 `docs/specs/module-chat.md`〈会话状态条〉。 */
+  stats?: ConversationStats | null
+}
+
+/** 会话状态条数据：工作区 | 累计消耗 | 本轮耗时 · tok/s | 上下文占用 %。
+ *  服务端每次生成后计算并持久化到 conversations.stats，客户端一律**原样采用**——
+ *  不比较、不合并、不判定新旧（发放权威在服务端）。
+ *
+ *  注意：`rounds` / `steps` **不上状态条**（界面显示的是 `durationMs`）。它们仍在
+ *  快照里，供诊断与将来做「生成中实时进度」之用——见 module-chat.md〈会话状态条〉。 */
+export interface ConversationStats {
+  /** 本会话**累计消耗**（账单口径）：Σ 每次 LLM 调用的（输入 + 输出），跨所有生成、
+   *  所有轮次累加。agent 每轮都会把整个上下文重发一次，**重复投喂也计入**——这就是
+   *  网关真正计费的口径。快照每次覆盖写而该值只增不减（见 ai/conversation-stats.ts）。 */
+  totalTokens?: number
+  /** true = `totalTokens` 中含估算部分（存量会话的历史回填，或某次生成整轮未回 usage）。
+   *  一旦置位**永不回退**——估算进来了就不能再假装精确。
+   *  标注：状态条当前**不渲染**该标记（只列裸数字），留给工具提示 / 详情视图。 */
+  totalEstimated?: boolean
+  /** 本轮生成耗时（ms，服务端墙钟）。单聊 = AI 循环段（含工具执行与空回复重试）；
+   *  群聊 = 整轮编排（含发言裁决与各成员串行回复）。
+   *  缺省 = 该字段上线前写入的存量快照。 */
+  durationMs?: number
+  /** 最近一次生成的 Agent 循环轮数（LLM 调用次数，含工具往返）——诊断用，不上 UI */
+  rounds: number
+  /** 最近一次生成的工具执行步数（每个 tool_execution_start 计一步）——诊断用，不上 UI */
+  steps: number
+  /** 最近一次生成的输出速度（tok/s；无输出时 0） */
+  tokensPerSecond: number
+  /** **当前上下文占用** token 数（优先上游 usage；estimated = 字符估算值）——百分比的分母侧 */
+  contextTokens: number
+  /** true = contextTokens 来自字符估算而非上游 usage。
+   *  标注：状态条当前**不渲染**该标记（只列裸数字），留给工具提示 / 详情视图。 */
+  estimated?: boolean
 }
 
 /** 会话分组工作区（workspaces 表）：文件夹语义。
@@ -116,6 +152,9 @@ export interface AppConfig {
   app_background: string  // base64 data URL, empty = no custom background
   api_endpoint: string
   api_key: string
+  /** 模型上下文窗口大小（tokens）：会话状态条「上下文（已用）%」的分母。
+   *  管理端网关设置可改；缺省 128000。 */
+  context_window: number
   support_attachments: boolean
   support_infinite_mode: boolean
   allow_im_conversations: boolean
@@ -322,6 +361,7 @@ export type ServerMessage =
   | { type: 'follow_up'; text: string }
   | { type: 'infinite_mode_off' }
   | { type: 'done'; reply: string; suggestions: string[]; agent_id?: string; agent_name?: string; infinite?: boolean }
+  | { type: 'stats'; stats: ConversationStats }
   | { type: 'ask_user'; question_id: string; tool_call_id: string; questions: AskUserQuestion[]; agent_id?: string; agent_name?: string }
   | { type: 'error'; code: string; params?: ErrParams; agent_id?: string; agent_name?: string }
   | { type: 'voice_segment'; message_id: number; index: number; audio_url: string; text: string; duration_seconds: number }

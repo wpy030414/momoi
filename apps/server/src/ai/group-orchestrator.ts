@@ -2,9 +2,9 @@
 // Group Chat Orchestrator — Multi-agent serial conversation
 // ============================================================
 
-import { runPiAgentLoop } from './pi-adapter.js'
+import { runPiAgentLoop, type RunPiAgentLoopResult } from './pi-adapter.js'
 import type { ChatMessage, ContentPart } from './provider.js'
-import type { ServerMessage, Agent, TraceEntry } from '@momoi/shared/types'
+import type { ConversationStats, ServerMessage, Agent, TraceEntry } from '@momoi/shared/types'
 import { ApiError } from '../lib/apiError.js'
 import type { ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
@@ -136,8 +136,26 @@ function formatDecisionContext(
     : joined
 }
 
-export async function orchestrateGroupChat(options: GroupOrchestratorOptions): Promise<void> {
+/** 群聊编排产物：`stats` 上 wire（会话状态条）；`genUsage` 是账单增量与历史回填
+ *  起点，与单聊 `RunPiAgentLoopResult['genUsage']` 同形——chat.ts 两类会话走同一套
+ *  累计逻辑（见 ai/conversation-stats.ts）。 */
+export interface GroupOrchestratorResult {
+  stats?: ConversationStats
+  genUsage?: {
+    billTokens: number
+    billEstimated: boolean
+    priorBillEstimate: number
+  }
+}
+
+export async function orchestrateGroupChat(options: GroupOrchestratorOptions): Promise<GroupOrchestratorResult> {
   const { userMessage, history, send, signal, thinkingMode, conversationId, userId, agentIds, language, saveMessage } = options
+
+  // 会话状态条聚合：耗时 = 整轮编排墙钟（含发言裁决与各成员串行回复——用户等的就是
+  // 这一段，故不取各成员之和）；轮/步累加（诊断用，不上 UI）；tok/s = Σ输出 / Σ流式时长；
+  // 上下文取最后一个有值的成员 run（成员间上下文高度重叠，末位最接近全貌）。
+  const groupStartedAt = Date.now()
+  const runs: RunPiAgentLoopResult[] = []
 
   // Preload agents (parallel, avoids repeated getAgent calls in the loop).
   // 必须早于 group_start：完整名册要供 @ 解析与本轮发言调度（中立 Agent 裁决）使用。
@@ -330,7 +348,7 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
 
       // 跨会话记忆的加载已下沉进 runPiAgentLoop（与本 Agent 的执行身份一致）
 
-      const { reply, suggestions, thinking, artifacts, trace } = await runPiAgentLoop({
+      const { reply, suggestions, thinking, artifacts, trace, stats, genUsage } = await runPiAgentLoop({
         userMessage,
         history: perAgentHistory,
         send: (msg: ServerMessage) => {
@@ -353,6 +371,8 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         forceCompliance: options.forceCompliance === true,
         world: options.world,
       })
+
+      runs.push({ reply, suggestions, thinking, artifacts, agentId, trace, stats, genUsage })
 
       repliedAgents.add(agentId)
 
@@ -426,7 +446,37 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
     }
   }
 
+  // 聚合状态条：轮/步累加；tok/s = Σ输出 / Σ流式时长；上下文取最后发言人
+  const aggregatedStats = ((): ConversationStats | undefined => {
+    if (runs.length === 0) return undefined
+    const totalOutput = runs.reduce((s, r) => s + r.genUsage.outputTokens, 0)
+    const totalStreamMs = runs.reduce((s, r) => s + r.genUsage.streamMs, 0)
+    const last = runs[runs.length - 1]
+    return {
+      // 整轮编排墙钟（含中立 Agent 的发言裁决）——群聊下这才是用户等的那段时间
+      durationMs: Date.now() - groupStartedAt,
+      rounds: runs.reduce((s, r) => s + r.stats.rounds, 0),
+      steps: runs.reduce((s, r) => s + r.stats.steps, 0),
+      tokensPerSecond: totalStreamMs > 0 ? Math.round((totalOutput / totalStreamMs) * 1000) : 0,
+      contextTokens: last.stats.contextTokens,
+      // 与 contextTokens 同源：该值出自身为 last 的成员 run，估算标记也必须取它——
+      // 取 some() 会把「更早成员用了估算、末位用了真值」错标成 ≈
+      estimated: last.stats.estimated,
+    }
+  })()
   send({ type: 'group_done' })
+  if (!aggregatedStats) return {}
+  return {
+    stats: aggregatedStats,
+    // 账单增量：各成员之和（轮/步同理）；估算标记取 some——只要有一位走的是估算，
+    // 这份增量就含估算；回填起点取各成员粗估的最大值（同一段历史的不同视角，
+    // 量级一致，只在首次落库时被采纳一次）
+    genUsage: {
+      billTokens: runs.reduce((s, r) => s + r.genUsage.billTokens, 0),
+      billEstimated: runs.some((r) => r.genUsage.billEstimated),
+      priorBillEstimate: Math.max(...runs.map((r) => r.genUsage.priorBillEstimate)),
+    },
+  }
 }
 
 /**

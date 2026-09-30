@@ -106,6 +106,16 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle>(function Gatewa
           onCheckedChange={(v) => setConfig({ ...config, allow_im_conversations: v })}
         />
       </div>
+      <div>
+        <label className="text-sm font-medium">{t('settings.contextWindow')}</label>
+        <Input
+          type="number"
+          min={1}
+          value={config.context_window ?? 128000}
+          onChange={(e) => setConfig({ ...config, context_window: Number(e.target.value) || 128000 })}
+          className="mt-1"
+        />
+      </div>
       <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>
   )
