@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { db, conversations, messages, groupConversationAgents, agents, wechatBindings, qqBindings, qqGroupConversations } from '../db/index.js'
-import { eq, and, desc, gte, sql } from 'drizzle-orm'
+import { eq, and, desc, gte, sql, inArray } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
@@ -9,6 +9,7 @@ import { ApiError } from '../lib/apiError.js'
 import { broadcastConversationSync, broadcastConversationChanged, broadcastUnreadUpdate } from '../lib/realtime.js'
 import { stopBotForUser } from '../im/qq/manager.js'
 import { trackUserActivity } from './user.js'
+import { resolveWorkspaceAnchor } from './workspaces.js'
 
 function getUserId(c: any): string {
   return c.get('userId') || ''
@@ -91,12 +92,102 @@ conversationsRoute.get('/', async (c) => {
     updated_at: conversations.updated_at,
     deleted_at: conversations.deleted_at,
     last_read_at: conversations.last_read_at,
+    workspace_id: conversations.workspace_id,
     agent_count: sql<number>`COALESCE((SELECT COUNT(*) FROM group_conversation_agents WHERE group_conversation_agents.conversation_id = conversations.id), 0)`,
     wechat_bound: sql<number>`EXISTS (SELECT 1 FROM wechat_bindings WHERE wechat_bindings.user_id = conversations.user_id AND wechat_bindings.conversation_id = conversations.id)`,
     qq_bound: sql<number>`EXISTS (SELECT 1 FROM qq_bindings WHERE qq_bindings.user_id = conversations.user_id AND qq_bindings.conversation_id = conversations.id) OR EXISTS (SELECT 1 FROM qq_group_conversations WHERE qq_group_conversations.conversation_id = conversations.id)`,
     unread_count: sql<number>`(SELECT COUNT(*) FROM messages WHERE messages.conversation_id = conversations.id AND messages.role = 'assistant' AND (conversations.last_read_at IS NULL OR messages.created_at > conversations.last_read_at))`,
   }).from(conversations).where(and(eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).orderBy(desc(conversations.updated_at)).all()
   return c.json({ conversations: list })
+})
+
+/** 搜索命中片段：命中词前后各 ~40 字符、总长上限 140，空白折叠为单空格 */
+function makeSnippet(text: string, q: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  const idx = flat.toLowerCase().indexOf(q.toLowerCase())
+  if (idx === -1) return flat.slice(0, 140)
+  const start = Math.max(0, idx - 40)
+  const end = Math.min(flat.length, idx + q.length + 40)
+  const prefix = start > 0 ? '…' : ''
+  const suffix = end < flat.length ? '…' : ''
+  const body = flat.slice(start, end)
+  return (prefix + body + suffix).slice(0, 142)
+}
+
+// Search conversations by title and message content.
+// ⚠️ 必须注册在 GET /:id 之前 —— Hono 按注册顺序匹配，否则 'search' 会被 /:id 捕获。
+conversationsRoute.get('/search', async (c) => {
+  const userId = getUserId(c)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
+
+  const q = (c.req.query('q') || '').trim().slice(0, 64)
+  if (!q) return c.json({ results: [] })
+
+  // LIKE 通配符转义（%/_/\）+ 大小写不敏感；ESCAPE 子句 SQLite/PG 双方言同构
+  const pat = `%${q.replace(/[\\%_]/g, (m) => '\\' + m).toLowerCase()}%`
+  const likeTitle = sql`lower(${conversations.title}) LIKE ${pat} ESCAPE '\\'`
+  const likeContent = sql`lower(${messages.content}) LIKE ${pat} ESCAPE '\\'`
+
+  // 1) 标题命中（最相关，排前面）
+  const titleRows = await db.select({
+    id: conversations.id,
+    title: conversations.title,
+    type: conversations.type,
+    agent_id: conversations.agent_id,
+    updated_at: conversations.updated_at,
+    workspace_id: conversations.workspace_id,
+  }).from(conversations)
+    .where(and(
+      eq(conversations.user_id, userId),
+      sql`${conversations.deleted_at} IS NULL`,
+      likeTitle,
+    ))
+    .orderBy(desc(conversations.updated_at))
+    .limit(20)
+    .all()
+
+  // 2) 内容命中：只搜 user/assistant 正文（排除 tool/system 的巨型 JSON 噪声）；
+  //    内层 limit 200 防全表搬运，JS 侧按会话去重后补足
+  const contentRows = await db.select({
+    id: conversations.id,
+    title: conversations.title,
+    type: conversations.type,
+    agent_id: conversations.agent_id,
+    updated_at: conversations.updated_at,
+    workspace_id: conversations.workspace_id,
+    content: messages.content,
+  }).from(messages)
+    .innerJoin(conversations, eq(messages.conversation_id, conversations.id))
+    .where(and(
+      eq(conversations.user_id, userId),
+      sql`${conversations.deleted_at} IS NULL`,
+      inArray(messages.role, ['user', 'assistant']),
+      likeContent,
+    ))
+    .orderBy(desc(messages.id))
+    .limit(200)
+    .all()
+
+  // 3) 合并：标题命中优先；内容命中按会话去重补足至 20（每会话取最新一条做 snippet）
+  const results: Array<{
+    conversation: { id: string; title: string; type: string; agent_id: string; updated_at: number; workspace_id: string | null }
+    matched: 'title' | 'content'
+    snippet?: string
+  }> = []
+  const seen = new Set<string>()
+
+  for (const row of titleRows) {
+    if (seen.has(row.id) || results.length >= 20) continue
+    seen.add(row.id)
+    results.push({ conversation: row, matched: 'title' })
+  }
+  for (const row of contentRows) {
+    if (seen.has(row.id) || results.length >= 20) continue
+    seen.add(row.id)
+    results.push({ conversation: row, matched: 'content', snippet: makeSnippet(row.content, q) })
+  }
+
+  return c.json({ results })
 })
 
 // Get one conversation with messages (paginated to avoid O(n) payloads)
@@ -195,13 +286,15 @@ conversationsRoute.post('/', async (c) => {
   const userId = getUserId(c)
   if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
-  const body = await c.req.json<{ title?: string; agent_id?: string; type?: 'direct' | 'group' | 'world'; agent_ids?: string[] }>()
+  const body = await c.req.json<{ title?: string; agent_id?: string; type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; workspace_id?: string | null }>()
   // 世界会话必须经 POST /api/worlds 创建（那里会一并写入 worlds 行）。
   // 必须显式拒绝，而不是靠上面的类型标注 —— 运行时这是**未经校验的 JSON**，
   // 否则能造出「有 conversations 行、无 worlds 行」的永久损坏侧边栏条目。
   if ((body as { type?: string }).type === 'world') {
     throw new ApiError(ErrCode.CONV_WORLD_CREATE_ONLY)
   }
+  // 分组工作区：创建时锁定（永不 UPDATE）；归属校验失败统一 404 防探测
+  const workspaceAnchor = await resolveWorkspaceAnchor(body.workspace_id, userId)
   const id = randomUUID()
   const now = Math.floor(Date.now() / 1000)
 
@@ -210,6 +303,7 @@ conversationsRoute.post('/', async (c) => {
     title: body.title || (body.type === 'group' ? '群组对话' : 'New Chat'),
     agent_id: body.agent_id || '',
     type: body.type || 'direct',
+    workspace_id: workspaceAnchor,
     created_at: now, updated_at: now,
   }).run()
 

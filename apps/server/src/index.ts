@@ -30,6 +30,7 @@ import { uploadRoute } from './routes/upload.js'
 import { userRoute } from './routes/user.js'
 import { standAloneUserRoute } from './routes/user-standalone.js'
 import { filesRoute } from './routes/files.js'
+import { workspacesRoute } from './routes/workspaces.js'
 import { groupRoute } from './routes/group.js'
 import { worldsRoute } from './routes/worlds.js'
 import { oauthRoute } from './routes/oauth.js'
@@ -74,6 +75,7 @@ app.route('/api/files', filesRoute)
 app.route('/api/workspace', filesRoute)
 app.route('/api/group', groupRoute)
 app.route('/api/worlds', worldsRoute)
+app.route('/api/workspaces', workspacesRoute)
 if (!STAND_ALONE) {
   // OAuth login is part of the Momoi auth stack — not offered in stand-alone.
   app.route('/api/oauth', oauthRoute)

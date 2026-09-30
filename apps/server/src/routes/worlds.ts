@@ -21,6 +21,7 @@ import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 import { ApiError } from '../lib/apiError.js'
 import { broadcastConversationSync } from '../lib/realtime.js'
 import { trackUserActivity } from './user.js'
+import { resolveWorkspaceAnchor } from './workspaces.js'
 
 function getUserId(c: any): string {
   return c.get('userId') || ''
@@ -88,6 +89,7 @@ worldsRoute.post('/', async (c) => {
     laws?: string
     agent_ids?: string[]
     title?: string
+    workspace_id?: string | null
   }>()
 
   // 至少 1 个 Agent（群聊要求 ≥2，世界无此约束 —— 一个人的世界也是世界）
@@ -95,6 +97,9 @@ worldsRoute.post('/', async (c) => {
   if (agentIds.length < 1) {
     throw new ApiError(ErrCode.WORLD_AGENTS_REQUIRED)
   }
+
+  // 分组工作区：创建时锁定（永不 UPDATE）；归属校验失败统一 404 防探测
+  const workspaceAnchor = await resolveWorkspaceAnchor(body.workspace_id, userId)
 
   const convId = randomUUID()
   const now = Math.floor(Date.now() / 1000)
@@ -106,6 +111,7 @@ worldsRoute.post('/', async (c) => {
     title: (body.title || '').trim().slice(0, 40) || '世界模拟',
     agent_id: agentIds[0],
     type: 'world',
+    workspace_id: workspaceAnchor,
     created_at: now,
     updated_at: now,
   }).run()

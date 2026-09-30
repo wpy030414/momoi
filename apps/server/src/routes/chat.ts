@@ -22,6 +22,7 @@ import { synthesizeAndSave, markVoiceComplete, createTtsProvider } from '../ai/t
 import { broadcastStream, broadcastConversationSync, broadcastUnreadUpdate } from '../lib/realtime.js'
 import { countUnread } from '../lib/unread.js'
 import { trackUserActivity } from './user.js'
+import { resolveWorkspaceAnchor } from './workspaces.js'
 
 export const chatRoute = new Hono()
 
@@ -99,8 +100,8 @@ chatRoute.post('/', async (c) => {
     throw new ApiError(ErrCode.UNAUTHORIZED)
   }
 
-  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string }>()
-  const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id } = body
+  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string; workspace_id?: string | null }>()
+  const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id, workspace_id } = body
   const requestedAgentId = body.agent_id
   // 本轮实际采用的 Agent：新建会话取请求 agent_id；已有单聊会话锚定到
   // conversations.agent_id（见下方归属校验分支）。
@@ -198,12 +199,24 @@ chatRoute.post('/', async (c) => {
 
       if (!convId) {
         convId = randomUUID()
+        // 分组工作区：创建时锁定（永不 UPDATE）。草稿态的 workspace_id 随首条消息
+        // 传到此处——归属校验失败以 SSE error 返回（流式上下文不能 throw ApiError）。
+        let workspaceAnchor: string | null = null
+        if (workspace_id) {
+          try {
+            workspaceAnchor = await resolveWorkspaceAnchor(workspace_id, userId)
+          } catch {
+            send({ type: 'error', code: ErrCode.WS_NOT_FOUND })
+            return
+          }
+        }
         const now = Math.floor(Date.now() / 1000)
         const title = message.slice(0, 40) || 'New Chat'
         await db.insert(conversations).values({
           id: convId, user_id: userId, title,
           agent_id: agentId || '',
           type: isGroup ? 'group' : 'direct',
+          workspace_id: workspaceAnchor,
           created_at: now, updated_at: now,
         }).run()
 
