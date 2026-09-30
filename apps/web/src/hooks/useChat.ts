@@ -33,6 +33,13 @@ const RETRY_BASE_MS = 2000
 const DRAFT_PREFIX = 'draft:'
 const isDraftKey = (k: string) => k.startsWith(DRAFT_PREFIX)
 
+/** 工作区 ID 运行时守卫：非非空字符串一律归 null（未分组）。防御「带 workspaceId
+ *  形参的回调被直接当事件处理器传入」——点击事件/DOM 对象一旦漏进
+ *  draftWorkspaceIdRef，会随草稿首条消息进入请求体，JSON.stringify 沿事件的
+ *  target → __reactFiber$ → stateNode 撞上循环引用，报错不可读且会话创建失败；
+ *  TS 对「(workspaceId?) => void → () => void」赋值不报错，运行时守卫是唯一兜底。 */
+const asWorkspaceId = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
+
 /** 远程流判活 TTL：他设备流事件的终态（done/error）可能丢失，窗口内
  *  快照合并按「流进行中」处理，避免吞掉尾部正在生成的消息。
  *  与本地空闲超时一致（60s）：远程流静默（长工具执行 / 群聊 agent 间隔）
@@ -453,6 +460,7 @@ export function useChat() {
       streamKey = draftKeyRef.current
     } else {
       streamKey = `${DRAFT_PREFIX}${++draftSeqRef.current}`
+      draftWorkspaceIdRef.current = null // 隐式草稿 = 未指定工作区；不残留上一个已作废草稿的锁定
       setDraftType('direct')
       setViewKey(null, streamKey)
     }
@@ -1062,7 +1070,7 @@ export function useChat() {
   const createConversation = useCallback((workspaceId?: string | null) => {
     const key = `${DRAFT_PREFIX}${++draftSeqRef.current}`
     ++loadGenRef.current // 作废在途的会话加载，防止慢响应覆盖新草稿
-    draftWorkspaceIdRef.current = workspaceId ?? null
+    draftWorkspaceIdRef.current = asWorkspaceId(workspaceId)
     setViewKey(null, key)
     setDraftType('direct')
     // 草稿态无会话 ID，hash 归位
@@ -1077,7 +1085,7 @@ export function useChat() {
   const startGroupDraft = useCallback((workspaceId?: string | null) => {
     const key = `${DRAFT_PREFIX}${++draftSeqRef.current}`
     ++loadGenRef.current // 作废在途的会话加载，防止慢响应覆盖新草稿
-    draftWorkspaceIdRef.current = workspaceId ?? null
+    draftWorkspaceIdRef.current = asWorkspaceId(workspaceId)
     setViewKey(null, key)
     setDraftType('group')
     if (window.location.hash) {

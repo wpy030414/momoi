@@ -565,6 +565,11 @@ export function App() {
   // 整树卸载 → 白屏，需手动刷新恢复。
   // Stable callbacks for Sidebar (prevent inline arrow re-creation on every render)
   const handleNewGroup = useCallback(() => setGroupDialogOpen(true), [])
+  /** 新建会话（未指定工作区）。必须包成零参回调再传给 Sidebar：
+   *  chat.createConversation 带可选 workspaceId 形参，直接作为 onClick 时
+   *  React 会把点击事件塞进形参，随首条消息进入请求体 → JSON.stringify
+   *  循环引用报错、会话创建失败（且 TS 对「带可选参函数 → () => void」不报错）。 */
+  const handleNewChat = useCallback(() => chat.createConversation(), [chat.createConversation])
   /** 打开会话搜索 */
   const handleOpenSearch = useCallback(() => setSearchOpen(true), [])
   /** 打开新建工作区对话框 */
@@ -708,7 +713,7 @@ export function App() {
             workspaces={chat.workspaces}
             activeId={chat.activeId}
             onSelect={chat.selectConversation}
-            onNew={chat.createConversation}
+            onNew={handleNewChat}
             onNewGroup={handleNewGroup}
             onRename={chat.renameConversation}
             onArchive={handleArchiveConversation}
