@@ -382,7 +382,13 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
 
   return (
     <div ref={containerRef} className={`max-w-3xl mx-auto w-full px-4 ${!collapsed && conversationId != null && stats ? 'pb-1' : 'pb-4'}`}>
-      <div className={`rounded-xl border bg-background/[.66] overflow-hidden ${collapsed ? '' : 'focus-within:ring-2 focus-within:ring-ring transition-shadow'}`}>
+      {/* 生成中（模型思考/回复）：给输入框套一层 Siri 式彩色光环——外层辉光 + 内层描边。
+          两层常驻 DOM、只靠 opacity 过渡淡入淡出（条件渲染是卸载，做不出退场过渡；
+          不叠加 scale，否则 box-shadow 的几何会被一起缩放，辉光看着在放大缩小）；
+          动画由 .ai-active 门控（见 globals.css）。盒子的 overflow-hidden 会把子元素的外
+          发光裁掉，所以光环必须住在盒子外层；盒子自身一行未改，避免重排。 */}
+      <div className={`relative ${disabled ? 'ai-active' : ''}`}>
+      <div className={`rounded-xl border bg-background/[.66] overflow-hidden ${collapsed ? '' : 'focus-within:border-ring transition-colors'}`}>
       {/* Collapsed row: single truncated line（稳态展开时 invisible，动画期间保持可见参与交叉过渡） */}
       <div
         ref={collapsedRowRef}
@@ -514,6 +520,17 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
             </div>
           </div>
         </div>
+      </div>
+      {/* 外发光：自身透明——非 inset 的 box-shadow 只画在边框盒之外，故不会遮住输入区 */}
+      <div
+        aria-hidden
+        className={`ai-glow pointer-events-none absolute inset-0 rounded-xl transition-opacity duration-700 ease-out ${disabled ? 'opacity-100' : 'opacity-0'}`}
+      />
+      {/* 描边：-inset-px 让 2px 彩环正好压在盒子原有的 1px 边框上（所以盒子本身不用改边框） */}
+      <div
+        aria-hidden
+        className={`ai-aura pointer-events-none absolute -inset-px rounded-xl transition-opacity duration-700 ease-out ${disabled ? 'opacity-100' : 'opacity-0'}`}
+      />
       </div>
 
       {/* 会话状态条（已有会话：输入框下方一行，不显工作区下拉） */}

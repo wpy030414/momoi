@@ -132,3 +132,82 @@
 .sidebar-scroll-area [data-radix-scroll-area-viewport] > div {
   display: block !important;
 }
+
+/* ---- 生成中的输入框光环（Siri 式：彩色外发光 + 旋转彩色描边）----
+   两层都常驻 DOM，靠 opacity/scale 过渡淡入淡出——条件渲染（卸载）做不出退场过渡。
+   动画一律挂在 `.ai-active` 之后：不生成时它们不可见，没必要继续逐帧重绘。 */
+
+/* 注册自定义属性：conic-gradient 的 from 角只有被 @property 声明为 <angle> 才能
+   被 @keyframes 平滑插值，否则逐帧跳变。 */
+@property --ai-aura-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes ai-aura-spin {
+  to { --ai-aura-angle: 360deg; }
+}
+
+/* 辉光色相缓慢游走（Siri 的呼吸感）：三层阴影几何固定、只换颜色，故可平滑插值。 */
+@keyframes ai-glow-breathe {
+  0%, 100% {
+    box-shadow:
+      0 0 8px 0px rgba(124, 92, 255, 0.60),
+      0 0 18px 2px rgba(59, 168, 255, 0.40),
+      0 0 32px 6px rgba(255, 107, 157, 0.25);
+  }
+  33% {
+    box-shadow:
+      0 0 8px 0px rgba(53, 230, 192, 0.60),
+      0 0 18px 2px rgba(124, 92, 255, 0.40),
+      0 0 32px 6px rgba(59, 168, 255, 0.25);
+  }
+  66% {
+    box-shadow:
+      0 0 8px 0px rgba(255, 217, 59, 0.60),
+      0 0 18px 2px rgba(255, 107, 157, 0.40),
+      0 0 32px 6px rgba(124, 92, 255, 0.25);
+  }
+}
+
+/* 外发光层：元素自身透明——非 inset 的 box-shadow 只画在边框盒之外，因此这层
+   无论铺多大都不会遮住/染色输入区，只会往四周散出光晕。
+   三层不同半径 + 不同色相叠出 Siri 那种「内核收束、外圈扩散」的彩色辉光。 */
+.ai-glow {
+  box-shadow:
+    0 0 8px 0px rgba(124, 92, 255, 0.60),
+    0 0 18px 2px rgba(59, 168, 255, 0.40),
+    0 0 32px 6px rgba(255, 107, 157, 0.25);
+}
+.ai-active .ai-glow {
+  animation: ai-glow-breathe 6s ease-in-out infinite;
+}
+
+/* 描边层：整块铺 conic-gradient，再用双层 mask 异或掉内容盒，只留下 padding 那一圈。
+   输入框本身是半透明的（bg-background/[.66]），整块盖上去会把输入区染色，mask 正是
+   为了避免这点。 */
+.ai-aura {
+  /* 兜底：@property 不被支持时（老 WebView）自定义属性不会自动拥有初值，var() 整条
+     失效会连背景一起丢掉。这里给一个普通声明，退化成「不转但仍显色的静态彩虹圈」；
+     支持 @property 时动画优先级更高，会覆盖此值。 */
+  --ai-aura-angle: 0deg;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--ai-aura-angle),
+    #7c5cff, #3ba8ff, #35e6c0, #ffd93b, #ff6b9d, #7c5cff
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.ai-active .ai-aura {
+  animation: ai-aura-spin 4s linear infinite;
+}
+
+/* 尊重系统「减少动态效果」：彩圈与辉光都保留（状态仍可辨识），只是不动 */
+@media (prefers-reduced-motion: reduce) {
+  .ai-active .ai-glow,
+  .ai-active .ai-aura { animation: none; }
+}
