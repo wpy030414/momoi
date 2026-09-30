@@ -10,6 +10,8 @@ export const conversations = sqliteTable('conversations', {
   updated_at: integer('updated_at').notNull(),
   deleted_at: integer('deleted_at'),
   last_read_at: integer('last_read_at'),
+  // 创建时锁定的分组工作区；NULL = 未分组。值永不 UPDATE——悬空值（工作区已删）按未分组渲染，沙箱仍锚定 ws-<id>
+  workspace_id: text('workspace_id'),
 })
 
 export const messages = sqliteTable('messages', {
@@ -140,6 +142,15 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
 export const worlds = sqliteTable('worlds', {
   conversation_id: text('conversation_id').primaryKey().references(() => conversations.id, { onDelete: 'cascade' }),
   laws: text('laws').notNull().default(''),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+})
+
+// 会话分组工作区：文件夹语义；同组成员会话共享文件沙箱目录 data/workspaces/ws-<id>
+export const workspaces = sqliteTable('workspaces', {
+  id: text('id').primaryKey(),
+  user_id: text('user_id').notNull().default(''),
+  name: text('name').notNull().default(''),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
 })

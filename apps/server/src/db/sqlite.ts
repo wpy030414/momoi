@@ -36,6 +36,14 @@ export async function initSqlite() {
     // Column already exists, safe to ignore
   }
 
+  // Migration: add workspace_id (分组工作区，创建时锁定；见 docs/specs/module-workspace.md)
+  try {
+    sqlDb.run(`ALTER TABLE conversations ADD COLUMN workspace_id TEXT`)
+    console.log('[db] Migration: added workspace_id to conversations')
+  } catch {
+    // Column already exists, safe to ignore
+  }
+
   // Persistent index creation — safe to run on every startup
   sqlDb.run(`CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id)`)
   sqlDb.run(`CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id)`)

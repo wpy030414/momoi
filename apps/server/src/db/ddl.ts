@@ -12,7 +12,8 @@ export const MIGRATION_SQL = `
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
     deleted_at INTEGER,
-    last_read_at INTEGER
+    last_read_at INTEGER,
+    workspace_id TEXT
   );
 
   CREATE TABLE IF NOT EXISTS messages (
@@ -146,8 +147,19 @@ export const MIGRATION_SQL = `
     updated_at      INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
+  -- 会话分组工作区：文件夹语义；创建时锁定到会话（conversations.workspace_id），
+  -- 同组成员共享文件沙箱目录 data/workspaces/ws-<id>。
+  CREATE TABLE IF NOT EXISTS workspaces (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
   CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
   CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id);
   CREATE INDEX IF NOT EXISTS idx_wechat_bindings_conv ON wechat_bindings(conversation_id);
   CREATE INDEX IF NOT EXISTS idx_oauth_user ON user_oauth_bindings(user_id);
-  CREATE INDEX IF NOT EXISTS idx_user_agent_memories ON user_agent_memories(user_id, agent_id);`
+  CREATE INDEX IF NOT EXISTS idx_user_agent_memories ON user_agent_memories(user_id, agent_id);
+  CREATE INDEX IF NOT EXISTS idx_workspaces_user ON workspaces(user_id);`

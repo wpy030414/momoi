@@ -27,7 +27,8 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       deleted_at INTEGER,
-      last_read_at INTEGER
+      last_read_at INTEGER,
+      workspace_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -167,7 +168,20 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    -- 会话分组工作区：文件夹语义；创建时锁定到会话（conversations.workspace_id）
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspaces_user ON workspaces(user_id);
   `)
+
+  // 既有 PG 部署补列（幂等）：分组工作区锚定列，见 docs/specs/module-workspace.md
+  await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS workspace_id TEXT`)
 
   const db = drizzlePg(pool, { schema }) as any
   console.log('[db] PostgreSQL ready')

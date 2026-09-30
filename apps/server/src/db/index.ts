@@ -44,4 +44,5 @@ export const {
   userAgentMemories,
   pushSubscriptions,
   worlds,
+  workspaces,
 } = result.schema
