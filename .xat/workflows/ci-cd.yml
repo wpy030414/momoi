@@ -1,5 +1,18 @@
 steps:
   - name: Build
-    run: pnpm build
+    run: |
+      avail_kb=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
+      if [ "${avail_kb:-0}" -lt 4194304 ]; then
+        echo "MemAvailable: ${avail_kb:-unknown} kB (< 4 GiB), apply NODE_OPTIONS=--max-old-space-size=1024"
+        export NODE_OPTIONS='--max-old-space-size=1024'
+      else
+        echo "MemAvailable: ${avail_kb} kB (>= 4 GiB), build with default NODE_OPTIONS"
+      fi
+      pnpm build
   - name: Run
-    run: pm2 restart momoi
+    run: |
+      if pm2 jlist 2>/dev/null | grep -q '"name":"momoi"'; then
+        echo 'pm2: process "momoi" exists -> delete before fresh start'
+        pm2 delete momoi
+      fi
+      pm2 start 'pnpm start' --name momoi
