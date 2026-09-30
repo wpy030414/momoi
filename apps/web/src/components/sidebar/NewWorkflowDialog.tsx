@@ -13,12 +13,9 @@ import { useTranslation } from 'react-i18next'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Loading } from '../ui/spinner'
-import { Folder } from 'lucide-react'
 import { AgentPickerList, type AgentBrief } from './AgentPickerList'
 import { errT } from '../../i18n'
-import type { Workspace } from '@momoi/shared/types'
 
 export type WorkflowMode = 'group' | 'world'
 
@@ -35,10 +32,8 @@ interface NewWorkflowDialogProps {
   onOpenChange: (open: boolean) => void
   agents: AgentBrief[]
   agentsLoading: boolean
-  workspaces: Workspace[]
-  /** workspaceId：目标工作区（创建时锁定，之后不可移动）；null = 未分组 */
-  onConfirmGroup: (agentIds: string[], workspaceId: string | null) => Promise<void>
-  onConfirmWorld: (agentIds: string[], draft: WorldDraft, workspaceId: string | null) => Promise<void>
+  onConfirmGroup: (agentIds: string[]) => Promise<void>
+  onConfirmWorld: (agentIds: string[], draft: WorldDraft) => Promise<void>
 }
 
 export function NewWorkflowDialog({
@@ -46,7 +41,6 @@ export function NewWorkflowDialog({
   onOpenChange,
   agents,
   agentsLoading,
-  workspaces,
   onConfirmGroup,
   onConfirmWorld,
 }: NewWorkflowDialogProps) {
@@ -54,7 +48,6 @@ export function NewWorkflowDialog({
   const [mode, setMode] = useState<WorkflowMode>('group')
   const [selected, setSelected] = useState<string[]>([])
   const [laws, setLaws] = useState('')
-  const [wsId, setWsId] = useState<string>('')  // '' = 未分组
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -62,7 +55,6 @@ export function NewWorkflowDialog({
     setMode('group')
     setSelected([])
     setLaws('')
-    setWsId('')
     setSubmitting(false)
     setError('')
   }
@@ -90,11 +82,10 @@ export function NewWorkflowDialog({
     setSubmitting(true)
     setError('')
     try {
-      const workspaceId = wsId || null
       if (mode === 'group') {
-        await onConfirmGroup(selected, workspaceId)
+        await onConfirmGroup(selected)
       } else {
-        await onConfirmWorld(selected, { laws: laws.trim() }, workspaceId)
+        await onConfirmWorld(selected, { laws: laws.trim() })
       }
       reset()
       onOpenChange(false)
@@ -132,26 +123,6 @@ export function NewWorkflowDialog({
           <Loading className="py-8" />
         ) : (
           <div className="space-y-4">
-            {/* 目标工作区（创建时锁定，之后不可移动） */}
-            {workspaces.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-sm font-medium flex items-center gap-1.5">
-                  <Folder className="h-3.5 w-3.5" />
-                  {t('sidebar.workspace')}
-                </div>
-                <Select value={wsId || 'ungrouped'} onValueChange={(v) => setWsId(v === 'ungrouped' ? '' : v)} disabled={submitting}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ungrouped">{t('sidebar.ungrouped')}</SelectItem>
-                    {workspaces.map((ws) => (
-                      <SelectItem key={ws.id} value={ws.id}>{ws.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
 
             <div className="space-y-2">
               <div className="text-sm font-medium">{t('workflow.selectAgents')}</div>

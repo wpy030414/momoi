@@ -624,8 +624,8 @@ export function App() {
     if (isMobile) setSidebarOpen(false)
   }, [chat.selectConversation, isMobile])
   /** 世界模拟确认：对话框提交 → 创生世界 → 停留在新会话视图（侧边栏不自动收回） */
-  const handleConfirmWorld = useCallback(async (agentIds: string[], draft: WorldDraft, workspaceId: string | null) => {
-    const { conversation } = await api.createWorld(draft.laws, agentIds, workspaceId)
+  const handleConfirmWorld = useCallback(async (agentIds: string[], draft: WorldDraft) => {
+    const { conversation } = await api.createWorld(draft.laws, agentIds, null)
     await chat.refreshConversations()
     await chat.selectConversation(conversation.id)
   }, [chat.refreshConversations, chat.selectConversation])
@@ -912,7 +912,7 @@ export function App() {
         />
       </Suspense>
 
-      {/* 新工作流：模式选择（群组会话 / 世界模拟）+ 目标工作区 + Agent 选择 + 世界法则 */}
+      {/* 新工作流：模式选择（群组会话 / 世界模拟）+ Agent 选择 + 世界法则 */}
       <NewWorkflowDialog
         open={groupDialogOpen}
         onOpenChange={(open) => {
@@ -921,10 +921,9 @@ export function App() {
         }}
         agents={agents}
         agentsLoading={agentsLoading}
-        workspaces={chat.workspaces}
-        onConfirmGroup={async (agentIds, workspaceId) => {
+        onConfirmGroup={async (agentIds) => {
           // 侧边栏不自动收回：选好 Agent 后停留在群聊新会话视图
-          await chat.createGroupConversation(agentIds, workspaceId)
+          await chat.createGroupConversation(agentIds)
         }}
         onConfirmWorld={handleConfirmWorld}
       />

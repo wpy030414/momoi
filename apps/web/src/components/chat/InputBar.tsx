@@ -388,7 +388,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
           动画由 .ai-active 门控（见 globals.css）。盒子的 overflow-hidden 会把子元素的外
           发光裁掉，所以光环必须住在盒子外层；盒子自身一行未改，避免重排。 */}
       <div className={`relative ${disabled ? 'ai-active' : ''}`}>
-      <div className={`rounded-xl border bg-background/[.66] overflow-hidden ${collapsed ? '' : 'focus-within:border-ring transition-colors'}`}>
+      <div className={`rounded-xl border bg-background/[.66] overflow-hidden`}>
       {/* Collapsed row: single truncated line（稳态展开时 invisible，动画期间保持可见参与交叉过渡） */}
       <div
         ref={collapsedRowRef}
@@ -465,7 +465,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
                     disabled={conversationId != null}
                   >
                     <SelectTrigger
-                      className="h-8 w-auto max-w-[200px] gap-1.5 rounded-md border-none px-3 py-1.5 text-sm font-normal text-muted-foreground shadow-none transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground [&>svg]:h-3.5 [&>svg]:w-3.5"
+                      className="h-8 w-auto max-w-[200px] gap-1.5 rounded-md border-none px-3 py-1.5 text-sm font-normal text-muted-foreground shadow-none transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground focus:ring-0 focus:outline-none [&>svg]:h-3.5 [&>svg]:w-3.5"
                       title={conversationId != null ? t('sidebar.newWorkspaceHint') : t('chat.workspacePicker')}
                     >
                       <Folder className="h-3.5 w-3.5 flex-shrink-0" />
