@@ -50,10 +50,10 @@ uploadRoute.post('/', async (c) => {
     const filename = `${id}${safeExt}`
 
     const buffer = Buffer.from(await file.arrayBuffer())
-    const ws = new SandboxFS(conversationId)
+    const ws = await SandboxFS.forConversation(conversationId)
     await ws.writeFile(`__uploads__/${filename}`, buffer)
 
-    const workspaceUrl = `/api/workspace/${conversationId}/file/__uploads__/${filename}`
+    const workspaceUrl = `/api/files/${conversationId}/file/__uploads__/${filename}`
 
     // If external image hosting is enabled, upload to CDN for user-facing URL
     let cdnUrl: string | null = null

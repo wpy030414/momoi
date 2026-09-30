@@ -5,7 +5,9 @@
 import fs from 'fs'
 import fsp from 'fs/promises'
 import path from 'path'
+import { eq } from 'drizzle-orm'
 import { repoRoot } from '../lib/paths.js'
+import { db, conversations } from '../db/index.js'
 
 const RESERVED_NAMES = new Set([
   'CON', 'PRN', 'AUX', 'NUL',
@@ -23,11 +25,36 @@ export class SandboxFS {
   private maxFiles: number
   private maxFileBytes: number
 
-  constructor(conversationId: string) {
-    this.root = path.resolve(repoRoot(), 'data', 'workspaces', conversationId)
+  private constructor(root: string) {
+    this.root = root
     this.maxBytes = parseInt(process.env.WORKSPACE_MAX_BYTES || String(DEFAULT_MAX_BYTES), 10)
     this.maxFiles = parseInt(process.env.WORKSPACE_MAX_FILES || String(DEFAULT_MAX_FILES), 10)
     this.maxFileBytes = parseInt(process.env.WORKSPACE_MAX_FILE_BYTES || String(DEFAULT_MAX_FILE_BYTES), 10)
+  }
+
+  /** 沙箱根目录：data/workspaces/（会话私有 <convId>/ 与工作区共享 ws-<workspaceId>/ 同住于此） */
+  static workspacesDir(): string {
+    return path.resolve(repoRoot(), 'data', 'workspaces')
+  }
+
+  /** 会话当前沙箱根：workspace_id 非空 → 工作区共享目录 ws-<id>，否则会话私有目录 <convId>。
+   *  workspace_id 在会话创建时锁定且永不 UPDATE，因此沙箱根随会话一辈子不变；
+   *  工作区被删除后成员会话的 workspace_id 悬空，但沙箱仍锚定原 ws-<id>（文件永不迁移）。
+   *  鉴权归调用方路由；查询异常按未分组回退——文件层绝不让聊天主链路炸掉。 */
+  static async forConversation(conversationId: string): Promise<SandboxFS> {
+    let anchor: string | null = null
+    try {
+      const rows = await (db.select({ workspace_id: conversations.workspace_id })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .limit(1) as unknown as Array<{ workspace_id: string | null }>)
+      anchor = rows[0]?.workspace_id ?? null
+    } catch {
+      // 极端场景（列缺失等）按未分组回退
+    }
+    return new SandboxFS(anchor
+      ? path.join(SandboxFS.workspacesDir(), `ws-${anchor}`)
+      : path.join(SandboxFS.workspacesDir(), conversationId))
   }
 
   /** Ensure workspace directory exists (lazy creation) */

@@ -895,7 +895,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<{ rep
   const toolCtx: ToolContext = {
     conversationId: convId,
     userId: userId || 'anonymous',
-    workspace: new SandboxFS(convId),
+    workspace: await SandboxFS.forConversation(convId),
     signal,
     mentionSignal,
     agentId: resolvedAgentId,

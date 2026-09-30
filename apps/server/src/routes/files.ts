@@ -1,5 +1,7 @@
 // ============================================================
-// Workspace Route — Serve files from conversation workspaces
+// Files Route — Serve files from conversation workspaces
+// （前身为 /api/workspace；旧前缀作为永久别名挂载，
+//   兼容持久化在 messages.attachments / trace 里的历史 URL）
 // ============================================================
 
 import { Hono } from 'hono'
@@ -11,10 +13,10 @@ import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { ApiError } from '../lib/apiError.js'
 import { SandboxFS } from '../tools/workspace.js'
 
-export const workspaceRoute = new Hono()
+export const filesRoute = new Hono()
 
 // Apply user auth to all routes
-workspaceRoute.use('*', userAuthMiddleware)
+filesRoute.use('*', userAuthMiddleware)
 
 function guessMime(ext: string): string {
   const map: Record<string, string> = {
@@ -43,8 +45,8 @@ function guessMime(ext: string): string {
   return map[ext] || 'application/octet-stream'
 }
 
-// GET /api/workspace/:conversationId/file/*filepath
-workspaceRoute.get('/:conversationId/file/*', async (c) => {
+// GET /api/files/:conversationId/file/*filepath
+filesRoute.get('/:conversationId/file/*', async (c) => {
   const userId = (c as any).get('userId') as string
   if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
@@ -62,7 +64,7 @@ workspaceRoute.get('/:conversationId/file/*', async (c) => {
   if (fileIdx === -1) throw new ApiError(ErrCode.WORKSPACE_INVALID_PATH)
   const filePath = decodeURIComponent(fullPath.slice(fileIdx + 6))
 
-  const workspace = new SandboxFS(convId)
+  const workspace = await SandboxFS.forConversation(convId)
   try {
     const buffer = await workspace.readFileRaw(filePath)
     const ext = path.extname(filePath).toLowerCase()

@@ -29,7 +29,7 @@ import { chatRoute } from './routes/chat.js'
 import { uploadRoute } from './routes/upload.js'
 import { userRoute } from './routes/user.js'
 import { standAloneUserRoute } from './routes/user-standalone.js'
-import { workspaceRoute } from './routes/workspace.js'
+import { filesRoute } from './routes/files.js'
 import { groupRoute } from './routes/group.js'
 import { worldsRoute } from './routes/worlds.js'
 import { oauthRoute } from './routes/oauth.js'
@@ -68,7 +68,10 @@ app.route('/api/upload', uploadRoute)
 // the minimal /me endpoint exists. WeChat/QQ bridge routes stay mounted —
 // binding is an IM capability, not Momoi auth, and binds to the 'admin' user.
 app.route('/api/user', STAND_ALONE ? standAloneUserRoute : userRoute)
-app.route('/api/workspace', workspaceRoute)
+// 会话工作区文件下载。旧前缀 /api/workspace 作为永久别名保留——历史 URL 持久化在
+// messages.attachments / tool trace 里，别名避免其 404（详见 docs/specs/module-workspace.md）。
+app.route('/api/files', filesRoute)
+app.route('/api/workspace', filesRoute)
 app.route('/api/group', groupRoute)
 app.route('/api/worlds', worldsRoute)
 if (!STAND_ALONE) {

@@ -46,17 +46,14 @@ async function buildNeutralContext(convId: string): Promise<string> {
 // Key: conversationId, Value: { enabled: boolean, messageCount: number }
 const infiniteState = new Map<string, { enabled: boolean; messageCount: number }>()
 
-/** Parse a workspace file URL: /api/workspace/{convId}/file/__uploads__/{filename} */
-function parseWorkspaceUrl(url: string): { workspaceId: string; wsPath: string } | null {
-  const parts = url.split('/')
-  const fileIdx = parts.indexOf('file')
-  if (fileIdx < 2) return null
-  if (parts[fileIdx - 1] !== '__uploads__') return null
-  const workspaceId = parts[fileIdx - 3]
-  if (!workspaceId) return null
-  const filename = parts.slice(fileIdx + 1).join('/')
-  if (!filename) return null
-  return { workspaceId, wsPath: `__uploads__/${filename}` }
+/** Parse a workspace file URL: /api/files/{convId}/file/__uploads__/{filename}
+ *  （兼容历史 /api/workspace 前缀——旧 URL 持久化在 messages.attachments / trace 里）
+ *  NOTE: 旧实现按 split('/') 位置解析，与上传 URL 实际形态（/file/__uploads__/）自诞生起
+ *  即不匹配、恒返回 null（AI 侧附件解析静默失败）——2026-09 重写为显式正则并修复。 */
+function parseWorkspaceUrl(url: string): { conversationId: string; wsPath: string } | null {
+  const m = url.match(/\/api\/(?:workspace|files)\/([^/]+)\/file\/(__uploads__\/.+)$/)
+  if (!m) return null
+  return { conversationId: m[1], wsPath: m[2] }
 }
 
 // Apply user auth to all routes
@@ -328,7 +325,7 @@ chatRoute.post('/', async (c) => {
         const imageParts: ContentPart[] = []
 
         // Copy document attachments to workspace for tool access
-        const workspace = new SandboxFS(convId)
+        const workspace = await SandboxFS.forConversation(convId)
         for (const att of attachments) {
           const wsUrl = (att as any).workspace_url || att.url
           const parsed = parseWorkspaceUrl(wsUrl)
@@ -336,7 +333,7 @@ chatRoute.post('/', async (c) => {
           const ext = path.extname(att.name).toLowerCase()
 
           if (DOC_EXTS.includes(ext)) {
-            const sourceWs = new SandboxFS(parsed.workspaceId)
+            const sourceWs = await SandboxFS.forConversation(parsed.conversationId)
             try {
               if (await sourceWs.exists(parsed.wsPath)) {
                 await workspace.copyIn(sourceWs.resolve(parsed.wsPath), att.name)
@@ -356,7 +353,7 @@ chatRoute.post('/', async (c) => {
             continue
           }
 
-          const sourceWs = new SandboxFS(parsed.workspaceId)
+          const sourceWs = await SandboxFS.forConversation(parsed.conversationId)
           const exists = await sourceWs.exists(parsed.wsPath)
           if (!exists) {
             textParts.push(`[附件 ${att.name}: 文件未找到]`)

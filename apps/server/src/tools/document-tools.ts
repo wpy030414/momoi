@@ -35,7 +35,7 @@ function makeArtifact(conversationId: string, filename: string, displayName: str
     filename,
     displayName,
     mimeType: guessMime(ext),
-    downloadUrl: `/api/workspace/${conversationId}/file/${encodeURIComponent(filename)}`,
+    downloadUrl: `/api/files/${conversationId}/file/${encodeURIComponent(filename)}`,
   }
 }
 
