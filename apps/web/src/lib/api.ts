@@ -161,7 +161,10 @@ export function getDeviceIdForRequest(): string | null {
 
 // Endpoints where 401 means "wrong credentials", not "session expired" —
 // a wrong-PIN attempt must never trigger the expired-session logout path.
-const CREDENTIALS_ENDPOINTS = ['/api/user/verify', '/api/user/change-pin']
+// 这些端点上的 401 表示"凭据本身不对"，不是会话过期——若按通用路径处理，
+// 用户只是打错一次 PIN 就会被清会话登出。配置导出/导入现在是 PIN 门控的
+// 步进校验端点，同样归入此类。
+const CREDENTIALS_ENDPOINTS = ['/api/user/verify', '/api/user/change-pin', '/api/admin/config/export', '/api/admin/config/import']
 
 /**
  * 401 统一处理：非凭据端点清会话 + 发节流的 auth:expired。
@@ -383,9 +386,14 @@ export const api = {
   // Admin - Config transfer（配置导入导出）
   // 导出端点返回 YAML 文本而非 JSON，request() 不适用——手写 fetch（同
   // uploadSkill 模式：cookie 自动附带、401 走 handleAuthOn401、错误走 toApiError）。
-  exportConfig: (): Promise<{ blob: Blob; filename: string }> => {
+  // 用 POST 而非 GET：导出的包含 api_key 明文，PIN 不能进 URL（访问日志/referrer）。
+  exportConfig: (pin: string): Promise<{ blob: Blob; filename: string }> => {
     const startedAt = Date.now()
-    return fetch('/api/admin/config/export').then(async (res) => {
+    return fetch('/api/admin/config/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin }),
+    }).then(async (res) => {
       if (!res.ok) {
         handleAuthOn401('/api/admin/config/export', startedAt, res.status)
         throw await toApiError(res)
@@ -402,10 +410,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ content }),
     }),
-  importConfig: (content: string) =>
+  // 正式导入带 PIN：服务端在落库前校验（dry-run 不校验）
+  importConfig: (content: string, pin: string) =>
     request<import('@momoi/shared/types').ImportResponse>('/api/admin/config/import', {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, pin }),
     }),
 
   // WeChat binding

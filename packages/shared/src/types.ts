@@ -195,13 +195,31 @@ export interface ConfigTransferAgent {
 }
 
 /**
+ * 网关段：与后台「网关」页的 7 项一一对应。
+ * 导出的是**生效值**（`map.get(key) || env.*`），因此 api_key/api_endpoint 可能来自
+ * .env 而从未被管理员在界面上输入过；导入会把它们写进 settings 表，从而「钉住」并
+ * 覆盖目标实例的 .env。详见 docs/specs/module-config.md 的导入导出章节。
+ */
+export interface ConfigExportGateway {
+  api_endpoint?: string
+  api_key?: string
+  context_window?: number
+  support_attachments?: boolean
+  support_infinite_mode?: boolean
+  use_external_image_hosting?: boolean
+  allow_im_conversations?: boolean
+}
+
+/**
  * 配置导出/导入包（version 1）。所有段与字段均可选：
  * 省略 = 不更新该键（绝非置空），支持手写只含目标字段的最小文件。
- * 绝不包含网关密钥（api_endpoint/api_key）与声线（voice_*）字段。
+ * **含网关段（api_endpoint/api_key 明文）**——文件等同凭证，导出/导入均需 PIN 二次校验；
+ * 仍不含声线（voice_*）字段。
  */
 export interface ConfigExportBundle {
   version: number
   exported_at?: string
+  gateway?: ConfigExportGateway
   experience?: {
     app_name?: string
     app_favicon?: string
@@ -226,8 +244,12 @@ export interface ImportIssue {
   params?: ErrParams
 }
 
-/** dry-run / 正式导入共用的变更摘要 */
+/**
+ * dry-run / 正式导入共用的变更摘要。
+ * 只承载**字段名**，绝不承载字段值——否则 dry-run 响应会把 api_key / client_secret 回显给客户端。
+ */
 export interface ImportSummary {
+  gateway: { changed: string[]; unchanged: string[] } | null
   experience: { changed: string[]; unchanged: string[] } | null
   agents: {
     update: Array<{ id: string; name: string; neutral: boolean }>

@@ -267,6 +267,12 @@ export enum ErrCode {
   CONFIG_IMPORT_PROVIDER_TOO_LONG = 'CONFIG_IMPORT_PROVIDER_TOO_LONG',
   /** params.id */
   CONFIG_IMPORT_DUPLICATE_PROVIDER_ID = 'CONFIG_IMPORT_DUPLICATE_PROVIDER_ID',
+  /** params.key */
+  CONFIG_IMPORT_UNKNOWN_GATEWAY_KEY = 'CONFIG_IMPORT_UNKNOWN_GATEWAY_KEY',
+  CONFIG_IMPORT_BAD_API_ENDPOINT = 'CONFIG_IMPORT_BAD_API_ENDPOINT',
+  // 无 params：api_key 的模板不得有任何插值位，否则值会被回显进错误消息
+  CONFIG_IMPORT_BAD_API_KEY = 'CONFIG_IMPORT_BAD_API_KEY',
+  CONFIG_IMPORT_BAD_CONTEXT_WINDOW = 'CONFIG_IMPORT_BAD_CONTEXT_WINDOW',
 }
 
 /** 每码元数据：默认 HTTP status + i18n 模板参数名（全有或全无） */
@@ -469,6 +475,10 @@ export const ERR_REGISTRY: Readonly<Record<ErrCode, ErrMeta>> = {
   [ErrCode.CONFIG_IMPORT_BAD_PROVIDER_URL]: { status: 400, params: ['field'] },
   [ErrCode.CONFIG_IMPORT_PROVIDER_TOO_LONG]: { status: 400, params: ['field'] },
   [ErrCode.CONFIG_IMPORT_DUPLICATE_PROVIDER_ID]: { status: 400, params: ['id'] },
+  [ErrCode.CONFIG_IMPORT_UNKNOWN_GATEWAY_KEY]: { status: 400, params: ['key'] },
+  [ErrCode.CONFIG_IMPORT_BAD_API_ENDPOINT]: { status: 400 },
+  [ErrCode.CONFIG_IMPORT_BAD_API_KEY]: { status: 400 },
+  [ErrCode.CONFIG_IMPORT_BAD_CONTEXT_WINDOW]: { status: 400 },
 }
 
 /** REST 错误响应体（唯一形状；code 放宽为 string 以容忍未知码） */

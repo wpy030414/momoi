@@ -571,13 +571,15 @@ App
 │     │           ├── MessageContent（Markdown + Mermaid）
 │     │           └── SuggestionChips
 │     ├── InputBar（文本输入 + 附件 + 思考模式 + 无限模式开关 + 发送）
-├── AdminScreen（密钥认证）
-│     ├── AgentManager（Agent CRUD + TTS 语音配置）
-│     ├── GatewaySettings（API 地址 + 密钥）
+├── AdminScreen（密钥认证；侧边栏顺序 = ADMIN_TABS 顺序）
+│     ├── ConfigTransfer（配置 YAML 导出/导入；两个方向都需 PIN 二次校验）
+│     ├── GatewaySettings（API 地址 + 密钥 + 上下文窗口 + 4 个功能开关）
 │     ├── ExperienceSettings（应用名称 + Favicon + 背景图 + 首页推荐问题 + 聊天常用追问）
+│     ├── AgentManager（Agent CRUD + TTS 语音配置）
+│     ├── McpManager（MCP 服务器 CRUD）
 │     ├── SkillManager（技能管理）
-│     ├── McpServerManager（MCP 服务器 CRUD）
-│     └── StatsPanel（统计 + 对话浏览）
+│     ├── UserManager（用户管理，standAlone 下隐藏）
+│     └── ReviewPanel（对话审查）
 ├── MenuDialog（语言/主题/管理员/修改 PIN/登出）
 └── ChangePinDialog
 ```

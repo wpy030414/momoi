@@ -1369,3 +1369,43 @@
 - `InputBar` 状态条：`工作区 | 累计 N tok | 耗时 · tok/s | 上下文 P%`；`formatTokenCount` 支持 `M` 级；存量快照缺字段的簇整簇隐藏
 - 回归测试：`apps/server/test/stats.test.ts`（15 断言，伪造 fetch 驱动真实 `runPiAgentLoop`）+ `apps/server/test/conversation-stats.test.ts`（12 断言，纯函数），均不依赖 .env / 数据库 / 磁盘
 - 契约见 `docs/specs/module-chat.md`〈会话状态条〉
+
+
+---
+
+## D53：配置导入导出纳入网关段（含明文 api_key）+ 端到端 PIN 二次校验
+
+**日期**：2026-09-30
+
+**背景**：`buildExportBundle` 只导出 `experience / agents / users` 三段，并在代码、类型、文档、测试四处明文写着「**绝不导出** api_endpoint/api_key」。结果是换机器或灾备时，最关键的网关配置（端点、密钥、上下文窗口、4 个开关）反而要手抄——bundle 自称「跨实例迁移」工具，却恰好搬不走迁移时最需要的那部分。另外两处版式问题同类：后台「配置」页挂在「网关」下方，而它承担的是整机迁移这类更高层动作；网关页的「模型上下文窗口」被 4 个功能开关与「端点/密钥」隔开，同属连接参数的两项不挨着。
+
+**决策**：
+1. 新增顶层 `gateway` 段（7 字段，与网关页一一对应），导出**生效值**（`map.get(key) || env.*`），**含 `api_key` 明文**
+2. `BUNDLE_VERSION` 保持 1——新段是可选增量，旧文件照常通过校验；升到 2 会让 `version !== BUNDLE_VERSION` 拒收所有既存文件
+3. 应用顺序改为 `gateway → experience → users → agents`，且 gateway 单独占一次 `updateConfig`，**不可与 experience 合并**
+4. 导出与导入的**正式落库**都需 PIN 二次校验；**每次导出都重新验**，导入的 dry-run 不验
+5. 导出端点 `GET` → `POST`（PIN 放请求体，不进 URL/日志）；导出/导入两个端点加入前端 `CREDENTIALS_ENDPOINTS`
+6. 侧边栏「配置」上移到「网关」之上（默认落地页仍是网关）；网关页 `context_window` 上移到 `api_key` 之下
+7. `gateway.api_endpoint` **不做** URL 形态校验
+
+**依据**：
+- **为什么要推翻「绝不导出密钥」**：那条不变量的收益是「文件可安全分享」，代价是灾备不完整——而真正被需要的是换机，两者不可兼得时取迁移完整性。且这**不是新增暴露面**：`GET /api/admin/config` 早已明文回传 `api_key`（`module-config.md`〈API Key 未脱敏〉记录了这条既有事实）。既然密钥在会话里本就明文可见，旧不变量掩盖的其实是「导出」这个**动作**，而不是密钥的存在——真正该补的是对这个动作的身份确认，而不是假装密钥不外流
+- **为什么是 PIN**：复用既有的 `verifyPin` + IP 失败计数，零新错误码、零新表、零新失效逻辑。代价必须承认：导出把密钥从「会话内的一个响应」变成「落盘的文件」——可离线传播、永不过期，风险等级确实更高，所以门禁加在动作上
+- **为什么每次导出都验（否掉「验一次发短期令牌」）**：令牌需要新的存储与失效规则，而导出的频率本就极低（迁移/备份时），每次重输的摩擦可以忽略——用一套状态机换来的便利不值
+- **为什么 dry-run 不验**：它不写库，摘要也只承载字段名（`ImportSummary` 的类型注释里写死这条）。把门禁挪到预检只会让反复试导变得难受，防线却一寸未增
+- **为什么 gateway 必须最先落库**：`use_external_image_hosting` 决定后面 favicon/background/avatar 的 base64 是否转 CDN，而 `maybeUploadDataUrl` 实时调 `isExternalImageHostingEnabled()`——**直读 `settings` 表，不走 config 缓存**。上传判定发生在任何写入之前，因此「同一份文件既开图床又带 base64 图片」只有在开关先落库时才成立；合并成一次 `updateConfig` 会静默失效
+- **为什么 `api_endpoint` 不校验 URL 形态**：`PUT /api/admin/config` 本身零校验，且 `.env` 里 `localhost:11434/v1` 这类无 scheme 写法很常见——强求 http(s) 会让**自家导出的文件被自家拒收**。`isHttpUrl` 是给图片值与 OAuth URL 写的，不该扩用到此处
+- **为什么导出「生效值」而不是 `settings` 原始行**：后者不泄露 `.env` 密钥，但 `.env`-only 实例导出的文件对迁移毫无用处，与需求直接冲突。代价（`.env` 密钥被带走 + 目标实例的该值被钉住、此后改 `.env` 不再生效）记录在 `module-config.md` 的导出范围一节与本条决策里，而不是留作暗坑——**不**占用界面文案：导出页的警示只保留一句「导出文件含 API 和 OAuth2 密钥，请谨慎保管该文件。」（三语同款短句）
+- **为什么 `BUNDLE_VERSION` 不升**：新段可选，v1 文件（无 gateway）仍全部有效；反之升 2 会拒收所有既存文件，而「向前兼容」本来就做不到——新文件打到旧服务端会撞顶层白名单报 `UNKNOWN_TOP_KEY`，报错信息比 `BAD_VERSION` 更具体，没有损失
+
+**影响**：
+- `packages/shared/src/types.ts`：新增 `ConfigExportGateway`、`ConfigExportBundle.gateway`、`ImportSummary.gateway`
+- `packages/shared/src/errors.ts`：新增 4 个 `CONFIG_IMPORT_*` 码（`UNKNOWN_GATEWAY_KEY` / `BAD_API_ENDPOINT` / `BAD_API_KEY` / `BAD_CONTEXT_WINDOW`）；**`BAD_API_KEY` 刻意不带 params**，避免模板插值把密钥回显进错误消息。`error-registry-i18n.test.ts` 的码数基线 150 → 154
+- `lib/config-transfer.ts`：`GATEWAY_KEYS`、`validateGateway`、`computePlan`/`planToSummary` 增 gateway、`applyImportBundle` 首步写 gateway
+- `routes/admin.ts`：`requirePin`（standAlone 短路）、export 改 POST 并加 `Cache-Control: no-store`、import 在落库前 `requirePin`
+- `lib/api.ts`：`exportConfig(pin)` / `importConfig(content, pin)`；`CREDENTIALS_ENDPOINTS` 增两条（否则一次 PIN 打错会被通用 401 路径清会话登出）
+- `ConfigTransfer.tsx`：新增 `PinForm`——导出用独立弹窗，导入在预检弹窗内**原地切换**到 PIN 视图（不叠 Radix 弹窗）
+- `AdminSidebar.tsx`：`ADMIN_TABS` 顺序；`GatewaySettings.tsx`：`context_window` 上移
+- i18n 三语：4 个 `errors.*`、`configSummaryGateway`、`configPin*`；**改写** `configExportDesc` / `configExportSecretWarn`（原文写着「不包含网关密钥与 API Key」，已为假）
+- 测试：`config-transfer.test.ts` 48 项（导出白名单断言由「不含」翻转为「含」；**fake 的 `updateConfig` 必须联动 `externalHosting`**，否则顺序断言测不出东西）
+- 文档：`module-config.md`（导出范围/校验规则/接口契约/应用顺序/PIN 门控；顺带订正 `support_attachments`、`support_infinite_mode` 的默认值——代码是 `!== 'false'` 即默认 true，文档原写 false）、`module-admin.md`（面板小节已过期：写「6 个标签页」且含 `Branding`，更正为当前 8 个 tab 与实际顺序）

@@ -185,16 +185,20 @@
 
 > 插件系统已移除（commit 3530176），相关端点不再存在。
 
-## 前端面板（SettingsDialog）
+## 前端面板（AdminScreen）
 
-6 个标签页：
+8 个标签页，顺序即 `AdminSidebar.tsx` 的 `ADMIN_TABS` 数组顺序（数组只驱动渲染顺序，tab 内容由 `AdminPanelMain.tsx` 按字符串相等选中；默认落地页是硬编码的 `DEFAULT_ADMIN_TAB = 'gateway'`，与数组顺序无关）：
 
-1. **Agent** — Agent 列表 / 创建 / 编辑 / 删除（中立 Agent 不可删除，名称/头像不可修改）
-2. **Gateway** — API 地址、密钥（密钥输入框为 `type=password` 遮挡显示 + 明文切换按钮）
-3. **Branding** — 应用名称、Favicon（上传转 base64）、聊天背景图
-4. **MCP** — MCP 服务器管理（添加/编辑/删除/启用禁用），存储于 `mcp_servers` 表
-5. **Skills** — 技能列表 / 上传 / 卸载
-6. **Stats** — 用户/对话/消息统计 + 对话表格（可展开查看消息）
+1. **配置**（`config`）— 设置数据的 YAML 导出/导入；两个方向都需 PIN 二次校验（见 `module-config.md`）
+2. **网关**（`gateway`）— API 地址、密钥（`type=password` 遮挡 + 明文切换）、模型上下文窗口、4 个功能开关
+3. **体验**（`experience`）— 应用名称、Favicon（上传转 base64）、聊天背景图、首页推荐问题、聊天常用追问
+4. **智能体**（`agent`）— Agent 列表 / 创建 / 编辑 / 删除（中立 Agent 不可删除，名称/头像不可修改）
+5. **MCP**（`mcp`）— MCP 服务器管理（添加/编辑/删除/启用禁用），存储于 `mcp_servers` 表
+6. **技能**（`skills`）— 技能列表 / 上传 / 卸载
+7. **用户**（`users`）— 用户管理与统计（standAlone 模式下隐藏）
+8. **审查**（`review`）— 对话内容审查
+
+`#/settings/<tab>` 深链可直达任一页；`branding` 是 `experience` 的历史别名，仍被路由守卫归一化。
 
 管理面板（`AdminScreen`）复用登录用户的 HttpOnly Cookie：同源请求由浏览器自动携带，服务端由 `adminAuthMiddleware` 校验名单。路由守卫保证只有 `/me` 返回 `is_admin: true` 的用户能进入 `#/settings`。
 

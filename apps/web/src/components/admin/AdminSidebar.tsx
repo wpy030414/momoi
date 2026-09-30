@@ -12,8 +12,8 @@ interface AdminSidebarProps {
 }
 
 export const ADMIN_TABS = [
-  { value: 'gateway', labelKey: 'settings.tabGateway', Icon: Globe },
   { value: 'config', labelKey: 'settings.tabConfig', Icon: ArrowLeftRight },
+  { value: 'gateway', labelKey: 'settings.tabGateway', Icon: Globe },
   { value: 'experience', labelKey: 'settings.tabExperience', Icon: Palette },
   { value: 'agent', labelKey: 'settings.tabAgent', Icon: Bot },
   { value: 'mcp', labelKey: 'settings.tabMcp', Icon: Server },

@@ -1,8 +1,10 @@
 /**
  * 配置导入导出（Config transfer）
  *
- * 导出：从 DB 收集「体验 + 智能体（除声线）+ 用户注册设置」为 version 1 的
- * YAML 包（config-output-${Date.now()}.yml）。绝不包含网关密钥与 voice 字段。
+ * 导出：从 DB 收集「网关 + 体验 + 智能体（除声线）+ 用户注册设置」为 version 1 的
+ * YAML 包（config-output-${Date.now()}.yml）。**含 api_endpoint/api_key 明文**——
+ * 文件等同凭证，两个端点的路由层都要求 PIN 二次校验（见 routes/admin.ts 的 requirePin）。
+ * 仍不含声线（voice_*）字段。
  *
  * 导入：YAML 解析（maxAliasCount/merge 防护）→ 白名单严格校验（错误以 ErrCode
  * （CONFIG_IMPORT_*）+ params 结构化，前端按 errors.<code> 渲染）→ dry-run 摘要 /
@@ -18,12 +20,13 @@ import { randomUUID } from 'crypto'
 import YAML from 'yaml'
 import { ErrCode } from '@momoi/shared/errors'
 import { NEUTRAL_AGENT_ID, NEUTRAL_AGENT_NAME } from '@momoi/shared/constants'
-import type { Agent, AppConfig, ConfigExportBundle, ImportIssue, ImportSummary, OAuth2Provider } from '@momoi/shared/types'
+import type { Agent, AppConfig, ConfigExportBundle, ConfigExportGateway, ImportIssue, ImportSummary, OAuth2Provider } from '@momoi/shared/types'
 
 export const BUNDLE_VERSION = 1
 export const MAX_IMPORT_BYTES = 10 * 1024 * 1024
 
 const EXPERIENCE_KEYS = ['app_name', 'app_favicon', 'app_background', 'show_github', 'recommended_questions', 'followup_questions'] as const
+const GATEWAY_KEYS = ['api_endpoint', 'api_key', 'context_window', 'support_attachments', 'support_infinite_mode', 'use_external_image_hosting', 'allow_im_conversations'] as const
 const AGENT_KEYS = ['id', 'role', 'name', 'model', 'system_prompt', 'avatar'] as const
 const PROVIDER_KEYS = ['id', 'name', 'client_id', 'client_secret', 'authorize_url', 'token_url', 'userinfo_url', 'scopes'] as const
 
@@ -70,7 +73,16 @@ export async function buildExportBundle(deps?: TransferDeps): Promise<ConfigExpo
   return {
     version: BUNDLE_VERSION,
     exported_at: new Date().toISOString(),
-    // 手工挑白名单字段——绝不整体序列化 AppConfig（含 api_endpoint/api_key）
+    // 手工挑白名单字段——绝不整体序列化 AppConfig（其余键如 tts_*、JWT/VAPID 不在导出范围）
+    gateway: {
+      api_endpoint: config.api_endpoint,
+      api_key: config.api_key,
+      context_window: config.context_window,
+      support_attachments: config.support_attachments,
+      support_infinite_mode: config.support_infinite_mode,
+      use_external_image_hosting: config.use_external_image_hosting,
+      allow_im_conversations: config.allow_im_conversations,
+    },
     experience: {
       app_name: config.app_name,
       app_favicon: config.app_favicon,
@@ -160,7 +172,7 @@ export function validateImportBundle(raw: unknown, ctx: ValidateContext): Valida
 
   // --- 顶层白名单 ---
   for (const key of Object.keys(raw)) {
-    if (!['version', 'exported_at', 'experience', 'agents', 'users'].includes(key)) {
+    if (!['version', 'exported_at', 'gateway', 'experience', 'agents', 'users'].includes(key)) {
       errors.push({ path: key, code: ErrCode.CONFIG_IMPORT_UNKNOWN_TOP_KEY, params: { key } })
     }
   }
@@ -174,6 +186,7 @@ export function validateImportBundle(raw: unknown, ctx: ValidateContext): Valida
     if (!ok) errors.push({ path: 'exported_at', code: ErrCode.CONFIG_IMPORT_BAD_EXPORTED_AT })
   }
 
+  const gateway = raw.gateway !== undefined ? validateGateway(raw.gateway, errors) : undefined
   const experience = raw.experience !== undefined ? validateExperience(raw.experience, errors) : undefined
   const agents = raw.agents !== undefined ? validateAgents(raw.agents, ctx, errors, warnings) : undefined
   const users = raw.users !== undefined ? validateUsers(raw.users, errors) : undefined
@@ -181,7 +194,7 @@ export function validateImportBundle(raw: unknown, ctx: ValidateContext): Valida
   // 段的存在性以原始键为准（而非归一化结果）：段内所有条目/字段均无实际
   // 变更（如中立条目只带 avatar）时归一化产物为空，但该段依然是"有效导入"
   // ——只产生 warning，不构成 empty。
-  if (raw.experience === undefined && raw.agents === undefined && raw.users === undefined) {
+  if (raw.gateway === undefined && raw.experience === undefined && raw.agents === undefined && raw.users === undefined) {
     errors.push({ path: '', code: ErrCode.CONFIG_IMPORT_EMPTY })
   }
 
@@ -189,10 +202,71 @@ export function validateImportBundle(raw: unknown, ctx: ValidateContext): Valida
 
   const bundle: ConfigExportBundle = { version: BUNDLE_VERSION }
   if (raw.exported_at !== undefined) bundle.exported_at = String(raw.exported_at)
+  if (gateway) bundle.gateway = gateway
   if (experience) bundle.experience = experience
   if (agents) bundle.agents = agents
   if (users) bundle.users = users
   return { ok: true, bundle, errors, warnings }
+}
+
+function validateGateway(v: unknown, errors: ImportIssue[]): ConfigExportGateway | undefined {
+  if (!isPlainObject(v)) {
+    errors.push({ path: 'gateway', code: ErrCode.CONFIG_IMPORT_BAD_SECTION, params: { section: 'gateway' } })
+    return undefined
+  }
+  const out: ConfigExportGateway = {}
+  for (const key of Object.keys(v)) {
+    if (!(GATEWAY_KEYS as readonly string[]).includes(key)) {
+      errors.push({ path: `gateway.${key}`, code: ErrCode.CONFIG_IMPORT_UNKNOWN_GATEWAY_KEY, params: { key } })
+      continue
+    }
+    const val = v[key]
+    switch (key) {
+      case 'api_endpoint': {
+        // 不校验 URL 形态：PUT /api/admin/config 本身零校验，且 .env 里
+        // `localhost:11434/v1` 这类无 scheme 写法很常见——强制 http(s) 会让
+        // 自家导出的文件被自家拒收（isHttpUrl 只服务于图片与 OAuth URL）。
+        if (typeof val !== 'string' || val.trim().length < 1 || val.trim().length > 500) {
+          errors.push({ path: 'gateway.api_endpoint', code: ErrCode.CONFIG_IMPORT_BAD_API_ENDPOINT })
+        } else {
+          out.api_endpoint = val.trim()
+        }
+        break
+      }
+      case 'api_key': {
+        // 长度 500 对齐 PROVIDER_* 的先例；不做 trim（密钥是不透明字节）。
+        // 空串合法 = 清空 settings 行，读取时回落 .env。
+        if (typeof val !== 'string' || val.length > 500) {
+          errors.push({ path: 'gateway.api_key', code: ErrCode.CONFIG_IMPORT_BAD_API_KEY })
+        } else {
+          out.api_key = val
+        }
+        break
+      }
+      case 'context_window': {
+        // 比读取路径更严：parseContextWindow 会把非法值静默夹成 128000，
+        // 那正是导入校验该拦下的静默错误。
+        if (typeof val !== 'number' || !Number.isInteger(val) || val < 1 || val > 10_000_000) {
+          errors.push({ path: 'gateway.context_window', code: ErrCode.CONFIG_IMPORT_BAD_CONTEXT_WINDOW })
+        } else {
+          out.context_window = val
+        }
+        break
+      }
+      case 'support_attachments':
+      case 'support_infinite_mode':
+      case 'use_external_image_hosting':
+      case 'allow_im_conversations': {
+        if (typeof val !== 'boolean') {
+          errors.push({ path: `gateway.${key}`, code: ErrCode.CONFIG_IMPORT_BAD_BOOLEAN, params: { field: key } })
+        } else {
+          out[key] = val
+        }
+        break
+      }
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined
 }
 
 function validateExperience(v: unknown, errors: ImportIssue[]): ConfigExportBundle['experience'] | undefined {
@@ -502,6 +576,8 @@ async function maybeUploadDataUrl(value: string, filename: string, deps: Transfe
 }
 
 interface ImportPlan {
+  gateway: ImportSummary['gateway']
+  gatewayUpdate: Partial<AppConfig>
   experience: { changed: string[]; unchanged: string[] } | null
   experienceUpdate: Partial<AppConfig>
   agents: ImportSummary['agents']
@@ -516,6 +592,26 @@ interface ImportPlan {
 async function computePlan(bundle: ConfigExportBundle, deps: TransferDeps): Promise<ImportPlan> {
   const [config, existingAgents] = await Promise.all([deps.getConfig(), deps.listAgents()])
   const existingById = new Map(existingAgents.map((a) => [a.id, a]))
+
+  // --- gateway ---
+  let gateway: ImportPlan['gateway'] = null
+  const gatewayUpdate: Partial<AppConfig> = {}
+  if (bundle.gateway) {
+    const changed: string[] = []
+    const unchanged: string[] = []
+    for (const key of GATEWAY_KEYS) {
+      const incoming = (bundle.gateway as Record<string, unknown>)[key]
+      if (incoming === undefined) continue
+      const current = (config as unknown as Record<string, unknown>)[key]
+      if (JSON.stringify(incoming) === JSON.stringify(current)) {
+        unchanged.push(key)
+      } else {
+        changed.push(key)
+        ;(gatewayUpdate as Record<string, unknown>)[key] = incoming
+      }
+    }
+    gateway = { changed, unchanged }
+  }
 
   // --- experience ---
   let experience: ImportPlan['experience'] = null
@@ -626,11 +722,12 @@ async function computePlan(bundle: ConfigExportBundle, deps: TransferDeps): Prom
   // 段缺省时摘要为 null（与 agents 同语义）
   const users: ImportSummary['users'] = bundle.users === undefined ? null : usersOut
 
-  return { experience, experienceUpdate, agents, agentOps, users, directOpen, oauthOpen, mergedProviders }
+  return { gateway, gatewayUpdate, experience, experienceUpdate, agents, agentOps, users, directOpen, oauthOpen, mergedProviders }
 }
 
 function planToSummary(plan: ImportPlan): ImportSummary {
   return {
+    gateway: plan.gateway,
     experience: plan.experience,
     agents: plan.agents,
     users: plan.users,
@@ -643,10 +740,19 @@ export async function summarizeImport(bundle: ConfigExportBundle, deps?: Transfe
   return planToSummary(await computePlan(bundle, d))
 }
 
-/** 正式导入：experience → users → agents 顺序应用（无事务，fail-fast） */
+/** 正式导入：gateway → experience → users → agents 顺序应用（无事务，fail-fast） */
 export async function applyImportBundle(bundle: ConfigExportBundle, deps?: TransferDeps): Promise<ImportSummary> {
   const d = deps ?? await loadDefaultDeps()
   const plan = await computePlan(bundle, d)
+
+  // gateway 必须最先落库：feat 里的 use_external_image_hosting 决定下面 favicon/
+  // background/avatar 的 base64 是否转 CDN（maybeUploadDataUrl 实时读该开关，走
+  // settings 表直读而非 config 缓存），同一份文件"开图床 + 带 base64 图片"要让
+  // 开关先生效。因此不能与 experience 合并成同一次 updateConfig——上传判定发生在
+  // 写入之前，合并会让开关失效。
+  if (Object.keys(plan.gatewayUpdate).length > 0) {
+    await d.updateConfig(plan.gatewayUpdate)
+  }
 
   // experience：图片字段过外部图床转换后写入
   if (plan.experienceUpdate.app_favicon !== undefined) {

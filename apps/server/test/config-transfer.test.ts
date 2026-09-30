@@ -39,6 +39,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     app_background: '',
     api_endpoint: 'https://api.openai.com/v1',
     api_key: 'sk-secret',
+    context_window: 128000,
     support_attachments: true,
     support_infinite_mode: true,
     allow_im_conversations: true,
@@ -105,6 +106,12 @@ function makeDeps(overrides: Overrides = {}): Fixture {
     updateConfig: async (partial) => {
       calls.updateConfig.push(partial)
       config = { ...config, ...partial }
+      // 生产里 use_external_image_hosting 落在 settings 表，而
+      // isExternalImageHostingEnabled() 直读该表（不走 config 缓存）。fake 必须同样
+      // 联动，否则「gateway 先于 experience 应用」这条顺序断言测不出任何东西。
+      if (partial.use_external_image_hosting !== undefined) {
+        externalHosting = partial.use_external_image_hosting
+      }
       return config
     },
     listAgents: async () => agents,
@@ -474,15 +481,26 @@ describe('validateImportBundle — users', () => {
 // ---- 导出 / 往返 ----
 
 describe('buildExportBundle + stringify + parse 往返', () => {
-  it('导出只含白名单字段：无 api_key/api_endpoint/voice/created_at', async () => {
+  it('导出含 gateway 七字段（api_key/api_endpoint 明文），仍不含 voice_/created_at', async () => {
     const fx = makeDeps()
     const bundle = await buildExportBundle(fx.deps)
     const text = stringifyExportYAML(bundle)
-    expect(text).not.toContain('sk-secret')
-    expect(text).not.toContain('api.openai.com')
+    expect(text).toContain('sk-secret')
+    expect(text).toContain('api.openai.com')
+    expect(text).toContain('support_attachments')
     expect(text).not.toContain('voice_')
     expect(text).not.toContain('created_at')
-    expect(text).not.toContain('support_attachments')
+    // 段级白名单：整体序列化 AppConfig 会带出 tts_* 等未导出键
+    expect(Object.keys(bundle).sort()).toEqual(['agents', 'experience', 'exported_at', 'gateway', 'users', 'version'])
+    expect(bundle.gateway).toEqual({
+      api_endpoint: 'https://api.openai.com/v1',
+      api_key: 'sk-secret',
+      context_window: 128000,
+      support_attachments: true,
+      support_infinite_mode: true,
+      use_external_image_hosting: false,
+      allow_im_conversations: true,
+    })
   })
 
   it('多行 system_prompt、空数组、空串、OAuth provider 完整往返', async () => {
@@ -515,9 +533,139 @@ describe('buildExportBundle + stringify + parse 往返', () => {
     expect(v.bundle?.experience?.app_favicon).toBe('data:image/png;base64,iVBOR')
     expect(v.bundle?.experience?.recommended_questions).toEqual(['你好', '介绍你自己'])
     expect(v.bundle?.experience?.followup_questions).toEqual([])
+    // gateway 段（含密钥明文）同样原样往返
+    expect(v.bundle?.gateway?.api_key).toBe('sk-secret')
+    expect(v.bundle?.gateway?.api_endpoint).toBe('https://api.openai.com/v1')
+    expect(v.bundle?.gateway?.context_window).toBe(128000)
+    expect(v.bundle?.gateway?.use_external_image_hosting).toBe(false)
     // 多行 system_prompt 块标量往返无损
     expect(v.bundle?.agents?.find((a) => a.id === UUID_A)?.system_prompt).toBe('hello\nworld')
     expect(v.bundle?.users?.oauth_providers).toEqual([provider])
+  })
+})
+
+// ---- gateway 段 ----
+
+describe('validateImportBundle — gateway', () => {
+  it('合法七字段全通过', () => {
+    const r = validateYAML(`
+gateway:
+  api_endpoint: https://api.openai.com/v1
+  api_key: sk-live
+  context_window: 64000
+  support_attachments: false
+  support_infinite_mode: false
+  use_external_image_hosting: true
+  allow_im_conversations: false
+`)
+    expect(r.ok).toBe(true)
+    expect(r.bundle?.gateway).toEqual({
+      api_endpoint: 'https://api.openai.com/v1',
+      api_key: 'sk-live',
+      context_window: 64000,
+      support_attachments: false,
+      support_infinite_mode: false,
+      use_external_image_hosting: true,
+      allow_im_conversations: false,
+    })
+  })
+
+  it('gateway 非映射拒绝（复用 BAD_SECTION + params.section）', () => {
+    const r = validateYAML('gateway: nope\n')
+    expect(r.ok).toBe(false)
+    expect(codes(r.errors)).toEqual([ErrCode.CONFIG_IMPORT_BAD_SECTION])
+    expect(r.errors[0].path).toBe('gateway')
+    expect(r.errors[0].params).toEqual({ section: 'gateway' })
+  })
+
+  it('未知键拒绝并定位到 params.key', () => {
+    const r = validateYAML('gateway:\n  api_key2: x\n  context_window: 1000\n')
+    expect(codes(r.errors)).toEqual([ErrCode.CONFIG_IMPORT_UNKNOWN_GATEWAY_KEY])
+    expect(r.errors[0].path).toBe('gateway.api_key2')
+    expect(r.errors[0].params).toEqual({ key: 'api_key2' })
+  })
+
+  it('api_endpoint：空串/超长拒绝；无 scheme 形态放行（与 PUT /config 的零校验一致）', () => {
+    expect(codes(validateYAML('gateway:\n  api_endpoint: ""\n').errors)).toEqual([ErrCode.CONFIG_IMPORT_BAD_API_ENDPOINT])
+    expect(codes(validateYAML(`gateway:\n  api_endpoint: ${'x'.repeat(501)}\n`).errors)).toEqual([ErrCode.CONFIG_IMPORT_BAD_API_ENDPOINT])
+    // .env 里 localhost:11434/v1 这类写法必须能往返，强求 http(s) 会让自家导出的文件被自家拒收
+    const ok = validateYAML('gateway:\n  api_endpoint: localhost:11434/v1\n')
+    expect(ok.ok).toBe(true)
+    expect(ok.bundle?.gateway?.api_endpoint).toBe('localhost:11434/v1')
+  })
+
+  it('api_key：空串合法（= 清 settings 行回落 .env）；超 500 拒绝；不做 trim', () => {
+    const empty = validateYAML('gateway:\n  api_key: ""\n')
+    expect(empty.ok).toBe(true)
+    expect(empty.bundle?.gateway?.api_key).toBe('')
+    expect(codes(validateYAML(`gateway:\n  api_key: ${'k'.repeat(501)}\n`).errors)).toEqual([ErrCode.CONFIG_IMPORT_BAD_API_KEY])
+    const padded = validateYAML('gateway:\n  api_key: "  sk x  "\n')
+    expect(padded.bundle?.gateway?.api_key).toBe('  sk x  ')
+  })
+
+  it('context_window：0 / 负数 / 小数 / 字符串 / 超上限拒绝，合法整数通过', () => {
+    for (const bad of ['0', '-1', '1.5', '"128000"', '10000001']) {
+      const r = validateYAML(`gateway:\n  context_window: ${bad}\n`)
+      expect(codes(r.errors), `context_window: ${bad}`).toEqual([ErrCode.CONFIG_IMPORT_BAD_CONTEXT_WINDOW])
+    }
+    const ok = validateYAML('gateway:\n  context_window: 1\n')
+    expect(ok.ok).toBe(true)
+    expect(ok.bundle?.gateway?.context_window).toBe(1)
+  })
+
+  it('四个开关非 boolean 拒绝并定位到 params.field', () => {
+    const r = validateYAML('gateway:\n  support_attachments: "true"\n')
+    expect(codes(r.errors)).toEqual([ErrCode.CONFIG_IMPORT_BAD_BOOLEAN])
+    expect(r.errors[0].path).toBe('gateway.support_attachments')
+    expect(r.errors[0].params).toEqual({ field: 'support_attachments' })
+  })
+
+  it('仅 gateway 一段即构成有效导入（EMPTY 判定已含 gateway）', () => {
+    expect(validateYAML('gateway:\n  api_key: x\n').ok).toBe(true)
+    // 段的存在性以原始键为准：空段是"有效但无事发生"，不是 empty
+    expect(validateYAML('gateway: {}\n').ok).toBe(true)
+    // 四段全缺才是 empty
+    expect(codes(validateYAML('version: 1\n').errors)).toEqual([ErrCode.CONFIG_IMPORT_EMPTY])
+  })
+})
+
+describe('gateway 摘要与应用', () => {
+  it('摘要只含文件中出现的键名，绝不携带键值（防 dry-run 回显密钥）', async () => {
+    const fx = makeDeps()
+    const summary = await summarizeImport({ version: 1, gateway: { api_key: 'sk-new', context_window: 128000 } }, fx.deps)
+    expect(summary.gateway).toEqual({ changed: ['api_key'], unchanged: ['context_window'] })
+    expect(summary.experience).toBeNull()
+    expect(summary.agents).toBeNull()
+    expect(summary.users).toBeNull()
+    expect(JSON.stringify(summary)).not.toContain('sk-new')
+  })
+
+  it('应用：只写变化的键，且与 experience 分两次 updateConfig', async () => {
+    const fx = makeDeps()
+    await applyImportBundle({
+      version: 1,
+      gateway: { context_window: 64000, api_key: 'sk-secret' }, // api_key 与库中一致 → 不写
+      experience: { app_name: 'New' },
+    }, fx.deps)
+    expect(fx.calls.updateConfig).toEqual([{ context_window: 64000 }, { app_name: 'New' }])
+    expect(fx.config.context_window).toBe(64000)
+  })
+
+  it('顺序：同一文件开启外部图床时 favicon 的 base64 会被转 CDN（gateway 必须先落库）', async () => {
+    const fx = makeDeps({ __externalHosting: false })
+    await applyImportBundle({
+      version: 1,
+      gateway: { use_external_image_hosting: true },
+      experience: { app_favicon: 'data:image/png;base64,iVBOR' },
+    }, fx.deps)
+    expect(fx.calls.cdnUploads).toEqual(['favicon.png'])
+    expect(fx.config.app_favicon).toBe('https://cdn.example/favicon.png')
+  })
+
+  it('gateway 与库中完全一致时不产生任何写入', async () => {
+    const fx = makeDeps()
+    await applyImportBundle({ version: 1, gateway: { api_endpoint: 'https://api.openai.com/v1' } }, fx.deps)
+    expect(fx.calls.updateConfig).toHaveLength(0)
   })
 })
 

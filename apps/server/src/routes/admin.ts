@@ -1,9 +1,12 @@
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import { sql } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
 import { ErrCode } from '@momoi/shared/errors'
-import { adminAuthMiddleware } from '../lib/auth.js'
+import { adminAuthMiddleware, verifyPin } from '../lib/auth.js'
 import { ApiError } from '../lib/apiError.js'
+import { STAND_ALONE } from '../lib/standalone.js'
+import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../lib/rateLimiter.js'
 import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen, isExternalImageHostingEnabled, getTtsConfig, updateTtsConfig, deleteUserMemories } from '../lib/config.js'
 import { base64ToBuffer, uploadToCdn } from '../lib/cdn.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '@momoi/shared/constants'
@@ -107,13 +110,55 @@ adminRoute.get('/config/env-gateway', async (c) => {
 
 // ---- Config transfer（配置导入导出，见 lib/config-transfer.ts） ----
 
-// Export the limited settings bundle as a downloadable YAML file.
-adminRoute.get('/config/export', async (c) => {
+const PIN_RE = /^\d{4,8}$/
+
+/**
+ * 步进校验（step-up auth）：导出/导入都会搬运 api_key 明文，因此要求管理员重新
+ * 输入自己的 PIN——被盗用的会话不能单靠 JWT 就把密钥打包带走。
+ *
+ * 与 POST /api/user/change-pin 同一套骨架（校验 + IP 失败计数），复用同一批
+ * ErrCode，故三语 locale 无需新增键。失败返回 401 AUTH_INVALID_PIN：前端
+ * lib/api.ts 的 CREDENTIALS_ENDPOINTS 已把这两条路径纳入白名单，401 不会被
+ * 误判成会话过期而清会话。
+ */
+async function requirePin(c: Context, pin: unknown): Promise<void> {
+  // 单机模式没有 PIN 概念（该模式下 adminAuthMiddleware 也直接短路）
+  if (STAND_ALONE) return
+
+  const ip = getClientIp(c)
+  const blocked = checkIpBlocked(ip)
+  if (blocked) {
+    throw new ApiError(ErrCode.USER_RATE_LIMITED, { seconds: blocked.seconds })
+  }
+
+  if (typeof pin !== 'string' || !PIN_RE.test(pin)) {
+    throw new ApiError(ErrCode.USER_PIN_FORMAT)
+  }
+
+  const username = (c as any).get('userId') as string
+  const userRow = await db.select().from(users).where(eq(users.username, username)).get()
+  if (!userRow?.pin_hash) throw new ApiError(ErrCode.USER_PIN_NOT_SET)
+
+  if (!verifyPin(pin, userRow.pin_hash)) {
+    recordPinFailure(ip)
+    throw new ApiError(ErrCode.AUTH_INVALID_PIN)
+  }
+  clearPinFailures(ip)
+}
+
+// Export the settings bundle (gateway + experience + agents + users) as a
+// downloadable YAML file. POST rather than GET so the PIN never lands in a URL
+// (access logs / referrers) — body is `{ pin }`.
+adminRoute.post('/config/export', async (c) => {
+  const body = await c.req.json<{ pin?: unknown }>().catch(() => null)
+  await requirePin(c, body?.pin)
   const bundle = await buildExportBundle()
   const yamlText = stringifyExportYAML(bundle)
   return c.body(yamlText, 200, {
     'Content-Type': 'application/x-yaml; charset=utf-8',
     'Content-Disposition': `attachment; filename="config-output-${Date.now()}.yml"`,
+    // 响应体含 api_key 明文，禁止任何中间层缓存
+    'Cache-Control': 'no-store',
   })
 })
 
@@ -121,8 +166,11 @@ adminRoute.get('/config/export', async (c) => {
 // change summary. Validation failures also return HTTP 200 with the full
 // structured error list — the client's generic error path would collapse
 // them into a single message.
+//
+// PIN 只在正式导入（落库）这一步校验：dry-run 不写库，摘要也只含字段名不含
+// 字段值，拿它当门禁只会让"反复预检"变得难受。
 adminRoute.post('/config/import', async (c) => {
-  const body = await c.req.json<{ content?: unknown }>().catch(() => null)
+  const body = await c.req.json<{ content?: unknown; pin?: unknown }>().catch(() => null)
   if (!body || typeof body.content !== 'string' || body.content.trim() === '') {
     throw new ApiError(ErrCode.ADMIN_CONTENT_REQUIRED)
   }
@@ -152,6 +200,9 @@ adminRoute.post('/config/import', async (c) => {
     const summary = await summarizeImport(validation.bundle)
     return c.json({ ok: true, errors: [], warnings: validation.warnings, summary })
   }
+
+  // 落库前先过 PIN：文件即将被写进 settings 表（含 api_key 明文）
+  await requirePin(c, body.pin)
 
   // 正式导入前重跑完整校验：dry-run 与确认之间服务端状态可能被并发修改
   //（如中立 Agent 已被改名），fail-fast 而不是应用过期数据。
