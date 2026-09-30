@@ -26,6 +26,28 @@ export interface Conversation {
   updated_at: number
   last_read_at?: number
   unread_count?: number
+  /** 创建时锁定的分组工作区；null/缺省 = 未分组（独享会话级沙箱）。
+   *  值永不 UPDATE——悬空值（工作区已删除）按未分组渲染，但沙箱仍锚定 ws-<id>。 */
+  workspace_id?: string | null
+}
+
+/** 会话分组工作区（workspaces 表）：文件夹语义。
+ *  会话创建时锁定一个工作区（或未分组），之后不可移动；
+ *  同一工作区内的会话共享文件沙箱目录 data/workspaces/ws-<id>。 */
+export interface Workspace {
+  id: string
+  user_id: string
+  name: string
+  created_at: number
+  updated_at: number
+}
+
+/** GET /api/conversations/search 响应条目 */
+export interface ConversationSearchResult {
+  conversation: Pick<Conversation, 'id' | 'title' | 'type' | 'agent_id' | 'updated_at' | 'workspace_id'>
+  matched: 'title' | 'content'
+  /** matched='content' 时的命中片段（前后各 ~40 字符，换行已折叠） */
+  snippet?: string
 }
 
 /** 世界模拟的侧表信息（worlds 行）。世界模拟是纯文本群聊的变体：

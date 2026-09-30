@@ -89,6 +89,8 @@
     "WORKSPACE_NOT_FOUND": "工作区不存在",
     "WORKSPACE_INVALID_PATH": "路径无效",
     "WORKSPACE_FILE_NOT_FOUND": "文件不存在",
+    "WS_NAME_REQUIRED": "请输入工作区名称",
+    "WS_NOT_FOUND": "工作区不存在",
     "GROUP_AGENT_ID_REQUIRED": "缺少 agent_id",
     "GROUP_NEUTRAL_AGENT_FORBIDDEN": "中立 Agent 不可加入群组对话",
     "WORLD_AGENTS_REQUIRED": "必须选择至少一个 Agent",

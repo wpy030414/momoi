@@ -32,7 +32,7 @@ const PLACEHOLDERS = (tpl: string): string[] =>
 
 describe('ErrCode 注册表 ↔ 三语 locale 一致性', () => {
   it('注册表码数符合预期（增删码时更新此基线）', () => {
-    expect(CODES.length).toBe(148)
+    expect(CODES.length).toBe(150)
   })
 
   for (const locale of LOCALES) {

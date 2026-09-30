@@ -89,6 +89,8 @@
     "WORKSPACE_NOT_FOUND": "Workspace not found",
     "WORKSPACE_INVALID_PATH": "Invalid path",
     "WORKSPACE_FILE_NOT_FOUND": "File not found",
+    "WS_NAME_REQUIRED": "Workspace name is required",
+    "WS_NOT_FOUND": "Workspace not found",
     "GROUP_AGENT_ID_REQUIRED": "agent_id required",
     "GROUP_NEUTRAL_AGENT_FORBIDDEN": "Neutral agent cannot be added to group chat",
     "WORLD_AGENTS_REQUIRED": "At least one agent is required",

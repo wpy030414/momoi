@@ -89,6 +89,8 @@
     "WORKSPACE_NOT_FOUND": "ワークスペースが見つかりません",
     "WORKSPACE_INVALID_PATH": "無効なパスです",
     "WORKSPACE_FILE_NOT_FOUND": "ファイルが見つかりません",
+    "WS_NAME_REQUIRED": "ワークスペース名を入力してください",
+    "WS_NOT_FOUND": "ワークスペースが見つかりません",
     "GROUP_AGENT_ID_REQUIRED": "agent_id が必要です",
     "GROUP_NEUTRAL_AGENT_FORBIDDEN": "中立エージェントはグループチャットに追加できません",
     "WORLD_AGENTS_REQUIRED": "少なくとも 1 つのエージェントが必要です",

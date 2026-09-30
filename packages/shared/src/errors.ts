@@ -151,6 +151,12 @@ export enum ErrCode {
   WORKSPACE_INVALID_PATH = 'WORKSPACE_INVALID_PATH',
   WORKSPACE_FILE_NOT_FOUND = 'WORKSPACE_FILE_NOT_FOUND',
 
+  // ---- WS（会话分组工作区；文件沙箱沿用上方 WORKSPACE_*，见 DECISIONS） ----
+  /** 新建/重命名工作区时名称为空 */
+  WS_NAME_REQUIRED = 'WS_NAME_REQUIRED',
+  /** 工作区不存在或无权访问（防探测统一 404） */
+  WS_NOT_FOUND = 'WS_NOT_FOUND',
+
   // ---- GROUP ----
   GROUP_AGENT_ID_REQUIRED = 'GROUP_AGENT_ID_REQUIRED',
   GROUP_NEUTRAL_AGENT_FORBIDDEN = 'GROUP_NEUTRAL_AGENT_FORBIDDEN',
@@ -370,6 +376,10 @@ export const ERR_REGISTRY: Readonly<Record<ErrCode, ErrMeta>> = {
   [ErrCode.WORKSPACE_NOT_FOUND]: { status: 404 },
   [ErrCode.WORKSPACE_INVALID_PATH]: { status: 400 },
   [ErrCode.WORKSPACE_FILE_NOT_FOUND]: { status: 404 },
+
+  // WS（会话分组工作区）
+  [ErrCode.WS_NAME_REQUIRED]: { status: 400 },
+  [ErrCode.WS_NOT_FOUND]: { status: 404 },
 
   // GROUP
   [ErrCode.GROUP_AGENT_ID_REQUIRED]: { status: 400 },
