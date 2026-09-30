@@ -113,8 +113,9 @@ export function ChatPanel({
   const atBottomRef = useRef(true)
   const expandedByUserRef = useRef(false)
   const programmaticScrollRef = useRef(false)
-  const scrollAccRef = useRef(0)
-  const prevScrollTopRef = useRef(0)
+  // 收缩判定的锚点：记录「开始记录」时的 scrollTop。只有当前位置相对锚点的
+  // 净位移达到 33vh 才收缩——来回小幅滚动会互相抵消，不会被累计距离误触发。
+  const scrollAnchorRef = useRef(0)
   const [revertedText, setRevertedText] = useState<string>('')
   // 深度思考已移除开关、强制开启（服务端 thinking_mode 恒 true）
   const [inputCollapsed, setInputCollapsed] = useState(false)
@@ -165,26 +166,28 @@ export function ChatPanel({
     if (gridRef.current) {
       gridRef.current.style.backgroundPositionY = `${el.scrollTop * -0.2}px`
     }
-    // Always track the scroll position so delta calculation stays accurate
-    // even when the current event is programmatic.
-    const delta = Math.abs(el.scrollTop - prevScrollTopRef.current)
-    prevScrollTopRef.current = el.scrollTop
-    // Ignore programmatic scrolls (e.g. auto-scroll-to-bottom on new message)
+    // 程序化滚动（新消息自动置底、动画期间钉住底部等）不是用户位移，
+    // 锚点直接跟随到新位置，避免程序化跳变被算成用户滚动。
     if (programmaticScrollRef.current) {
       programmaticScrollRef.current = false
+      scrollAnchorRef.current = el.scrollTop
       return
     }
     const threshold = el.clientHeight * 0.1
     atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold
     // expandedByUserRef is a short-lived guard set on expand-click — ignore
     // layout-shift scrolls during the transition; once it clears, next user
-    // scroll collapses normally.
-    if (expandedByUserRef.current) return
-    // Accumulate scroll distance — collapse only after 33vh of travel
-    scrollAccRef.current += delta
+    // scroll collapses normally. 同步锚点，位移从动画结束处重新起算。
+    if (expandedByUserRef.current) {
+      scrollAnchorRef.current = el.scrollTop
+      return
+    }
+    // 净位移 = 当前位置 − 锚点。来回滚动互相抵消，只有从起点单向
+    // （或净效应）滚出 33vh 才收缩。
+    const displacement = Math.abs(el.scrollTop - scrollAnchorRef.current)
     const minScroll = el.clientHeight * 0.33
-    if (scrollAccRef.current >= minScroll && !inputCollapsedRef.current) {
-      scrollAccRef.current = 0
+    if (displacement >= minScroll && !inputCollapsedRef.current) {
+      scrollAnchorRef.current = el.scrollTop
       inputCollapsedRef.current = true
       setInputCollapsed(true)
     }
@@ -236,11 +239,8 @@ export function ChatPanel({
       if (gridRef.current) {
         gridRef.current.style.backgroundPositionY = `${el.scrollTop * -0.2}px`
       }
-    }
-    // Reset scroll accumulator on conversation switch
-    if (isSwitch) {
-      scrollAccRef.current = 0
-      prevScrollTopRef.current = 0
+      // 置底跳变不算用户位移——锚点跟随到新底部，位移从置底处重新起算
+      scrollAnchorRef.current = el.scrollTop
     }
   }, [messages])
 
@@ -450,7 +450,8 @@ export function ChatPanel({
                 inputCollapsedRef.current = false
                 setInputCollapsed(false)
                 expandedByUserRef.current = true
-                scrollAccRef.current = 0
+                // 位移锚点重置到当前滚动位置，展开后从零重新起算
+                scrollAnchorRef.current = containerRef.current?.scrollTop ?? 0
                 // Release the guard after the expand animation completes
                 setTimeout(() => { expandedByUserRef.current = false }, 350)
               }}
