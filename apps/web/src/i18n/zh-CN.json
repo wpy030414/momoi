@@ -233,6 +233,7 @@
     "noConversations": "暂无对话",
     "workspace": "工作区",
     "ungrouped": "未分组",
+    "noWorkspaces": "暂无工作区",
     "searchConversations": "搜索会话",
     "searchPlaceholder": "搜索会话标题与消息内容",
     "searchNoResults": "没有匹配的会话",

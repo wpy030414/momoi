@@ -233,6 +233,7 @@
     "noConversations": "会話はまだありません",
     "workspace": "ワークスペース",
     "ungrouped": "未分類",
+    "noWorkspaces": "ワークスペースはまだありません",
     "searchConversations": "会話を検索",
     "searchPlaceholder": "タイトルとメッセージ内容を検索",
     "searchNoResults": "一致する会話がありません",

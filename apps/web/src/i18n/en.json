@@ -233,6 +233,7 @@
     "noConversations": "No conversations yet",
     "workspace": "Workspaces",
     "ungrouped": "Ungrouped",
+    "noWorkspaces": "No workspaces yet",
     "searchConversations": "Search Conversations",
     "searchPlaceholder": "Search titles and message content",
     "searchNoResults": "No matching conversations",

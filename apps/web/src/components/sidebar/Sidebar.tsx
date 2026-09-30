@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
 import { MarqueeText } from '../ui/MarqueeText'
-import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen, Brain, Bell, BellOff, Map, Scale, Search, FolderPlus, Folder, ChevronDown, ChevronRight, Archive } from 'lucide-react'
+import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen, Brain, Bell, BellOff, Map, Scale, Search, FolderPlus, ChevronDown, ChevronRight, Archive } from 'lucide-react'
 import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation, Workspace } from '@momoi/shared/types'
@@ -288,7 +288,7 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
 
   return (
     <div className="flex flex-col h-full w-72 bg-card">
-      {/* App name + GitHub */}
+      {/* App name + conversation search（GitHub 已下移至底栏设置左侧） */}
       <div className="flex items-center justify-between px-4 border-b" style={{ height: '60px' }}>
         <h1 className="text-lg font-semibold flex items-center gap-1.5">
           {onShowIntro ? (
@@ -304,16 +304,17 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
           ) : appName}
           {standAlone && <span className="inline-flex items-center justify-center h-[18px] w-[18px] rounded-[4px] bg-black text-white dark:bg-white dark:text-black text-[11px] font-bold leading-none">S</span>}
         </h1>
-        {showGithub && (
-          <a
-            href="https://github.com/wpy030414/momoi"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-          >
-            <Github className="h-4 w-4" />
-          </a>
-        )}
+        {/* 会话搜索：不是工作区专属动作（未分组会话同样要搜），故从工作区标题行上提到
+            此处，取代原先的 GitHub 图标位；GitHub 下移到下方设置左侧。 */}
+        <button
+          type="button"
+          onClick={onOpenSearch}
+          title={t('sidebar.searchConversations')}
+          aria-label={t('sidebar.searchConversations')}
+          className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+        >
+          <Search className="h-4 w-4" />
+        </button>
       </div>
 
       {/* New chat button */}
@@ -334,15 +335,6 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
           {t('sidebar.workspace')}
         </span>
         <span className="flex items-center gap-0.5">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            title={t('sidebar.searchConversations')}
-            onClick={onOpenSearch}
-          >
-            <Search className="h-3.5 w-3.5" />
-          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -369,10 +361,10 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
                   }`}
                   onClick={() => { if (renamingWsId !== ws.id) toggleCollapse(ws.id) }}
                 >
+                  {/* 箭头（折叠/展开）已表明这一行不是会话，无需再放文件夹图标 */}
                   {collapsed
                     ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
                     : <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
-                  <Folder className="h-4 w-4 flex-shrink-0" />
                   {renamingWsId === ws.id ? (
                     <input
                       ref={wsInputRef}
@@ -409,14 +401,31 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
                     </span>
                   )}
                 </div>
-                {!collapsed && members.map(renderConversationItem)}
+                {/* 展开态：一枚浅色竖线（树形引导线）+ 其下会话的强制缩进。
+                    线心落在箭头中点正下方——列表容器 px-2 + 工作区行 px-2 + 箭头宽
+                    14px÷2 = 距侧栏左缘 23px；本容器左缘已在 8px 处，故再缩进 15px。
+                    会话额外 pl-2，使高亮块与竖线之间留出呼吸位。 */}
+                {!collapsed && members.length > 0 && (
+                  <div className="ml-[15px] border-l border-border/60 pl-2 space-y-1">
+                    {members.map(renderConversationItem)}
+                  </div>
+                )}
               </div>
             )
           })}
-          {/* 未分组平铺列表（含删除工作区后的悬空会话） */}
-          {workspaces.length > 0 && ungrouped.length > 0 && (
-            <div className="px-4 pt-2 pb-1">
-              <span className="text-xs font-medium text-muted-foreground/70 uppercase tracking-wider">
+          {/* 无工作区时的占位：工作区小节仍占位（顶替文件夹列表的位置），其下照常是未分组。
+              完全空（连会话也没有）时不显示，交给下方的「暂无对话」统一兜底，避免两条空态并存。 */}
+          {workspaces.length === 0 && conversations.length > 0 && (
+            <p className="py-1.5 text-sm text-muted-foreground text-center">{t('sidebar.noWorkspaces')}</p>
+          )}
+          {/* 未分组平铺列表（含删除工作区后的悬空会话）。
+              「未分组」是与「工作区」平等的小节标题，不是工作区的下级：字号/字重/大小写/
+              颜色一律与上方「工作区」标题同款（全量 text-muted-foreground，不用 /70 浅色）；
+              左缩进也对齐到同一列——本容器已有 px-2，故此处再加 px-2 = 16px，与「工作区」
+              标题的 px-4 等宽。无工作区时同样显示（此时工作区小节由占位文案顶替）。 */}
+          {ungrouped.length > 0 && (
+            <div className="px-2 pt-2 pb-1">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 {t('sidebar.ungrouped')}
               </span>
             </div>
@@ -558,14 +567,27 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
           <span className="text-sm truncate">{currentUser}</span>
         </button>
 
-        {/* Right: settings button with popover */}
-        <button
-          ref={settingsBtnRef}
-          className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-accent/50 transition-colors"
-          onClick={() => { setUserPopoverOpen(false); setSettingsPopoverOpen(!settingsPopoverOpen) }}
-        >
-          <Settings className="h-4 w-4 text-muted-foreground" />
-        </button>
+        {/* Right: GitHub + settings button with popover（GitHub 从顶栏下移至此，
+            置于设置左侧；样式沿用顶栏那枚，与设置按钮同尺寸同色） */}
+        <span className="flex items-center gap-1">
+          {showGithub && (
+            <a
+              href="https://github.com/wpy030414/momoi"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+            >
+              <Github className="h-4 w-4" />
+            </a>
+          )}
+          <button
+            ref={settingsBtnRef}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-accent/50 transition-colors"
+            onClick={() => { setUserPopoverOpen(false); setSettingsPopoverOpen(!settingsPopoverOpen) }}
+          >
+            <Settings className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </span>
       </div>
 
       {/* User popover */}
