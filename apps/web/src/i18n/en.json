@@ -617,13 +617,29 @@
         "title": "Personal & group conversations",
         "body": "Chat quietly with a single AI, or pull several AIs into one group conversation and watch them answer together. Send a document and the AI understands it right away; turn on Infinite Mode and the AI keeps reasoning on its own."
       },
+      "world": {
+        "title": "World Simulation",
+        "body": "Put several AIs into one world: you write its laws, and they reason and interact on their own — watch from the sidelines, or step in whenever you like."
+      },
+      "workspace": {
+        "title": "Workspaces",
+        "body": "Group related conversations into a workspace; they share one file directory, so anything you upload once is readable by every conversation inside — and you can open the document viewer any time. Search, unread badges, archiving, and Markdown export all live in the sidebar."
+      },
       "memory": {
         "title": "AI memory",
         "body": "AIs keep what matters about you in long-term memory and recall it naturally in later conversations. From the memory panel in the sidebar, you can view, edit, or delete each AI's memories at any time."
       },
+      "voice": {
+        "title": "Voice",
+        "body": "Give an AI a voice and its replies are synthesized automatically — tap play above a message bubble and listen, with speed and pitch to taste."
+      },
       "im": {
         "title": "Continue on IM",
         "body": "Bind WeChat or QQ and take any conversation with you — continue it in your IM anytime, anywhere, right from your phone."
+      },
+      "companion": {
+        "title": "Always with you",
+        "body": "Every device on your account stays in sync in real time — say something here, see it there. When you're away, the AI pings you back; the moment you return, it says hello first."
       },
       "finale": {
         "title": "You're all set",
@@ -639,7 +655,16 @@
       "memoryItem1": "Likes a latte in the morning",
       "memoryItem2": "Has a cat named Kuro",
       "memoryItem3": "Is studying volcanology",
-      "imMessage": "Let's keep chatting today!"
+      "imMessage": "Let's keep chatting today!",
+      "worldName": "Mistlands",
+      "worldTurn": "reasoning…",
+      "workspaceName": "Project · Season 2",
+      "imageName": "scene-sketch.png",
+      "docViewerTitle": "World bible",
+      "voiceLabel": "Auto voice",
+      "searchHint": "Search chats…",
+      "pushNudge": "Your AI misses you — come back soon",
+      "greetingText": "Welcome back!"
     }
   },
   "workflow": {

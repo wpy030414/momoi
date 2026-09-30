@@ -1,11 +1,11 @@
-import { Send, MessagesSquare, Users, BookOpen, Brain, Smartphone, Paperclip, Wrench, Infinity as InfinityIcon, Globe, Image, FileText, Shield, Code } from 'lucide-react'
+import { Send, MessagesSquare, Users, BookOpen, Brain, Smartphone, Paperclip, AudioWaveform, Infinity as InfinityIcon, Bell, Image, FileText, Scale, Folder } from 'lucide-react'
 
 /**
- * Introduction page 5 mock — the finale: a glowing send button ready to start
+ * Introduction page 9 mock — the finale: a glowing send button ready to start
  * the first conversation, surrounded by feature bubbles recapping the whole
- * app (chat, group, docs, memory, attachments, infinite mode, IM, admin panel,
- * web, images, files, security, code) plus a few pulsing specks.
- * Purely decorative, semantic tokens only.
+ * app (chat, group, docs, memory, attachments, infinite mode, IM, web, images,
+ * files, world simulation, workspaces, voice, companionship) plus a few
+ * pulsing specks. Purely decorative, semantic tokens only.
  */
 export function MockFinale() {
   const bubble =
@@ -34,7 +34,7 @@ export function MockFinale() {
         <MessagesSquare className="h-3.5 w-3.5" aria-hidden="true" />
       </span>
       <span className={`${bubble} top-0 left-[34%] h-5 w-5 animate-[float-drift_4.4s_ease-in-out_infinite_0.6s]`}>
-        <Globe className="h-2.5 w-2.5" aria-hidden="true" />
+        <Bell className="h-2.5 w-2.5" aria-hidden="true" />
       </span>
       <span className={`${bubble} top-1 right-[7%] h-6 w-6 animate-[float-drift_6.2s_ease-in-out_infinite_1.2s]`}>
         <BookOpen className="h-3 w-3" aria-hidden="true" />
@@ -45,18 +45,18 @@ export function MockFinale() {
         <Brain className="h-3.5 w-3.5" aria-hidden="true" />
       </span>
       <span className={`${bubble} right-0 top-[38%] h-6 w-6 animate-[float-drift_5.4s_ease-in-out_infinite_0.9s]`}>
-        <Shield className="h-3 w-3" aria-hidden="true" />
+        <Scale className="h-3 w-3" aria-hidden="true" />
       </span>
       <span className={`${bubble} right-0 bottom-[28%] h-5 w-5 animate-[float-drift_4.2s_ease-in-out_infinite_2.4s]`}>
         <Image className="h-2.5 w-2.5" aria-hidden="true" />
       </span>
       <span className={`${bubble} right-[16%] bottom-[16%] h-5 w-5 animate-[float-drift_6.5s_ease-in-out_infinite_2.1s]`}>
-        <Code className="h-2.5 w-2.5" aria-hidden="true" />
+        <Folder className="h-2.5 w-2.5" aria-hidden="true" />
       </span>
 
       {/* Bottom edge: right · mid · left */}
       <span className={`${bubble} bottom-0 right-[5%] h-6 w-6 animate-[float-drift_4.6s_ease-in-out_infinite_1.9s]`}>
-        <Wrench className="h-3 w-3" aria-hidden="true" />
+        <AudioWaveform className="h-3 w-3" aria-hidden="true" />
       </span>
       <span className={`${bubble} bottom-0 left-[38%] h-5 w-5 animate-[float-drift_5.3s_ease-in-out_infinite_1.1s]`}>
         <FileText className="h-2.5 w-2.5" aria-hidden="true" />

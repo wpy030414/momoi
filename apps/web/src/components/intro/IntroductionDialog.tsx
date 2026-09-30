@@ -6,11 +6,14 @@ import { Button } from '../ui/button'
 import { cn } from '../../lib/utils'
 import { MockOverview } from './mocks/MockOverview'
 import { MockChat } from './mocks/MockChat'
+import { MockWorld } from './mocks/MockWorld'
+import { MockWorkspace } from './mocks/MockWorkspace'
 import { MockMemory } from './mocks/MockMemory'
+import { MockVoice } from './mocks/MockVoice'
 import { MockIm } from './mocks/MockIm'
+import { MockCompanion } from './mocks/MockCompanion'
 import { MockFinale } from './mocks/MockFinale'
 
-const PAGE_COUNT = 5
 // Horizontal swipe threshold: horizontal travel must exceed this many px AND
 // exceed the vertical travel, so diagonal scrolls don't flip pages.
 const SWIPE_THRESHOLD_PX = 48
@@ -28,10 +31,19 @@ interface IntroductionPage {
 const PAGES: IntroductionPage[] = [
   { titleKey: 'intro.pages.welcome.title', bodyKey: 'intro.pages.welcome.body', mock: <MockOverview /> },
   { titleKey: 'intro.pages.chat.title', bodyKey: 'intro.pages.chat.body', mock: <MockChat /> },
+  { titleKey: 'intro.pages.world.title', bodyKey: 'intro.pages.world.body', mock: <MockWorld /> },
+  { titleKey: 'intro.pages.workspace.title', bodyKey: 'intro.pages.workspace.body', mock: <MockWorkspace /> },
   { titleKey: 'intro.pages.memory.title', bodyKey: 'intro.pages.memory.body', mock: <MockMemory /> },
+  { titleKey: 'intro.pages.voice.title', bodyKey: 'intro.pages.voice.body', mock: <MockVoice /> },
   { titleKey: 'intro.pages.im.title', bodyKey: 'intro.pages.im.body', mock: <MockIm /> },
+  { titleKey: 'intro.pages.companion.title', bodyKey: 'intro.pages.companion.body', mock: <MockCompanion /> },
   { titleKey: 'intro.pages.finale.title', bodyKey: 'intro.pages.finale.body', mock: <MockFinale /> },
 ]
+
+// Derived, not hard-coded: PAGE_COUNT feeds both the paging clamps and the
+// a11y `{{total}}` copy, so a page added to PAGES must never need a second edit.
+// Declared after PAGES — `const` is in the temporal dead zone above it.
+const PAGE_COUNT = PAGES.length
 
 interface IntroductionDialogProps {
   open: boolean
@@ -41,8 +53,10 @@ interface IntroductionDialogProps {
 }
 
 /**
- * First-use introduction — a 5-page horizontally paged tour (welcome →
- * personal/group conversations → AI memory → continue on IM → finale).
+ * First-use introduction — a horizontally paged tour of the whole app except
+ * the admin panel: welcome → personal/group conversations → world simulation →
+ * workspaces → AI memory → voice → continue on IM → multi-device companionship
+ * → finale. Page count is derived from PAGES.
  * Purely controlled: the "seen" flag (localStorage) is written by the parent
  * in onOpenChange, mirroring ChangePinDialog's contract.
  *
