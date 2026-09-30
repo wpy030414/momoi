@@ -679,7 +679,7 @@
     "createWorld": "Create World",
     "creating": "Creating…",
     "failed": "Failed to create, please retry",
-    "worldTitle": "World Simulation",
+    "worldTitle": "World Simulation ready",
     "editLaws": "Edit World Laws",
     "lawsHint": "Laws take effect immediately after saving and are injected each turn.",
     "lawsPlaceholder": "Rules every being in this world (agents included) must obey",

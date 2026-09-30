@@ -581,7 +581,7 @@ chatRoute.post('/', async (c) => {
             timer = setTimeout(() => resolve(null), SUGGESTIONS_TIMEOUT_MS)
           })
           const suggestions = await Promise.race([
-            generateNeutralSuggestions(config, model, context, extraPrompt),
+            generateNeutralSuggestions(config, model, context, extraPrompt, isWorld),
             timeout,
           ])
           if (timer) clearTimeout(timer)

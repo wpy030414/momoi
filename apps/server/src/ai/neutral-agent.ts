@@ -79,11 +79,13 @@ export async function generateNeutralSuggestions(
   agentModel: string,
   conversationContext: string,
   extraSystemPrompt?: string,
+  isWorld?: boolean,
 ): Promise<string[] | null> {
   try {
+    const worldCtx = isWorld ? { laws: '' } : undefined
     const messages: ChatMessage[] = [
-      { role: 'system', content: buildSuggestionsSystemPrompt({ extra: extraSystemPrompt }) },
-      { role: 'user', content: buildSuggestionsUserMessage({ context: conversationContext }) },
+      { role: 'system', content: buildSuggestionsSystemPrompt({ extra: extraSystemPrompt, world: worldCtx }) },
+      { role: 'user', content: buildSuggestionsUserMessage({ context: conversationContext, world: worldCtx }) },
     ]
 
     let raw = ''

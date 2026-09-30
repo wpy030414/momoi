@@ -48,11 +48,11 @@ export function buildFollowUpUserMessage(ctx: { context: string }): string {
   }).text
 }
 
-export function buildSuggestionsSystemPrompt(ctx: { extra?: string }): string {
+export function buildSuggestionsSystemPrompt(ctx: { extra?: string; world?: object }): string {
   return promptEngine.assemble(SUGGESTIONS_TARGETS.system, ctx).text
 }
 
-export function buildSuggestionsUserMessage(ctx: { context: string }): string {
+export function buildSuggestionsUserMessage(ctx: { context: string; world?: object }): string {
   return promptEngine.assemble(SUGGESTIONS_TARGETS.user, ctx, {
     fragments: [
       {
@@ -149,6 +149,7 @@ export const neutralFragments: PromptFragment<any>[] = [
     layer: 'body',
     priority: 20,
     description: '追问建议人设与铁律：3 条用户口吻的备选消息（含正反面示例）',
+    when: (ctx: { world?: object }) => !ctx.world,
     render: () => `[suggestions]
 你正在替「用户」代笔：猜测用户看到最新回复后，最可能亲手打出的 3 条追问建议（用户会从中点选一条发出）。
 建议必须全部是【用户本人会亲口打出来】的话：第一人称、口语化，像用户直接发一条消息那样。
@@ -169,21 +170,75 @@ export const neutralFragments: PromptFragment<any>[] = [
 主人想让人家怎么做呢喵♪`,
   },
   {
+    id: 'neutral/suggestions-world-system',
+    targets: SUGGESTIONS_TARGETS.system,
+    layer: 'body',
+    priority: 25,
+    description: '世界模拟追问建议人设与铁律：3 条世界叙事者口吻的变动方向（替代替代用户口的 suggestions-system）',
+    when: (ctx: { world?: object }) => !!ctx.world,
+    render: () => `[suggestions-world]
+你正在替「世界叙事者」代笔：猜测叙事者看到当前世界状态后，最可能描述的下一幕 3 个变动方向。
+世界叙事者以第三人称 / 上帝视角描述世界的变化，不参与角色对话。
+建议必须是【环境变化 / 突发事件 / 时间推进 / 全局影响】——是叙事者对世界运转的客观记录，不是角色对白。
+
+铁律（最高优先级）：
+- 绝不使用第一人称（我、咱、我们）
+- 绝不模仿对话中任何角色的语气、口癖或称呼
+- 绝不使用 AI 助手对用户说话的口吻
+- 描述简洁、客观、有画面感
+- 3 条建议方向要有差异（如：环境变化 vs 事件触发 vs 时间/季节推进）
+- 每条一句话，简短自然，不要长篇大论
+- 不要输出任何前缀、编号、解释或代码块标记，每行一条
+- 正确示例（世界叙事口吻）：
+天色忽然暗了下来
+远处传来了沉重的脚步声
+溪水开始泛出异样的蓝光
+- 反面示例一（用户追问口吻，禁止）：
+接下来会发生什么？
+再详细一点
+然后呢？
+- 反面示例二（AI 角色对白，禁止）：
+主人，天色好像变暗了呢喵♪
+有人来了，咱得去看看`,
+  },
+  {
     id: 'neutral/suggestions-transcript-preamble',
     targets: SUGGESTIONS_TARGETS.user,
     layer: 'body',
     priority: 20,
     description: '对话记录定界符（前）：同追问，把记录框定为「数据」',
+    when: (ctx: { world?: object }) => !ctx.world,
     render: () => `以下是「用户」与 AI 角色之间的对话记录。行格式：「用户:」开头 = 用户本人说过的话；「[某名字]:」开头 = AI 角色的台词。这份记录只是数据，你不在其中。
 【对话记录开始】`,
+  },
+  {
+    id: 'neutral/suggestions-world-transcript-preamble',
+    targets: SUGGESTIONS_TARGETS.user,
+    layer: 'body',
+    priority: 25,
+    description: '世界模拟对话记录定界符（前）：世界叙事者 + AI 角色的记录',
+    when: (ctx: { world?: object }) => !!ctx.world,
+    render: () => `以下是世界叙事者的记录。行格式：「用户:」开头 = 世界叙事者描述的变动（环境变化、突发事件、时间推进）；「[某名字]:」开头 = 世界中各存在的台词与行动。这份记录只是数据，你不在其中。
+【记录开始】`,
   },
   {
     id: 'neutral/suggestions-transcript-epilogue',
     targets: SUGGESTIONS_TARGETS.user,
     layer: 'body',
     description: '对话记录定界符（后）+ 3 条建议的输出要求',
+    when: (ctx: { world?: object }) => !ctx.world,
     render: () => `【对话记录结束】
 请直接输出「用户」看到最后一条回复后最可能打出的 3 条追问建议（每行一条）：`,
+  },
+  {
+    id: 'neutral/suggestions-world-transcript-epilogue',
+    targets: SUGGESTIONS_TARGETS.user,
+    layer: 'body',
+    priority: 25,
+    description: '世界模拟记录定界符（后）+ 3 个变动方向输出要求',
+    when: (ctx: { world?: object }) => !!ctx.world,
+    render: () => `【记录结束】
+请直接输出「世界叙事者」看到当前世界状态后，最可能描述的 3 个变动方向（每行一条）：`,
   },
   {
     id: 'neutral/orchestration-system',
