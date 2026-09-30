@@ -883,7 +883,8 @@ export function useChat() {
       case 'done':
         // 单聊对齐 group_done：收到 done 即结束 loading
         // （连接可能还要保持打开，等待中立 Agent 补发 suggestions）
-        if (!remote && !streamsRef.current.get(key)?.infinite) {
+        // 群聊/世界需等待所有 Agent 发言完毕（group_done），不收单 Agent 的 done 解锁
+        if (!remote && !streamsRef.current.get(key)?.infinite && !streamsRef.current.get(key)?.group) {
           setLoadingFor(key, false)
         }
         // remote done 在无限演算中不清 TTL：每轮 done 之后还有
