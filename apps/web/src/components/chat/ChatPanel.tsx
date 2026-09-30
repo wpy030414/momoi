@@ -314,6 +314,7 @@ export function ChatPanel({
                 stats={stats}
                 contextWindow={contextWindow}
                 conversationWorkspaceName={conversationWorkspaceName}
+                onCancel={onCancel}
               />
 
               {/* Recommended questions */}
@@ -411,6 +412,7 @@ export function ChatPanel({
             stats={stats}
             contextWindow={contextWindow}
             conversationWorkspaceName={conversationWorkspaceName}
+            onCancel={onCancel}
           />
         </div>
       )}

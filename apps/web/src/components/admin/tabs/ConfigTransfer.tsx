@@ -305,28 +305,22 @@ export function ConfigTransfer() {
             </div>
           )}
 
-          <DialogFooter>
-            {awaitingPin ? (
-              <Button
-                variant="outline"
-                onClick={() => { setAwaitingPin(false); setPinError('') }}
-                disabled={applying}
-              >
-                {t('common.cancel')}
-              </Button>
-            ) : dialog?.ok ? (
-              <>
-                <Button variant="outline" onClick={closeDialog} disabled={applying}>
-                  {t('common.cancel')}
-                </Button>
-                <Button variant="destructive" onClick={() => { setPinError(''); setAwaitingPin(true) }} disabled={applying || dialog.errors.length > 0}>
-                  {applying ? t('settings.configImportApplying') : t('settings.configImportConfirm')}
-                </Button>
-              </>
-            ) : (
-              <Button variant="outline" onClick={closeDialog}>{t('common.close')}</Button>
-            )}
-          </DialogFooter>
+          {!awaitingPin && (
+            <DialogFooter>
+              {dialog?.ok ? (
+                <>
+                  <Button variant="outline" onClick={closeDialog} disabled={applying}>
+                    {t('common.cancel')}
+                  </Button>
+                  <Button variant="destructive" onClick={() => { setPinError(''); setAwaitingPin(true) }} disabled={applying || dialog.errors.length > 0}>
+                    {applying ? t('settings.configImportApplying') : t('settings.configImportConfirm')}
+                  </Button>
+                </>
+              ) : (
+                <Button variant="outline" onClick={closeDialog}>{t('common.close')}</Button>
+              )}
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
     </div>

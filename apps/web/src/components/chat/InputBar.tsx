@@ -3,9 +3,11 @@ import { useTranslation } from 'react-i18next'
 import { errT } from '../../i18n'
 import { handleAuthOn401 } from '../../lib/api'
 import { toApiError } from '../../lib/apiError'
-import { ArrowUp, Folder, Infinity, Loader2, Paperclip, X, Upload } from 'lucide-react'
+import { ArrowUp, Folder, Infinity, Loader2, Paperclip, Square, X, Upload } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog'
+import { Button } from '../ui/button'
 import type { ConversationStats, Workspace } from '@momoi/shared/types'
 import { formatDuration, formatTokenCount } from '../../lib/format'
 
@@ -62,6 +64,8 @@ interface InputBarProps {
   contextWindow?: number
   /** 当前工作区名称（已有会话用——状态条首字段） */
   conversationWorkspaceName?: string
+  /** AI 生成中取消回调 */
+  onCancel?: () => void
 }
 
 /** Scan backwards from cursorPos to find the last active @mention trigger */
@@ -80,7 +84,7 @@ function detectMention(text: string, cursorPos: number): { query: string; start:
   return null
 }
 
-export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, infiniteMode, onInfiniteModeChange, workspaces, newChatWorkspaceId, onNewChatWorkspaceChange, conversationWorkspaceId, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation, collapsed = false, onExpand, stats, contextWindow = 128000, conversationWorkspaceName }: InputBarProps) {
+export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, infiniteMode, onInfiniteModeChange, workspaces, newChatWorkspaceId, onNewChatWorkspaceChange, conversationWorkspaceId, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation, collapsed = false, onExpand, stats, contextWindow = 128000, conversationWorkspaceName, onCancel }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -96,6 +100,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
   const [mentionQuery, setMentionQuery] = useState('')
   const [mentionIndex, setMentionIndex] = useState(1)
   const [menuPosition, setMenuPosition] = useState<{ bottom: number; left: number } | null>(null)
+  const [stopDialogOpen, setStopDialogOpen] = useState(false)
 
   const isInputDisabled = noAgents
   const cannotSend = disabled || isInputDisabled || uploading
@@ -504,18 +509,52 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
                   </button>
                 )}
                 <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
-                <button
-                  onClick={handleSend}
-                  disabled={cannotSend || !hasContent}
-                  className="inline-flex items-center justify-center p-1.5 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all h-9 w-9"
-                  title={t('chat.send')}
-                >
-                  {disabled ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ArrowUp className="h-4 w-4" />
-                  )}
-                </button>
+                {disabled && onCancel ? (
+                  <>
+                    <button
+                      onClick={() => setStopDialogOpen(true)}
+                      className="inline-flex items-center justify-center p-1.5 rounded-md text-sm bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-all h-9 w-9"
+                      title={t('chat.stopGenerating')}
+                    >
+                      <Square className="h-4 w-4" />
+                    </button>
+                    <Dialog open={stopDialogOpen} onOpenChange={setStopDialogOpen}>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>{t('chat.stopConfirmTitle')}</DialogTitle>
+                          <DialogDescription>{t('chat.stopConfirmDescription')}</DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setStopDialogOpen(false)}>
+                            {t('common.cancel')}
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            onClick={() => {
+                              setStopDialogOpen(false)
+                              onCancel()
+                            }}
+                          >
+                            {t('chat.stopConfirmAction')}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </>
+                ) : (
+                  <button
+                    onClick={handleSend}
+                    disabled={cannotSend || !hasContent}
+                    className="inline-flex items-center justify-center p-1.5 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all h-9 w-9"
+                    title={t('chat.send')}
+                  >
+                    {disabled ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowUp className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </div>

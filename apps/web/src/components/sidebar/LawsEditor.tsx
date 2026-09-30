@@ -58,6 +58,7 @@ export function LawsEditor({ open, onOpenChange, laws, saving, onSave }: LawsEdi
             disabled={!dirty || saving}
             onClick={async () => {
               await onSave(draft)
+              onOpenChange(false)
             }}
           >
             {saving ? t('workflow.saving') : t('workflow.save')}
