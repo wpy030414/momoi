@@ -332,6 +332,7 @@ routes/admin.ts
   ├── prompts/（提示词规则引擎，见 routes/prompts.ts —— 目录 / 单片段 / 预览）
   ├── ai/workbuddy/（WorkBuddy 上游，见 routes/workbuddy.ts —— 微信二维码登录 / 凭证状态 / 退出）
   ├── ai/doubao/（豆包网页上游，见 routes/doubao.ts —— 抖音授权二维码登录 / Cookie 凭证 / 风控标记）
+  ├── ai/models.ts（上游模型目录聚合，见 routes/admin.ts 的 /gateway/models —— Agent 表单模型下拉）
   ├── lib/encrypted-settings.ts（两类上游凭证共用的 AES-256-GCM settings 读写）
   ├── lib/headless-browser.ts（两类上游登录共用的系统 Edge/Chrome 启动器）
   └── skills/loader.ts（技能注册表）
@@ -588,7 +589,7 @@ App
 │     ├── ConfigTransfer（配置 YAML 导出/导入；两个方向都需 PIN 二次校验）
 │     ├── GatewaySettings（上游类型 + API 地址/密钥或内置上游凭证 + 上下文窗口 + 功能开关）
 │     ├── ExperienceSettings（应用名称 + Favicon + 背景图 + 首页推荐问题 + 聊天常用追问）
-│     ├── AgentManager（Agent CRUD + TTS 语音配置）
+│     ├── AgentManager（Agent CRUD + TTS 语音配置；模型下拉来自上游目录，可选自定义）
 │     ├── McpManager（MCP 服务器 CRUD）
 │     ├── SkillManager（技能管理）
 │     ├── UserManager（用户管理，standAlone 下隐藏）

@@ -35,6 +35,8 @@ export const workbuddyConfig = {
   ideVersion: env('WORKBUDDY_IDE_VERSION', '5.8.3'),
 
   chatPath: '/v2/chat/completions',
+  /** 云端模型目录：Agent 表单的模型下拉从这里取（随账号套餐变化） */
+  modelsPath: env('WORKBUDDY_MODELS_PATH', '/v2/enterprises/personal/models'),
   refreshPath: '/v2/plugin/auth/token/refresh',
   statePath: '/v2/plugin/auth/state',
   tokenPath: '/v2/plugin/auth/token',

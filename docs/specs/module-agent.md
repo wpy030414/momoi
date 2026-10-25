@@ -13,7 +13,10 @@ Agent 是独立配置的 AI 角色，每个 Agent 拥有独立的模型、系统
 | `apps/server/src/schema.ts` | agents 表 Drizzle 定义 + group_conversation_agents 关联表 |
 | `apps/server/src/lib/config.ts` | Agent CRUD 函数 + `bootstrapAgents()` 引导逻辑 |
 | `apps/server/src/routes/admin.ts` | Agent 管理 API 端点 |
+| `apps/server/src/ai/models.ts` | 上游模型目录聚合（custom / workbuddy / doubao） |
+| `apps/server/src/ai/workbuddy/models.ts` | WorkBuddy 云端模型目录拉取 |
 | `apps/web/src/components/admin/tabs/AgentManager.tsx` | Agent 管理面板前端组件 |
+| `apps/web/src/components/admin/tabs/ModelPicker.tsx` | 模型下拉（目录 + 自定义输入） |
 
 ## 数据模型
 
@@ -294,6 +297,33 @@ export async function deleteAgent(id: string): Promise<boolean>
 
 **响应**：`{ "success": true }`
 
+## 模型目录与选择
+
+Agent 表单的「模型」是下拉框，打开表单时调用 `GET /api/admin/gateway/models`（`adminAuthMiddleware`）获取**当前上游派发**的模型目录：
+
+| 上游类型 | 目录来源 |
+|---|---|
+| `custom` | `GET {api_endpoint}/models`（OpenAI 兼容；`api_key` 非空时带 `Authorization: Bearer …`） |
+| `workbuddy` | WorkBuddy 云端目录 `GET {WORKBUDDY_BASE_URL}/v2/enterprises/personal/models`（需已登录，401/403 强制续期后重试一次） |
+| `doubao` | 静态预设 `MODEL_PRESETS`（见 `module-doubao.md` 的模型映射） |
+
+**响应**：
+```json
+{
+  "source": "workbuddy",
+  "models": [
+    { "id": "glm-5.3", "name": "GLM-5.3", "vendor": "GLM" }
+  ],
+  "warning": "not_logged_in",
+  "detail": "目录拉取失败时的上游原始错误摘要（排查用）"
+}
+```
+
+- 归一化：去重、丢弃空 id、过滤 `tags` 含 `text-to-image` 的模型；`name` 与 `id` 相同时省略
+- **失败不报错**：目录拉取异常一律返回 `models: []` + `warning`（`not_logged_in` / `upstream_error`），下拉回退为手动输入——模型选择不能成为保存 Agent 的前置条件
+- 前端 `ModelPicker`：目录为空、或当前模型不在目录内时自动切到「自定义」输入框；当前值命中目录则显示为选中项；右上角刷新按钮重新拉取
+- 保存仍只提交 `agent.model` 字符串，服务端不校验模型是否在目录内（上游可能随时增删模型，历史 Agent 必须始终可编辑）
+
 ## 行为约束
 
 1. 默认 Agent 由 `bootstrapAgents()` 在首次启动时自动创建，无需手动配置
@@ -315,3 +345,6 @@ export async function deleteAgent(id: string): Promise<boolean>
 6. 中立 Agent 的 model 和 system_prompt 可正常修改
 7. Agent 删除后不影响已有对话历史
 8. 旧版本全局配置（settings 表中的 model/system_prompt）自动迁移到默认 Agent
+9. 编辑/创建 Agent 时模型为下拉框，选项来自当前上游派发的目录；选中即写入 `model`
+10. 目录拉取失败或需要目录外的模型名时，选「自定义」可手动填写并正常保存
+11. 已保存但不在当前目录内的模型（上游已下线 / 切换了上游）在编辑时仍可见、不被清空

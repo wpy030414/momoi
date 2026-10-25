@@ -10,58 +10,17 @@
  * 响应仍是标准 OpenAI SSE chunk，解析与工具调用聚合沿用 provider.ts 的既有逻辑。
  */
 
-import crypto from 'node:crypto'
 import { ErrCode } from '@momoi/shared/errors'
 import { ApiError } from '../../lib/apiError.js'
 import { workbuddyConfig as cfg } from './config.js'
 import { forceRefresh, getAccessToken } from './token-manager.js'
+import { gatewayHeaders } from './headers.js'
 import type { WorkBuddyCredential } from './credentials.js'
-
-function traceHeaders(): Record<string, string> {
-  const traceId = crypto.randomBytes(16).toString('hex')
-  const spanId = crypto.randomBytes(8).toString('hex')
-  return {
-    'traceparent': `00-${traceId}-${spanId}-01`,
-    'b3': `${traceId}-${spanId}-1-${crypto.randomBytes(8).toString('hex')}`,
-    'X-B3-TraceId': traceId,
-    'X-B3-SpanId': spanId,
-    'X-B3-Sampled': '1',
-  }
-}
-
-/** 网关要求的客户端身份头 + 会话链路头 */
-function gatewayHeaders(credential: WorkBuddyCredential): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Authorization': `Bearer ${credential.accessToken}`,
-    'Content-Type': 'application/json',
-    'Accept': 'text/event-stream',
-    'Accept-Encoding': 'identity',
-    'X-Product': cfg.product,
-    'X-IDE-Type': 'WorkBuddy',
-    'X-IDE-Name': 'WorkBuddy',
-    'X-IDE-Version': cfg.ideVersion,
-    'X-Private-Data': 'true',
-    'User-Agent': `WorkBuddy/${cfg.ideVersion}`,
-    'X-Domain': credential.domain || cfg.domain,
-    'x-requested-with': 'XMLHttpRequest',
-    'X-Conversation-ID': crypto.randomUUID(),
-    'X-Conversation-Request-ID': crypto.randomUUID(),
-    'X-Conversation-Message-ID': crypto.randomUUID(),
-    'X-Request-ID': crypto.randomUUID(),
-    'acp-connection-id': crypto.randomUUID(),
-    'X-Agent-Intent': 'craft',
-    'X-Agent-Purpose': 'conversation',
-    'x-codebuddy-request': '1',
-    ...traceHeaders(),
-  }
-  if (credential.uid) headers['X-User-Id'] = credential.uid
-  return headers
-}
 
 function send(credential: WorkBuddyCredential, body: string, signal: AbortSignal): Promise<Response> {
   return fetch(`${cfg.baseUrl}${cfg.chatPath}`, {
     method: 'POST',
-    headers: gatewayHeaders(credential),
+    headers: gatewayHeaders(credential, { accept: 'text/event-stream', conversation: true }),
     body,
     signal,
   })

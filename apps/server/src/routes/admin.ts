@@ -21,6 +21,7 @@ import { stopBotForUser, stopAllBotsForUser } from '../im/qq/manager.js'
 import { promptsRoute } from './prompts.js'
 import { workbuddyRoute } from './workbuddy.js'
 import { doubaoRoute } from './doubao.js'
+import { listGatewayModels } from '../ai/models.js'
 
 import { repoRoot } from '../lib/paths.js'
 
@@ -55,6 +56,8 @@ adminRoute.use('/workbuddy', adminAuthMiddleware)
 adminRoute.use('/workbuddy/*', adminAuthMiddleware)
 adminRoute.use('/doubao', adminAuthMiddleware)
 adminRoute.use('/doubao/*', adminAuthMiddleware)
+adminRoute.use('/gateway', adminAuthMiddleware)
+adminRoute.use('/gateway/*', adminAuthMiddleware)
 
 // 提示词目录与预览（提示词规则引擎的运行时入口，见 routes/prompts.ts）
 adminRoute.route('/prompts', promptsRoute)
@@ -118,6 +121,13 @@ adminRoute.get('/config/env-gateway', async (c) => {
     api_key: envVars['OPENAI_API_KEY'] || process.env.OPENAI_API_KEY || '',
     model: envVars['OPENAI_MODEL'] || process.env.OPENAI_MODEL || DEFAULT_MODEL,
   })
+})
+
+// 上游模型目录：Agent 表单「模型」下拉的数据源。
+// 拉取失败不报错——models 为空并带 warning，前端回退为手动填写模型 ID。
+adminRoute.get('/gateway/models', async (c) => {
+  const config = await getConfig()
+  return c.json(await listGatewayModels(config))
 })
 
 // ---- Config transfer（配置导入导出，见 lib/config-transfer.ts） ----

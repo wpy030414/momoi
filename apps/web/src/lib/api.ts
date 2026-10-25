@@ -308,6 +308,8 @@ export const api = {
   // automatically; the server additionally checks ADMIN-list membership.
   getConfig: () => request<import('@momoi/shared/types').AppConfig>('/api/admin/config'),
   getEnvGateway: () => request<{ api_endpoint: string; api_key: string; model: string }>('/api/admin/config/env-gateway'),
+  // Admin - 当前上游派发的模型目录（Agent 表单模型下拉；失败时返回空列表 + warning）
+  gatewayModels: () => request<import('@momoi/shared/types').GatewayModelList>('/api/admin/gateway/models'),
   // Admin - WorkBuddy 上游（凭证由服务端托管并后台自动轮换）
   workbuddyStatus: () => request<import('@momoi/shared/types').WorkBuddyStatus>('/api/admin/workbuddy/status'),
   workbuddyLogin: () => request<{ auth_url: string; state: string }>('/api/admin/workbuddy/login', { method: 'POST', body: '{}' }),

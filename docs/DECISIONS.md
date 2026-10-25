@@ -1876,3 +1876,40 @@
 - web：WorkBuddy 凭证面板直接展示微信二维码，移除自动弹窗，保留「打开登录页」回退链接；三语文案同步
 - 测试：`test/workbuddy-token.test.ts` 新增二维码截获 / 超时回退用例；本机真实冒烟在 3.2s 内截获 image/jpeg 二维码
 - 文档：`module-workbuddy.md` 登录流程、环境变量、接口契约与验收标准同步
+
+---
+
+## D67：Agent 模型改为上游目录下拉 + 自定义回退
+
+**日期**：2026-10-25
+
+**背景**：Agent 的 `model` 一直是自由文本输入。切到 WorkBuddy / 豆包上游后，模型 ID 不再是常识（`glm-5.3`、`doubao-expert`……），管理员只能另找文档；写错要等到对话才暴露。
+
+**决策**：
+1. 新增管理端点 `GET /api/admin/gateway/models`，按当前保存的 `gateway_source` 返回模型目录：
+   - `custom`：`GET {api_endpoint}/models`（OpenAI 兼容，`api_key` 非空时带 Bearer）
+   - `workbuddy`：云端目录 `/v2/enterprises/personal/models`（先检查登录态，未登录不发起请求）
+   - `doubao`：`MODEL_PRESETS` 静态预设（网页端没有可编程的目录接口）
+2. Agent 表单的模型字段换成下拉，末尾固定一个「自定义」项；目录为空或当前值不在目录内时自动切到自定义输入。
+3. 目录接口失败不返回 5xx，降级为 `models: []` + `warning`；保存时服务端不校验模型是否在目录内。
+
+**为什么不在保存时校验模型**：
+- ❌ 上游目录随套餐 / 版本变化，硬校验会让历史 Agent 无法保存；
+- ❌ 自定义端点可能只实现 `/chat/completions` 而没有 `/models`；
+- ✅ 下拉只是输入便利，唯一事实仍是 `agent.model` 字符串。
+
+**为什么不做服务端缓存**：
+- 目录没有失效通知；缓存会让「换了套餐 / 换了端点」后的第一次编辑看到旧列表。
+- 每次打开表单拉一次，代价是一次 GET；失败已有降级路径。
+
+**关键取舍**：
+- **WorkBuddy 目录与对话共用身份头**：从 `chat.ts` 抽出 `headers.ts`，目录请求只换 `Accept` 并去掉对话链路头。
+- **文生图模型不进下拉**：`tags` 含 `text-to-image` 的条目被过滤，避免把图像模型选给对话 Agent。
+- **豆包不列短别名**：`doubao` / `doubao-pro` / `doubao-think` 仍可解析，但下拉只列 5 个正式预设，别名走自定义输入。
+
+**影响**：
+- shared：`GatewayModelOption` / `GatewayModelList`
+- server：新增 `ai/models.ts`、`ai/workbuddy/models.ts`、`ai/workbuddy/headers.ts`（从 `chat.ts` 抽出的身份头）；`routes/admin.ts` 新增 `/gateway/models`；`ai/workbuddy/config.ts` 新增 `WORKBUDDY_MODELS_PATH`；`ai/doubao/config.ts` 新增 `listDoubaoModels()`
+- web：新增 `ModelPicker`，`AgentManager` 的模型输入替换为下拉；三语新增文案
+- 测试：`test/gateway-models.test.ts`（custom 归一化 / 失败降级 / doubao 静态 / workbuddy 未登录与目录解析）
+- 文档：`module-agent.md`、`module-config.md`、`module-workbuddy.md`、`module-doubao.md`、`ARCHITECTURE.md`、`PRD.md` 同步

@@ -12,6 +12,7 @@ import { Slider } from '../../ui/slider'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
 import { Pencil, Trash2, Plus, Upload, Copy, Shield, Mic, Volume2 } from 'lucide-react'
 import { useToast } from '../../ui/toast'
+import { ModelPicker } from './ModelPicker'
 
 export interface AgentManagerHandle {
   triggerCreate: () => void
@@ -186,15 +187,7 @@ function AgentRow({
         </div>
       )}
 
-      <div>
-        <label className="text-sm font-medium">{t('settings.agentModel')}</label>
-        <Input
-          value={formModel}
-          onChange={(e) => setFormModel(e.target.value)}
-          placeholder={t('settings.modelPlaceholder')}
-          className="mt-1"
-        />
-      </div>
+      <ModelPicker value={formModel} onChange={setFormModel} />
 
       <div>
         <label className="text-sm font-medium">{t('settings.agentSystemPrompt')}</label>

@@ -23,6 +23,8 @@ Momoi 不再使用自配置的 OpenAI 兼容端点，而是把对话请求转发
 | `apps/server/src/ai/workbuddy/credentials.ts` | 凭证落 `settings` 表，AES-256-GCM 加密（`aesgcm:v1:` 信封） |
 | `apps/server/src/ai/workbuddy/token-manager.ts` | 缓存 → 存储 → 续期编排、登录会话状态机、后台轮换 keeper |
 | `apps/server/src/ai/workbuddy/chat.ts` | 对话转发（认证头 / 401 重试 / 链路头） |
+| `apps/server/src/ai/workbuddy/headers.ts` | 网关客户端身份头（对话与模型目录共用） |
+| `apps/server/src/ai/workbuddy/models.ts` | 云端模型目录拉取（Agent 表单的模型下拉） |
 | `apps/server/src/lib/headless-browser.ts` | 系统 Edge / Chrome 启动器（WorkBuddy / 豆包登录共用） |
 | `apps/server/src/routes/workbuddy.ts` | 管理端点（状态 / 登录 / 登录进度 / 退出） |
 | `apps/server/src/ai/provider.ts` | `gateway_source=workbuddy` 时把请求交给 `chat.ts`，解析逻辑不变 |
@@ -85,6 +87,16 @@ POST /api/admin/workbuddy/login
 | `WORKBUDDY_BROWSER_EXECUTABLE_PATH` | 空 | 指定浏览器可执行文件（容器 / 自定义 Chromium） |
 | `WORKBUDDY_BROWSER_ARGS` | 空 | 追加浏览器启动参数（空格分隔；容器内常需 `--no-sandbox`） |
 | `WORKBUDDY_QR_WAIT_MS` | `30000` | 等待微信二维码的上限；超时回退为「打开登录页」 |
+| `WORKBUDDY_MODELS_PATH` | `/v2/enterprises/personal/models` | 云端模型目录路径（Agent 表单的模型下拉） |
+
+## 模型目录
+
+- 来源：`GET {WORKBUDDY_BASE_URL}{WORKBUDDY_MODELS_PATH}`，响应 `{ data: { models: [{ id, name, vendor, tags }] } }`
+- 身份头与对话转发共用 `headers.ts`；目录请求用 `Accept: application/json`，不带对话链路头
+- 401/403 与转发同语义：强制续期后重试一次
+- 过滤 `tags` 含 `text-to-image` 的模型，去重后返回（契约见 `module-agent.md` 的「模型目录与选择」）
+- 目录拉取失败不影响 Agent 编辑：接口降级为 `models: []` + `warning`，前端回退手动填写
+- 目录不做缓存：每次打开 Agent 表单重新拉取，避免展示套餐已移除的模型
 
 ## 转发行为
 
@@ -111,11 +123,13 @@ POST /api/admin/workbuddy/login
 2. **凭证全局唯一**：与 `api_key` 同级，一次登录全站生效
 3. **不读取本机 WorkBuddy App 登录态**：仅走网页登录，避免绑定特定机器与 App 版本
 4. **失败可恢复**：续期失败只影响 WorkBuddy 上游，切回 `custom` 不受影响
-5. **模型名由管理员指定**：智能体里的 `model` 填 WorkBuddy 模型 ID（如 `glm-5.3`）
+5. **模型名由管理员指定**：Agent 表单的模型下拉来自云端目录；目录外模型选「自定义」
+   手动填写，`model` 仍是 WorkBuddy 模型 ID（如 `glm-5.3`）
 
 ## 验收标准
 
 - 选择 WorkBuddy 后，API 端点/密钥输入框消失，出现凭证面板；右上角「从环境变量加载」按钮一并隐藏（登录入口在凭证面板内）
+- 编辑 Agent 时模型下拉展示该账号的云端目录；未登录时提示先登录，仍可「自定义」手动填写
 - 点击登录 → 面板直接显示**微信扫码二维码**（不自动弹窗）→ 微信扫码确认后凭证面板显示「已登录 + 账号 + 有效期」
 - 服务端没有可用浏览器时，面板不显示二维码，但仍提供「打开登录页」链接可完成登录
 - 服务端重启后无需重新登录；access token 临近过期时表内凭证自动更新（refresh token 轮换）

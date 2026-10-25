@@ -7,6 +7,8 @@
  * 环境变量覆盖（例如豆包升级后需要改 pc_version）。
  */
 
+import type { GatewayModelOption } from '@momoi/shared/types'
+
 function env(key: string, fallback: string): string {
   const v = process.env[key]
   return v !== undefined && v !== '' ? v : fallback
@@ -155,4 +157,12 @@ export function resolveModelPreset(id: string | undefined): DoubaoModelPreset {
   const alias = MODEL_ALIASES[name]
   if (alias && MODEL_PRESETS[alias]) return MODEL_PRESETS[alias]
   return MODEL_PRESETS[DEFAULT_MODEL]
+}
+
+/**
+ * 模型下拉选项：豆包网页端没有可编程的目录接口，直接暴露静态预设。
+ * 短别名不重复列出——需要别名时在 Agent 表单里选「自定义」手动填写。
+ */
+export function listDoubaoModels(): GatewayModelOption[] {
+  return Object.values(MODEL_PRESETS).map((preset) => ({ id: preset.id, name: preset.name }))
 }

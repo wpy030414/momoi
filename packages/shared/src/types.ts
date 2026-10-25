@@ -305,6 +305,29 @@ export interface DoubaoLoginStatus {
   credential?: DoubaoStatus
 }
 
+// ---- 上游模型目录（Agent 表单的模型下拉） ----
+
+/** 上游模型目录中的一项 */
+export interface GatewayModelOption {
+  id: string
+  /** 展示名；缺省或与 id 相同时前端只显示 id */
+  name?: string
+  /** 供应商（WorkBuddy 目录提供，如 GLM / DeepSeek） */
+  vendor?: string
+}
+
+/**
+ * 上游模型目录。拉取失败不抛错：models 为空数组并带 warning，
+ * 管理端据此回退为手动填写模型 ID。
+ */
+export interface GatewayModelList {
+  source: GatewaySource
+  models: GatewayModelOption[]
+  warning?: 'not_logged_in' | 'upstream_error'
+  /** 上游原始错误摘要（排查用，随 warning 展示） */
+  detail?: string
+}
+
 // ---- Agent ----
 
 export interface Agent {

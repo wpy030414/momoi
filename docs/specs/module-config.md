@@ -165,6 +165,9 @@ WorkBuddy 官方网关；`doubao` 时改由 `apps/server/src/ai/doubao/` 转发�
 - 写入收口：`updateConfig` 落库前做同样归一化，避免脏值
 - 配置导入导出：`gateway.gateway_source` 属于 gateway 白名单，枚举外取值报
   `CONFIG_IMPORT_BAD_GATEWAY_SOURCE`；凭证本身不在导出范围内
+- 模型目录：`GET /api/admin/gateway/models` 按当前上游返回 Agent 表单可选的模型
+  （`custom` 请求 `{api_endpoint}/models`，`workbuddy` 拉云端目录，`doubao` 用静态预设；
+  契约见 `module-agent.md` 的「模型目录与选择」）
 
 详见 `module-workbuddy.md` 与 `module-doubao.md`。
 
