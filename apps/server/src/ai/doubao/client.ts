@@ -14,10 +14,13 @@
  */
 
 import { doubaoConfig as cfg, resolveModelPreset, type DoubaoModelPreset } from './config.js'
-import { CookieJar } from './cookie-jar.js'
+import { CookieJar, type CookieRecord } from './cookie-jar.js'
 import { chatHeaders, desktopParams, toQuery, webParams } from './security-params.js'
 import { iterateSse, type SseEvent } from './sse.js'
-import { flattenMessages } from './messages.js'
+import { flattenMessages, UnsupportedMessageError } from './messages.js'
+import { buildAttachmentBlock, uploadAttachments, UploadError, type UploadBatch } from './upload.js'
+import { deleteConversation } from './conversation-cleanup.js'
+import { AUTH_CODES, RISK_CODES } from './error-codes.js'
 import { markNeedsCaptcha } from './risk.js'
 import type { DoubaoSession } from './credentials.js'
 
@@ -29,10 +32,19 @@ export class DoubaoUpstreamError extends Error {
   readonly code?: number
   readonly needsCaptcha?: boolean
   readonly detail?: unknown
+  /** 显式标记是否允许回退到 /samantha；风险 / 鉴权 / 参数错误一律 false */
+  readonly fallbackable?: boolean
 
   constructor(
     message: string,
-    opts: { kind: 'auth' | 'risk' | 'upstream'; status?: number; code?: number; needsCaptcha?: boolean; detail?: unknown },
+    opts: {
+      kind: 'auth' | 'risk' | 'upstream'
+      status?: number
+      code?: number
+      needsCaptcha?: boolean
+      detail?: unknown
+      fallbackable?: boolean
+    },
   ) {
     super(message)
     this.name = 'DoubaoUpstreamError'
@@ -41,6 +53,7 @@ export class DoubaoUpstreamError extends Error {
     this.code = opts.code
     this.needsCaptcha = opts.needsCaptcha
     this.detail = opts.detail
+    this.fallbackable = opts.fallbackable
   }
 }
 
@@ -60,12 +73,11 @@ export interface ChatRequest {
   deepThink?: boolean
   signal?: AbortSignal
   onMode?: (mode: ChatMode) => void
+  /** 发生静默回退时回调（用于日志 / 诊断） */
+  onFallback?: (reason: string) => void
   /** 成功建立上游 SSE 流后回调（供外层清理连接超时） */
   onConnected?: () => void
 }
-
-const RISK_CODES = new Set([710022001, 710022002, 710022003, 710022004, 710022005, 710022006])
-const AUTH_CODES = new Set([710012001, 710012002, 710012003, 710012004])
 
 function randomLocalId(): string {
   return `local_${Math.random().toString(16).slice(2, 10)}${Date.now().toString(16).slice(-8)}`
@@ -106,6 +118,8 @@ interface ParseState {
   inThinking: boolean
   thinkDelimiters: number
   conversationId: string
+  /** 最近一次已展示的思考步骤标题，避免重复 */
+  lastThinkingTitle: string
 }
 
 export class DoubaoClient {
@@ -113,12 +127,34 @@ export class DoubaoClient {
   readonly state: DoubaoSession
   readonly baseUrl: string
   readonly chatMode: 'auto' | 'chat' | 'samantha'
+  /** 最近一次已同步的 Cookie 快照：只有内容变化才回调写回 */
+  private cookieSnapshot: string
+  private readonly onCookiesChanged?: (cookies: CookieRecord[]) => void | Promise<void>
 
-  constructor(state: DoubaoSession, opts: { baseUrl?: string; chatMode?: 'auto' | 'chat' | 'samantha' } = {}) {
+  constructor(
+    state: DoubaoSession,
+    opts: {
+      baseUrl?: string
+      chatMode?: 'auto' | 'chat' | 'samantha'
+      /** 上游轮换了 Cookie（Set-Cookie）时回调，供会话层加密写回 */
+      onCookiesChanged?: (cookies: CookieRecord[]) => void | Promise<void>
+    } = {},
+  ) {
     this.state = state
     this.jar = CookieJar.fromJSON(state.cookies)
     this.baseUrl = (opts.baseUrl || cfg.baseUrl).replace(/\/+$/, '')
     this.chatMode = opts.chatMode || cfg.chatMode
+    this.cookieSnapshot = JSON.stringify(this.jar.toJSON())
+    this.onCookiesChanged = opts.onCookiesChanged
+  }
+
+  /** 吸收上游 Set-Cookie；内容变化时通知会话层写回，避免轮换结果丢失 */
+  private async absorbResponseCookies(response: Response, requestUrl: string): Promise<void> {
+    this.jar.absorb(response.headers, requestUrl)
+    const next = JSON.stringify(this.jar.toJSON())
+    if (next === this.cookieSnapshot) return
+    this.cookieSnapshot = next
+    await this.onCookiesChanged?.(this.jar.toJSON())
   }
 
   /** 把 OpenAI messages 压平并发送；返回上游增量 */
@@ -126,11 +162,47 @@ export class DoubaoClient {
     const preset = resolveModelPreset(req.model)
     const effort = mapEffort(req.reasoningEffort, preset.reasoningEffort)
     const deep = req.deepThink ?? preset.deepThink
-    const { prompt } = flattenMessages(req.messages)
+    const flattened = flattenMessages(req.messages)
+    const prompt = flattened.prompt
     if (cfg.debug) {
-      console.log(`[doubao] prompt chars=${prompt.length} preview=${JSON.stringify(prompt.slice(0, 120))}`)
+      console.log(
+        `[doubao] prompt chars=${prompt.length} attachments=${flattened.attachments.length} ` +
+          `preview=${JSON.stringify(prompt.slice(0, 120))}`,
+      )
     }
-    const { response, kind } = await this.openChat(prompt, preset, effort, deep, req)
+
+    // 当前用户消息的图片 / 文件先上传到豆包 ImageX，再以 10052 附件块发送。
+    // 上传失败不回退 /samantha（旧端点没有附件语义，静默丢弃比报错更糟）。
+    let batch: UploadBatch = { localMessageId: '', attachments: [] }
+    if (flattened.attachments.length > 0) {
+      try {
+        batch = await uploadAttachments(
+          {
+            baseUrl: this.baseUrl,
+            jar: this.jar,
+            device: this.state.device,
+            uid: this.state.uid,
+            signal: req.signal,
+          },
+          flattened.attachments,
+        )
+      } catch (e) {
+        if (e instanceof UploadError) {
+          if (e.kind === 'unsupported') throw new UnsupportedMessageError(e.message)
+          throw new DoubaoUpstreamError(e.message, {
+            kind: e.kind,
+            status: e.status,
+            code: e.code,
+            needsCaptcha: e.needsCaptcha,
+            detail: e.detail,
+            fallbackable: false,
+          })
+        }
+        throw e
+      }
+    }
+
+    const { response, kind } = await this.openChat(prompt, preset, effort, deep, req, batch)
     req.onMode?.(kind)
     req.onConnected?.()
     if (!response.body) throw new DoubaoUpstreamError('豆包上游响应为空', { kind: 'upstream' })
@@ -139,24 +211,49 @@ export class DoubaoClient {
       inThinking: false,
       thinkDelimiters: 0,
       conversationId: '',
+      lastThinkingTitle: '',
     }
     let sawDone = false
+    let bodyClosed = false
 
-    for await (const ev of iterateSse(response.body)) {
-      if (ev.data.trim() === '[DONE]') {
-        sawDone = true
-        break
-      }
-      const deltas = kind === 'web' ? this.parseWebEvent(ev, state) : this.parseLegacyEvent(ev, state)
-      for (const d of deltas) {
-        if (d.done) {
+    try {
+      for await (const ev of iterateSse(response.body)) {
+        if (ev.data.trim() === '[DONE]') {
           sawDone = true
           break
         }
-        if (d.conversationId && !state.conversationId) state.conversationId = d.conversationId
-        if (d.text || d.reasoning || d.usage) yield d
+        const deltas = kind === 'web' ? this.parseWebEvent(ev, state) : this.parseLegacyEvent(ev, state)
+        for (const d of deltas) {
+          if (d.done) {
+            sawDone = true
+            break
+          }
+          if (d.conversationId && !state.conversationId) state.conversationId = d.conversationId
+          if (d.text || d.reasoning || d.usage) yield d
+        }
+        if (sawDone) break
       }
-      if (sawDone) break
+      // 正常读到流尾 => body 已关闭；因 SSE_REPLY_END / 结束标记提前 break
+      // => 主动 cancel，避免上游连接（可能还有推荐问题）被长时间占住
+      bodyClosed = !sawDone
+    } finally {
+      if (!bodyClosed) {
+        try {
+          await response.body.cancel()
+        } catch {
+          /* 已关闭 */
+        }
+      }
+      // 每轮在豆包侧创建的会话不留在账号最近会话里：流结束后异步删除，
+      // 不阻塞客户端；失败只记录统计与警告。
+      if (state.conversationId) {
+        void deleteConversation({
+          baseUrl: this.baseUrl,
+          jar: this.jar,
+          device: this.state.device,
+          conversationId: state.conversationId,
+        })
+      }
     }
     yield { done: true, conversationId: state.conversationId || undefined }
   }
@@ -167,18 +264,31 @@ export class DoubaoClient {
     effort: 3 | 4 | 5,
     deep: boolean,
     req: ChatRequest,
+    batch: UploadBatch,
   ): Promise<{ response: Response; kind: ChatMode }> {
     const signal = req.signal
 
+    const fetchUpstream = async (url: string, init: RequestInit): Promise<Response> => {
+      try {
+        return await fetch(url, { ...init, signal })
+      } catch (e) {
+        if ((e as Error)?.name === 'AbortError') throw e
+        throw new DoubaoUpstreamError(`豆包网络错误：${(e as Error).message}`, {
+          kind: 'upstream',
+          fallbackable: true,
+        })
+      }
+    }
+
     const tryWeb = async (): Promise<{ response: Response; kind: ChatMode }> => {
       const url = `${this.baseUrl}${cfg.chatPath}?${toQuery(webParams(this.state.device, this.jar))}`
-      const body = JSON.stringify(this.buildWebPayload(prompt, preset, effort, deep))
-      const response = await fetch(url, {
+      const body = JSON.stringify(this.buildWebPayload(prompt, preset, effort, deep, batch))
+      const response = await fetchUpstream(url, {
         method: 'POST',
         headers: chatHeaders(this.jar, { stream: true }),
         body,
-        signal,
       })
+      await this.absorbResponseCookies(response, url)
       if (!response.ok) {
         const text = await response.text().catch(() => '')
         throw this.errorFromResponse(response.status, text)
@@ -186,7 +296,7 @@ export class DoubaoClient {
       const ct = response.headers.get('content-type') || ''
       if (!/text\/event-stream/i.test(ct)) {
         const text = await response.text().catch(() => '')
-        throw this.errorFromResponse(response.status, text, '上游返回非 SSE 响应')
+        throw this.errorFromResponse(response.status, text, '上游返回非 SSE 响应', true)
       }
       return { response, kind: 'web' }
     }
@@ -194,12 +304,12 @@ export class DoubaoClient {
     const tryLegacy = async (): Promise<{ response: Response; kind: ChatMode }> => {
       const url = `${this.baseUrl}${cfg.legacyChatPath}?${toQuery(desktopParams(this.state.device, this.jar))}`
       const body = JSON.stringify(this.buildLegacyPayload(prompt, preset, deep))
-      const response = await fetch(url, {
+      const response = await fetchUpstream(url, {
         method: 'POST',
         headers: chatHeaders(this.jar, { stream: true, legacy: true }),
         body,
-        signal,
       })
+      await this.absorbResponseCookies(response, url)
       if (!response.ok) {
         const text = await response.text().catch(() => '')
         throw this.errorFromResponse(response.status, text)
@@ -207,7 +317,7 @@ export class DoubaoClient {
       const ct = response.headers.get('content-type') || ''
       if (!/text\/event-stream/i.test(ct)) {
         const text = await response.text().catch(() => '')
-        throw this.errorFromResponse(response.status, text, '上游返回非 SSE 响应')
+        throw this.errorFromResponse(response.status, text, '上游返回非 SSE 响应', true)
       }
       return { response, kind: 'legacy' }
     }
@@ -218,12 +328,14 @@ export class DoubaoClient {
     try {
       return await tryWeb()
     } catch (e) {
-      if (e instanceof DoubaoUpstreamError && e.kind === 'auth') throw e
+      // 附件无法在旧端点上还原；宁可报错，也不静默丢附件
+      if (batch.attachments.length > 0) throw e
+      if (!this.isFallbackable(e)) throw e
       // 外层超时 / 调用方取消：回退没有意义，且会把超时错误掩盖成上游错误
       if ((e as Error)?.name === 'AbortError') throw e
-      if (cfg.debug) {
-        console.warn(`[doubao] /chat/completion 不可用，回退 /samantha: ${(e as Error).message}`)
-      }
+      const reason = e instanceof Error ? e.message : String(e)
+      console.warn(`[doubao] /chat/completion 不可用，回退 /samantha: ${reason}`)
+      req.onFallback?.(reason)
       try {
         return await tryLegacy()
       } catch (legacyError) {
@@ -239,14 +351,33 @@ export class DoubaoClient {
                 code: legacyError.code,
                 needsCaptcha: legacyError.needsCaptcha,
                 detail: legacyError.detail,
+                fallbackable: false,
               }
-            : { kind: 'upstream' },
+            : { kind: 'upstream', fallbackable: false },
         )
       }
     }
   }
 
-  private buildWebPayload(prompt: string, preset: DoubaoModelPreset, effort: 3 | 4 | 5, deep: boolean): unknown {
+  /** 只有端点缺失 / 网络或协议错误才允许回退；风控、鉴权、参数错误一律不回退 */
+  private isFallbackable(error: unknown): boolean {
+    if (error instanceof DoubaoUpstreamError) {
+      if (error.kind === 'auth' || error.kind === 'risk') return false
+      if (error.fallbackable !== undefined) return error.fallbackable
+      if (error.status === undefined) return true
+      return [404, 405, 410, 501, 502, 503, 504].includes(error.status)
+    }
+    if (error instanceof Error && /fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|socket|network/i.test(error.message)) {
+      return true
+    }
+    return false
+  }
+
+  private buildWebPayload(prompt: string, preset: DoubaoModelPreset, effort: 3 | 4 | 5, deep: boolean, batch: UploadBatch): unknown {
+    // 网页端的 need_deep_think / ext.use_deep_think 取菜单 menu_type（0/3/9/5/10001），
+    // 不是 0/1 布尔。Momoi 的「关闭思考」开关仍需生效：对默认思考的模型收起为 0；
+    // 工作任务类模型的 menu_type 是模式标识（非思考开关），不因开关而改变。
+    const menuType = deep ? preset.menuType : preset.deepThink ? 0 : preset.menuType
     const textBlock = {
       block_type: 10000,
       content: {
@@ -264,6 +395,24 @@ export class DoubaoClient {
       extra_info: {},
       append_fields: [],
     }
+    const messageList: any[] = []
+    if (batch.attachments.length > 0) {
+      messageList.push({
+        local_message_id: batch.localMessageId || uuid(),
+        content_block: [buildAttachmentBlock(batch)],
+        message_status: 0,
+      })
+    }
+    if (prompt) {
+      messageList.push({
+        local_message_id: uuid(),
+        content_block: [textBlock],
+        message_status: 0,
+      })
+    }
+    if (messageList.length === 0) {
+      throw new UnsupportedMessageError('没有可发送的文本或附件内容')
+    }
     return {
       client_meta: {
         local_conversation_id: randomLocalId(),
@@ -277,13 +426,7 @@ export class DoubaoClient {
           { permission_name: 'ACCESS_BACKGROUND_LOCATION', status: 3 },
         ],
       },
-      messages: [
-        {
-          local_message_id: uuid(),
-          content_block: [textBlock],
-          message_status: 0,
-        },
-      ],
+      messages: messageList,
       option: {
         send_message_scene: '',
         create_time_ms: Date.now(),
@@ -292,7 +435,7 @@ export class DoubaoClient {
         answer_with_suggest: false,
         agent_mode: preset.agentMode,
         tts_switch: false,
-        need_deep_think: deep ? 1 : 0,
+        need_deep_think: menuType,
         click_clear_context: false,
         from_suggest: false,
         is_regen: false,
@@ -335,7 +478,7 @@ export class DoubaoClient {
         connector_info_list: [],
         model_config: {
           model_item_key: preset.modelItemKey,
-          model_extra_params: {},
+          model_extra_params: preset.modelExtraParams ?? {},
           reasoning_effort: effort,
         },
         aggregate_params: {
@@ -354,7 +497,7 @@ export class DoubaoClient {
       user_context: [],
       ext: {
         agent_mode: String(preset.agentMode),
-        use_deep_think: deep ? '1' : '0',
+        use_deep_think: String(menuType),
         sub_conv_firstmet_type: '1',
         general_task_param: '{"server_do_compare":true}',
         collection_id: '',
@@ -385,8 +528,8 @@ export class DoubaoClient {
         is_ai_playground: false,
         memory_type: 2,
         message_from: 0,
-        use_deep_think: deep,
-        use_auto_cot: deep && preset.id === 'doubao-expert',
+        use_deep_think: deep && preset.menuType > 0,
+        use_auto_cot: deep && preset.menuType === 3,
         resend_for_regen: false,
         enable_commerce_credit: false,
       },
@@ -397,7 +540,7 @@ export class DoubaoClient {
     }
   }
 
-  private errorFromResponse(status: number, text: string, prefix?: string): DoubaoUpstreamError {
+  private errorFromResponse(status: number, text: string, prefix?: string, fallbackable?: boolean): DoubaoUpstreamError {
     let json: Record<string, unknown> | null = null
     try {
       json = JSON.parse(text) as Record<string, unknown>
@@ -415,12 +558,12 @@ export class DoubaoClient {
       prefix,
       `豆包上游 HTTP ${status}`,
     )
-    return this.classifyError(message, { status, code, detail: json ?? text })
+    return this.classifyError(message, { status, code, detail: json ?? text, fallbackable })
   }
 
   private classifyError(
     message: string,
-    opts: { status?: number; code?: number; detail?: unknown },
+    opts: { status?: number; code?: number; detail?: unknown; fallbackable?: boolean },
   ): DoubaoUpstreamError {
     const status = opts.status
     const code = opts.code
@@ -437,6 +580,7 @@ export class DoubaoClient {
         status,
         code,
         detail: opts.detail,
+        fallbackable: false,
       })
     }
     if (
@@ -451,13 +595,17 @@ export class DoubaoClient {
         code,
         needsCaptcha: true,
         detail: opts.detail,
+        fallbackable: false,
       })
     }
+    const fallbackable =
+      opts.fallbackable ?? (status === undefined || [404, 405, 410, 501, 502, 503, 504].includes(status))
     return new DoubaoUpstreamError(`豆包上游错误：${message}`, {
       kind: 'upstream',
       status,
       code,
       detail: opts.detail,
+      fallbackable,
     })
   }
 
@@ -492,8 +640,17 @@ export class DoubaoClient {
       })
     }
 
+    // 用户消息回显，绝不能当成助手正文
+    if (eventName === 'full_msg_notify') return []
+
     const out: ChatDelta[] = []
     let blockTextInEvent = false
+
+    if (eventName === 'sse_reply_end') {
+      // end_type=1 是正文结束；后续只有推荐问题，提前收尾
+      out.push({ done: true })
+      return out
+    }
 
     if (eventName === 'sse_ack') {
       const cid = pickString(obj.ack_client_meta?.conversation_id, obj.conversation_id, obj.conversationId)
@@ -510,11 +667,46 @@ export class DoubaoClient {
       else out.push({ text })
     }
 
+    /** 新版协议：block_type=10040 的 content.thinking_block 承载思考内容或步骤摘要 */
+    const pushThinking = (content: any): boolean => {
+      const thinking = content?.thinking_block
+      if (!thinking || typeof thinking !== 'object') return false
+      const think = pickString(
+        thinking.think,
+        thinking.text,
+        typeof thinking.content === 'string' ? thinking.content : '',
+      )
+      if (think) {
+        out.push({ reasoning: think })
+      } else if (cfg.emitThinkingSummary) {
+        // 网页端 cot_ui_style=summary 时只下发步骤标题，不下发完整 CoT
+        const title = pickString(
+          thinking.finish_title,
+          thinking.streaming_title,
+          thinking.unfold_streaming_title,
+          thinking.title,
+          thinking.summary,
+        )
+        if (title && title !== state.lastThinkingTitle) {
+          state.lastThinkingTitle = title
+          if (!/^(正在思考|深度思考中|深度思考|已完成思考|思考中)$/.test(title)) {
+            out.push({ reasoning: `${title}\n` })
+          }
+        }
+      }
+      // thinking_block 是自包含块；重置旧的 delimiter 状态，避免把正文误判为思考
+      state.inThinking = false
+      state.thinkDelimiters = 0
+      return true
+    }
+
     const handleBlock = (block: any) => {
       if (!block || typeof block !== 'object') return
       const bt = Number(block.block_type ?? block.content_type ?? block.type ?? 0)
       const content = block.content ?? block
       if (bt === 10040) {
+        if (pushThinking(content)) return
+        // 兼容旧协议：无 thinking_block 的 10040 作为思考分隔符
         state.thinkDelimiters += 1
         state.inThinking = state.thinkDelimiters === 1
         const think = pickString(
@@ -552,6 +744,7 @@ export class DoubaoClient {
         return // 工具/搜索/附件块：当前不映射为正文
       }
       // 未知块：只抓明显的 think/text 字段，避免把结构化内容当成正文
+      if (pushThinking(content)) return
       const think = pickString(content?.think)
       if (think) out.push({ reasoning: think })
       const text = pickString(content?.text_block?.text, content?.text)
@@ -574,13 +767,17 @@ export class DoubaoClient {
         if (typeof pv?.content === 'string' && pv.content) {
           try {
             const inner = JSON.parse(pv.content)
-            const t = pickString(inner?.text)
-            if (t) {
-              blockTextInEvent = true
-              pushText(t)
+            if (inner && typeof inner === 'object' && (inner.block_type !== undefined || inner.content?.thinking_block || inner.content?.text_block)) {
+              handleBlock(inner)
+            } else if (!pushThinking(inner)) {
+              const t = pickString(inner?.text)
+              if (t) {
+                blockTextInEvent = true
+                pushText(t)
+              }
+              const think = pickString(inner?.think)
+              if (think) out.push({ reasoning: think })
             }
-            const think = pickString(inner?.think)
-            if (think) out.push({ reasoning: think })
           } catch {
             /* 非 JSON patch，忽略 */
           }
@@ -606,13 +803,18 @@ export class DoubaoClient {
           content = {}
         }
       }
-      const t = pickString(content?.text)
-      const think = pickString(content?.think)
-      if (ct === 2008) {
+      if (content?.thinking_block) {
+        const think = pickString(content.thinking_block.think, content.thinking_block.text)
         if (think) out.push({ reasoning: think })
-        if (t) out.push({ text: t })
-      } else if (ct === 2001 || ct === 10000 || ct === 2003) {
-        if (t) out.push({ text: t })
+      } else {
+        const t = pickString(content?.text)
+        const think = pickString(content?.think)
+        if (ct === 2008) {
+          if (think) out.push({ reasoning: think })
+          if (t) out.push({ text: t })
+        } else if (ct === 2001 || ct === 10000 || ct === 2003) {
+          if (t) out.push({ text: t })
+        }
       }
     }
 

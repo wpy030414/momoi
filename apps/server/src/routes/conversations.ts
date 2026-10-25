@@ -8,6 +8,8 @@ import { ErrCode } from '@momoi/shared/errors'
 import { ApiError } from '../lib/apiError.js'
 import { broadcastConversationSync, broadcastConversationChanged, broadcastUnreadUpdate } from '../lib/realtime.js'
 import { stopBotForUser } from '../im/qq/manager.js'
+import { clearVoiceCache } from '../ai/tts.js'
+import { rewriteTraceForEditedContent } from '../lib/message-edit.js'
 import { trackUserActivity } from './user.js'
 import { resolveWorkspaceAnchor } from './workspaces.js'
 
@@ -533,5 +535,47 @@ conversationsRoute.delete('/:id/messages/:messageId', async (c) => {
   broadcastConversationChanged(userId, convId)
   broadcastConversationSync(userId)
 
+  return c.json({ success: true })
+})
+
+// Edit an assistant message in place — 只修改历史内容，不触发任何上游生成。
+// 后续轮次的模型上下文从 DB 重新装配，因此修改会自然影响「未来 AI 看到的历史」。
+conversationsRoute.patch('/:id/messages/:messageId', async (c) => {
+  const userId = getUserId(c)
+  if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
+
+  const convId = c.req.param('id')
+  const messageId = Number(c.req.param('messageId'))
+  const body = await c.req.json<{ content?: string }>()
+  const content = typeof body.content === 'string' ? body.content : ''
+  if (!content.trim()) throw new ApiError(ErrCode.CHAT_EMPTY_MESSAGE)
+
+  const conv = await db.select().from(conversations).where(and(eq(conversations.id, convId), eq(conversations.user_id, userId), sql`${conversations.deleted_at} IS NULL`)).get()
+  if (!conv) throw new ApiError(ErrCode.CONV_NOT_FOUND)
+
+  const msg = await db.select().from(messages).where(and(eq(messages.id, messageId), eq(messages.conversation_id, convId))).get()
+  if (!msg) throw new ApiError(ErrCode.CONV_MESSAGE_NOT_FOUND)
+  // 用户消息的编辑走 POST /api/chat（需要触发新一轮回复）；此端点只接受 AI 消息
+  if (msg.role !== 'assistant') throw new ApiError(ErrCode.CHAT_EDIT_UNSUPPORTED)
+
+  // trace 里旧的正文分片全部失效：保留思考 / 工具 / 卡片条目，末尾追加一份新文本，
+  // 保证刷新后时间线仍按「思考 → 工具 → 正文」渲染。
+  const trace = rewriteTraceForEditedContent(msg.trace, content)
+
+  await db.update(messages)
+    .set({ content, trace, suggestions: null })
+    .where(eq(messages.id, messageId))
+    .run()
+
+  // 内容已变：旧语音缓存与当前文本不再对应
+  if (msg.agent_id) clearVoiceCache(msg.agent_id, messageId)
+
+  const now = Math.floor(Date.now() / 1000)
+  await db.update(conversations).set({ updated_at: now }).where(eq(conversations.id, convId)).run()
+
+  broadcastConversationChanged(userId, convId)
+  broadcastConversationSync(userId)
+
+  trackUserActivity(userId).catch(() => {})
   return c.json({ success: true })
 })

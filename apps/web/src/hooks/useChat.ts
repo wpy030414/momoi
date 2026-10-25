@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, getUser, handleAuthOn401, getDeviceIdForRequest, subscribeRealtime, connectRealtime } from '../lib/api'
 import { errT } from '../i18n'
 import { errFromEnvelope, toApiError } from '../lib/apiError'
+import { useToast } from '../components/ui/toast'
 import type { Conversation, ConversationStats, Workspace, Attachment, TraceEntry, WorldStateDef } from '@momoi/shared/types'
 import { THINKING_SEGMENT_OPEN } from '@momoi/shared/constants'
 
@@ -106,6 +107,7 @@ interface LocalStream {
 
 export function useChat() {
   const { t, i18n } = useTranslation()
+  const { toast } = useToast()
   const [conversations, setConversations] = useState<Conversation[]>([])
   /** 会话分组工作区（侧边栏文件夹）；会话创建时锁定一个（或未分组） */
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
@@ -501,7 +503,7 @@ export function useChat() {
     handleSSEEventRef.current = handleSSEEvent
   })
 
-  const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean, _forceCompliance?: boolean) => {
+  const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean, _forceCompliance?: boolean, editMessageId?: number) => {
     if (!text.trim()) return
 
     // 目标分区：当前会话 → 当前草稿 → 首页空态就地开隐式 direct 草稿（保持原有行为）
@@ -562,6 +564,9 @@ export function useChat() {
             agent_id: agentId || undefined,
             _retry: isRetry,
             _force_compliance: _forceCompliance || undefined,
+            // 编辑用户消息：服务端截断该消息及其后所有消息，再以新文本重新发问。
+            // 网络层自动重试（_retry）时服务端会忽略该字段，避免重复删除。
+            edit_message_id: editMessageId || undefined,
             thinking_mode: thinkingMode,
             attachments: attachments || undefined,
             // 世界模拟走群聊编排 —— conversation_type 以会话真实类型为准（'world' 会话在
@@ -733,7 +738,7 @@ export function useChat() {
     if (!streamsRef.current.has(streamKey)) {
       updateLastMessage(streamKey, { streaming: false })
     }
-  }, [updateMessages, updateLastMessage, setLoadingFor, renamePartition, applySnapshot, refreshConversations, setViewKey, storeServerStats, t, i18n])
+  }, [updateMessages, updateLastMessage, setLoadingFor, renamePartition, applySnapshot, refreshConversations, setViewKey, storeServerStats, convTypeOf, t, i18n])
 
   /** 实时中继事件入口：他设备流事件写入其会话自己的分区 */
   const handleRemoteStreamEvent = useCallback((msg: import('@momoi/shared/types').ServerMessage, conversationId: string) => {
@@ -742,6 +747,17 @@ export function useChat() {
 
   function handleSSEEvent(msg: any, key: string, opts?: { remote?: boolean }) {
     const remote = !!opts?.remote
+    // 流事件始终作用于列表末尾的 assistant 气泡（群聊按 agent_start 动态新建）
+    const patchTarget = (updater: (m: ChatMessage) => ChatMessage) => {
+      updateMessages(key, (prev) => {
+        const i = prev.length - 1
+        const cur = prev[i]
+        if (!cur || cur.role !== 'assistant') return prev
+        const next = [...prev]
+        next[i] = updater(cur)
+        return next
+      })
+    }
     switch (msg.type) {
       case 'user_message_id': {
         if (remote) return // 他设备的用户消息 ID 回填对本设备无意义
@@ -778,9 +794,7 @@ export function useChat() {
       }
 
       case 'token':
-        updateMessages(key, (prev) => {
-          const last = prev[prev.length - 1]
-          if (!last || last.role !== 'assistant') return prev
+        patchTarget((last) => {
           const newContent = last.content + msg.text
           // 同步 trace：追加到最后一个 text 条目，或新建一个
           const trace = last.trace || []
@@ -796,16 +810,14 @@ export function useChat() {
           // 远程流恢复：尾部气泡曾被 DB 快照整体覆盖（判活 TTL 过期所致），
           // 重新置为流式让后续 token 继续追加，而不是静默丢流
           if (remote && !last.streaming) {
-            return [...prev.slice(0, -1), { ...last, content: newContent, streaming: true, trace: newTrace }]
+            return { ...last, content: newContent, streaming: true, trace: newTrace }
           }
-          return [...prev.slice(0, -1), { ...last, content: newContent, trace: newTrace }]
+          return { ...last, content: newContent, trace: newTrace }
         })
         break
 
       case 'thinking': {
-        updateMessages(key, (prev) => {
-          const last = prev[prev.length - 1]
-          if (!last || last.role !== 'assistant') return prev
+        patchTarget((last) => {
           // Separator = new round header; text = append to the last thinking entry in trace
           const isSegmentHeader = msg.text.startsWith(THINKING_SEGMENT_OPEN)
           let trace = last.trace || []
@@ -821,30 +833,27 @@ export function useChat() {
             }
             trace = updated
           }
-          return [...prev.slice(0, -1), { ...last, trace, ...(remote && !last.streaming ? { streaming: true } : {}) }]
+          return { ...last, trace, ...(remote && !last.streaming ? { streaming: true } : {}) }
         })
         break
       }
 
       case 'tool_call':
       case 'tool_execution_start':
-        updateMessages(key, (prev) => {
-          const last = prev[prev.length - 1]
-          if (!last || last.role !== 'assistant') return prev
+        patchTarget((last) => {
           const newToolCall = { id: msg.id, name: msg.name, input: msg.input, status: 'running' as const }
           const trace = [...(last.trace || []), { type: 'tool_call' as const, ...newToolCall }]
-          return [...prev.slice(0, -1), {
+          return {
             ...last,
             toolCalls: [...(last.toolCalls || []), newToolCall],
             trace,
-          }]
+          }
         })
         break
 
       case 'tool_result':
-        updateMessages(key, (prev) => {
-          const last = prev[prev.length - 1]
-          if (!last || !last.toolCalls?.length) return prev
+        patchTarget((last) => {
+          if (!last.toolCalls?.length) return last
           const calls = [...last.toolCalls]
           // 优先按 id 精确匹配（并行回填仍能对齐）；退化到「最后一个同名未完成」
           let idx = -1
@@ -877,7 +886,7 @@ export function useChat() {
           if (traceEntry && traceEntry.type === 'tool_call') {
             trace[traceIdx] = { ...traceEntry, status: isError ? 'error' : 'done', result: msg.summary, artifacts: msg.artifacts || traceEntry.artifacts }
           }
-          return [...prev.slice(0, -1), { ...last, toolCalls: calls, trace }]
+          return { ...last, toolCalls: calls, trace }
         })
         // 如果 pendingQuestion 的 tool_call_id 匹配，清除问题卡片（限本会话）
         if (pendingRef.current[key] && msg.id && pendingRef.current[key]!.tool_call_id === msg.id) {
@@ -926,16 +935,12 @@ export function useChat() {
         if (remote && !streamsRef.current.get(key)?.infinite) {
           remoteLastAtRef.current.delete(key)
         }
-        updateMessages(key, (prev) => {
-          const last = prev[prev.length - 1]
-          if (!last || last.role !== 'assistant') return prev
-          return [...prev.slice(0, -1), {
-            ...last,
-            content: msg.reply || last.content,
-            suggestions: msg.suggestions,
-            streaming: false,
-          }]
-        })
+        patchTarget((last) => ({
+          ...last,
+          content: msg.reply || last.content,
+          suggestions: msg.suggestions,
+          streaming: false,
+        }))
         break
 
       case 'stats':
@@ -947,11 +952,11 @@ export function useChat() {
       case 'error':
         console.error('Server error:', msg.code)
         if (remote) remoteLastAtRef.current.delete(key)
-        updateMessages(key, (prev) => {
-          const last = prev[prev.length - 1]
-          if (!last || last.role !== 'assistant') return prev
-          return [...prev.slice(0, -1), { ...last, content: t('chat.errorMessage', { message: errT(errFromEnvelope(msg)) }), streaming: false }]
-        })
+        patchTarget((last) => ({
+          ...last,
+          content: t('chat.errorMessage', { message: errT(errFromEnvelope(msg)) }),
+          streaming: false,
+        }))
         break
 
       // --- Voice Events ---
@@ -994,15 +999,14 @@ export function useChat() {
 
       case 'agent_done':
         // Mark this agent's message as complete
-        updateMessages(key, (prev) => {
-          const last = prev[prev.length - 1]
-          if (!last || last.role !== 'assistant' || last.agent_id !== msg.agent_id) return prev
-          return [...prev.slice(0, -1), {
+        patchTarget((last) => {
+          if (last.agent_id !== msg.agent_id) return last
+          return {
             ...last,
             content: msg.reply || last.content,
             suggestions: msg.suggestions,
             streaming: false,
-          }]
+          }
         })
         break
 
@@ -1011,11 +1015,9 @@ export function useChat() {
         // 守卫 1：仅当最后一条消息仍是 assistant 气泡时应用——loading 已提前结束，
         //         用户可能已抢发下一条消息，此时晚到的建议直接丢弃（DB 已持久化，刷新可见）。
         // 守卫 2：群聊下 agent_id 不匹配（同上竞态）也丢弃。
-        updateMessages(key, (prev) => {
-          const last = prev[prev.length - 1]
-          if (!last || last.role !== 'assistant') return prev
-          if (msg.agent_id && last.agent_id && last.agent_id !== msg.agent_id) return prev
-          return [...prev.slice(0, -1), { ...last, suggestions: msg.suggestions }]
+        patchTarget((last) => {
+          if (msg.agent_id && last.agent_id && last.agent_id !== msg.agent_id) return last
+          return { ...last, suggestions: msg.suggestions }
         })
         break
 
@@ -1335,6 +1337,82 @@ export function useChat() {
     await sendMessage(originalText, true, undefined, agentId || null, false, undefined, false, true)
   }, [revertMessage, sendMessage, conversationsRef])
 
+  /**
+   * 编辑一条消息（气泡内联编辑提交）。
+   *
+   * - AI 消息：只 PATCH 历史内容，不触发上游生成——影响的是「未来 AI 看到的历史」。
+   * - 用户消息：等价旧回退 —— 截断该消息及其后所有消息，再以新文本重新发问；
+   *   附件沿用原消息，服务端在 POST /api/chat 内原子完成删除 + 插入。
+   *
+   * @returns true = 已提交（编辑器可关闭）；false = 失败或不可编辑
+   */
+  const editMessage = useCallback(async (index: number, content: string, groupAgentIds?: string[]): Promise<boolean> => {
+    const key = activeKeyRef.current
+    if (!key) return false
+    const trimmed = content.trim()
+    if (!trimmed) return false
+    const message = messagesByConvRef.current[key]?.[index]
+    if (!message || message.id == null) return false
+
+    if (message.role === 'assistant') {
+      try {
+        await api.updateMessage(key, message.id, trimmed)
+      } catch (err) {
+        console.error('Failed to edit message:', err)
+        toast({ title: t('chat.editFailed'), description: errT(err as any), variant: 'error' })
+        return false
+      }
+      updateMessages(key, (prev) => {
+        const i = prev.findIndex((m) => m.id === message.id)
+        if (i < 0) return prev
+        const cur = prev[i]
+        // 时间线里旧的正文分片全部作废：保留思考 / 工具 / 卡片，末尾补一份新文本
+        const trace = cur.trace && cur.trace.length > 0
+          ? [...cur.trace.filter((e) => e.type !== 'text'), { type: 'text' as const, text: trimmed }]
+          : cur.trace
+        const next = [...prev]
+        next[i] = { ...cur, content: trimmed, trace, suggestions: undefined }
+        return next
+      })
+      return true
+    }
+
+    // 用户消息：先中止本会话在途流，再截断本地列表，由 sendMessage 重新追加气泡
+    const entry = streamsRef.current.get(key)
+    if (entry) {
+      entry.userCancelled = true
+      entry.abort.abort()
+      setLoadingFor(key, false)
+      streamTerminatedForciblyRef.current = true
+    }
+    const type = convTypeOf(key)
+    const groupMode = type === 'group' || type === 'world'
+    const agentId = conversationsRef.current.find((c) => c.id === key)?.agent_id || null
+
+    // 群聊编辑必须带成员名单：视图刚切进群聊、isGroupMode 尚未同步时 App 可能
+    // 传不出 IDs，此时向服务端补拉一次，避免服务端退化到单 Agent 分支
+    let agentIds = groupAgentIds
+    if (groupMode && (!agentIds || agentIds.length === 0) && !isDraftKey(key)) {
+      const res = await api.getGroupAgents(key).catch(() => null)
+      agentIds = res?.agents.map((a) => a.id)
+    }
+
+    updateMessages(key, (prev) => prev.slice(0, index))
+    // 不 await 整轮生成：编辑提交即关闭编辑器，后续回复走正常流式气泡
+    void sendMessage(
+      trimmed,
+      true,
+      message.attachments && message.attachments.length > 0 ? message.attachments : undefined,
+      groupMode ? null : agentId,
+      groupMode,
+      agentIds,
+      false,
+      false,
+      message.id,
+    )
+    return true
+  }, [sendMessage, updateMessages, setLoadingFor, convTypeOf, conversationsRef, toast, t])
+
   // ---- Realtime: 同账号多设备实时同步 ----
   // 建立 SSE 长连接（GET /api/events），接收其他设备的聊天流事件与
   // 会话列表 / 内容变更信号，实时渲染而不需手动刷新。
@@ -1439,6 +1517,7 @@ export function useChat() {
     refreshWorkspaces,
     cancel,
     revertMessage,
+    editMessage,
     forceComplianceRetry,
     pendingQuestion,
     sendAnswer,

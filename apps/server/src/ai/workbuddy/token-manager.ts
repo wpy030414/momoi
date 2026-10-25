@@ -27,8 +27,10 @@ interface LoginSession {
   status: 'pending' | 'scanned' | 'success' | 'failed'
   startedAt: number
   message?: string
-  /** 登录页的微信二维码（浏览器不可用时缺省，前端回退为打开登录页） */
+  /** 登录页的微信二维码（浏览器不可用时缺省，面板回退为打开登录页） */
   qrDataUrl?: string
+  /** 二维码捕获阶段：loading → ready / unavailable（面板据此决定按钮与回退链接） */
+  qrState: 'loading' | 'ready' | 'unavailable'
   wechat?: WechatQrSession | null
 }
 
@@ -195,18 +197,25 @@ export async function getStatus(): Promise<WorkBuddyStatus> {
   }
 }
 
-/** 异步捕获登录页的微信二维码；浏览器不可用时保持「打开登录页」回退形态 */
+/** 异步捕获登录页的微信二维码；失败时标记 unavailable，交给面板提供打开登录页回退 */
 async function attachWechatQr(current: LoginSession): Promise<void> {
   try {
     const wechat = await openWechatQrLogin(current.authUrl)
-    if (!wechat) return
     if (session !== current || current.status !== 'pending') {
-      await wechat.close().catch(() => {})
+      await wechat?.close().catch(() => {})
+      return
+    }
+    const qr = wechat?.getQr()
+    if (!wechat || !qr) {
+      current.qrState = 'unavailable'
+      console.warn('[workbuddy] 未截获登录页微信二维码，回退为打开登录页')
       return
     }
     current.wechat = wechat
-    current.qrDataUrl = wechat.getQr() ?? undefined
+    current.qrDataUrl = qr
+    current.qrState = 'ready'
   } catch (err) {
+    if (session === current) current.qrState = 'unavailable'
     console.warn(`[workbuddy] 微信二维码捕获失败：${errMessage(err)}`)
   }
 }
@@ -230,6 +239,7 @@ export async function beginLogin(): Promise<{ auth_url: string; state: string }>
     authUrl: handshake.authUrl,
     status: 'pending',
     startedAt: Date.now(),
+    qrState: 'loading',
   }
   session = next
   void attachWechatQr(next)
@@ -273,7 +283,10 @@ async function runLogin(current: LoginSession): Promise<void> {
       }
       // 微信页面可能刷新二维码；扫码后状态从 pending 切到 scanned
       const qr = current.wechat?.getQr()
-      if (qr) current.qrDataUrl = qr
+      if (qr) {
+        current.qrDataUrl = qr
+        current.qrState = 'ready'
+      }
       if (current.wechat?.getStatus() === 'scanned') current.status = 'scanned'
       failures = 0
     } catch (err) {
@@ -298,8 +311,11 @@ export async function getLoginStatus(): Promise<WorkBuddyLoginStatus> {
     session.status = 'scanned'
   }
   const base: WorkBuddyLoginStatus = { status: session.status, message: session.message }
-  if ((session.status === 'pending' || session.status === 'scanned') && session.qrDataUrl) {
-    base.qr_data_url = session.qrDataUrl
+  if ((session.status === 'pending' || session.status === 'scanned')) {
+    base.qr_state = session.qrState
+    if (session.qrDataUrl) base.qr_data_url = session.qrDataUrl
+    // 只有确认二维码拿不到时才下发登录页地址：正常流程不展示任何外链
+    if (session.qrState === 'unavailable') base.auth_url = session.authUrl
   }
   if (session.status !== 'success') return base
   return { ...base, credential: await getStatus() }

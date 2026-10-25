@@ -25,8 +25,11 @@
 | `apps/server/src/routes/events.ts` | 实时事件通道 `GET /api/events`（SSE 长连接） |
 | `packages/shared/src/thinking.ts` | thinking 分段的编解码 |
 | `packages/shared/src/types.ts` | ServerMessage 联合类型、RealtimeEvent、AskUserQuestion 等 |
-| `apps/web/src/hooks/useChat.ts` | 客户端聊天状态管理 + SSE 解析 + 重试 + 哈希路由 |
+| `apps/web/src/hooks/useChat.ts` | 客户端聊天状态管理 + SSE 解析 + 重试 + 编辑 + 哈希路由 |
 | `apps/web/src/hooks/useGroupChat.ts` | 群聊状态管理 |
+| `apps/web/src/components/chat/MessageActions.tsx` | 消息右键 / 长按菜单（复制 / 编辑 / 强制重试） |
+| `apps/web/src/components/chat/MessageBubble.tsx` | 消息气泡 + 气泡内联编辑 |
+| `apps/server/src/lib/message-edit.ts` | 编辑的纯函数助手（trace 重写） |
 | `apps/web/src/lib/format.ts` | 状态条展示格式化：token 数缩写、耗时（ms/s） |
 
 ## 接口契约
@@ -48,7 +51,8 @@
   "agent_ids": ["可选-群聊Agent ID列表"],
   "infinite_mode": false,
   "language": "zh-CN",
-  "device_id": "来源设备标识（同账号实时中继用，源设备据此跳过）"
+  "device_id": "来源设备标识（同账号实时中继用，源设备据此跳过）",
+  "edit_message_id": 123
 }
 ```
 
@@ -58,6 +62,9 @@
 - `agent_ids`：群聊模式下指定参与 Agent 的 ID 列表
 - `infinite_mode`：是否开启无限演算模式（中立 Agent 自动追问）
 - `attachments` 见 `module-file-attachment.md`
+- `edit_message_id`：编辑用户消息——服务端先删除该消息及其后所有消息，再以
+  `message` / `attachments` 重新写入并生成回复（附件缺省沿用原消息）。`_retry`
+  时按目标行是否仍存在判定是否重复执行编辑
 
 **响应**：SSE 流（`Content-Type: text/event-stream`），每条事件通过 `event: message` + `data: {json}` 发送。
 
@@ -185,7 +192,7 @@ Voice 参数从 Agent 的 `voice_settings` JSON 中读取：`speakerId`（必选
 |---|---|---|
 | `stream` | `{ type: "stream", conversation_id: string, event: ServerMessage }` | 聊天流中继：同账号其他设备的实时消息事件 |
 | `conv_sync` | `{ type: "conv_sync" }` | 会话列表变更信号 → 刷新侧边栏 |
-| `conv_changed` | `{ type: "conv_changed", conversation_id: string }` | 会话内容变更（如回退消息）→ 正在查看的设备重新拉取 |
+| `conv_changed` | `{ type: "conv_changed", conversation_id: string }` | 会话内容变更（回退 / 编辑）→ 正在查看的设备重新拉取 |
 | `group_members` | `{ type: "group_members", conversation_id: string }` | 群成员变更 → 刷新成员列表 |
 
 **订阅管理**：
@@ -289,7 +296,7 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 15. **多设备实时同步（新机制）**：客户端维护一条 `GET /api/events` SSE 长连接（同账号每设备一条，按 `localStorage` 持久化的 `momoi_device_id` 标识），接收：
     - `stream` 事件：其他设备正在流式输出同一会话时，直接把中继的 `ServerMessage` 应用到本地消息列表（tokens / thinking / tool_call / agent_start / done / suggestions / voice_segment 等）；`user_message` 中继用于渲染他设备的用户气泡（单聊同时预建流式 assistant 气泡以承接后续 token）
     - `conv_sync`：会话列表变更信号 → 刷新侧边栏（新建/删除/重命名/群成员数）
-    - `conv_changed`：其他设备回退了某会话 → 若本设备正在查看则整条重拉对齐
+    - `conv_changed`：其他设备改动某会话（回退 / 编辑）→ 若本设备正在查看则整条重拉对齐
     - `group_members`：群成员变更 → 刷新成员列表与侧边栏人数
     - 事件源 `EventSource` 携带 Cookie 认证（HttpOnly JWT），用户名经查询参数传递（EventSource 无法附加自定义请求头）；断线由浏览器自动重连
     - 源设备自跳过：聊天流中继携带发起方 `device_id`，源设备不重复接收（已通过自己的 fetch 流渲染）
@@ -312,6 +319,51 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 1. **进程内事件总线**：`Map<userId, Set<subscriber>>`，每个订阅持有 `device_id` 与串行化写入链。聊天流事件经 `broadcastStream` 跳过源设备后实时中继到同账号其他设备；会话列表 / 内容变更 / 群成员变更经 `broadcastConversationSync` / `broadcastConversationChanged` / `broadcastGroupMembers` 广播
 2. **事件通道路由**：`GET /api/events?device_id=xxx`（`userAuthMiddleware` 认证）→ SSE 长连接，每 15s 心跳；客户端断开时 `onAbort` 清理订阅。订阅按 `deviceId` 幂等（同设备重连先移除旧订阅，避免事件双发）
 3. **仅限单实例**：多实例 / 横向扩容需把内存总线替换为 Redis pub/sub（超出当前范围，见 `AGENTS.md` 非目标）
+
+## 消息操作（右键 / 长按）
+
+所有消息气泡共用一套操作菜单：桌面端**右击**、移动端**长按**（480ms，位移
+≤10px；同时保留 Radix ContextMenu 自带的 700ms 长按）。AI 消息提供
+**复制 / 编辑**；用户消息额外提供**强制重试**（重新作答）。左侧常驻「更多」
+按钮已移除。
+
+| 操作 | 用户消息 | AI 消息 |
+|---|---|---|
+| 复制 | 复制正文（QQ 群消息复制去掉 `[发送者]: ` 前缀后的内容） | 复制完整回复正文 |
+| 编辑 | 气泡内联编辑；提交后**截断该消息及其后所有消息并重新发问** | 气泡内联编辑；**只改历史内容，不触发上游请求** |
+| 强制重试 | 沿用旧路线：回退到该消息（删除该条及其后）后以 `_force_compliance` 重发 | 不提供（编辑已足够改写 AI 回复） |
+
+交互约束：
+
+1. **只有提交才改历史**：编辑输入框只存在于气泡处，取消 / Esc 不发任何请求；
+   Enter 提交、Shift+Enter 换行，输入法组合中的 Enter 不提交
+2. **生成中只允许复制**：编辑 / 强制重试在 `loading` 或消息自身 `streaming` 时禁用；
+   内联编辑期间菜单完全抑制（保留输入框原生右键与文本选择）
+3. **QQ 群只读**：消息来自 QQ 侧，编辑 / 重试会与远端不同步，因此只保留复制
+4. **世界模拟**：AI 消息同样只提供复制 / 编辑；编辑只改该气泡的历史内容，不触发
+   世界回合或状态结算
+
+### 编辑用户消息（提交）
+
+`POST /api/chat` 携带 `edit_message_id`：
+
+1. 校验目标消息属于该会话且 `role = 'user'`，否则 SSE `error` +
+   `CHAT_EDIT_UNSUPPORTED`
+2. 删除 `messages.id >= edit_message_id` 的全部消息（等价旧回退）；编辑首条消息
+   时同步会话标题
+3. 以新文本 + 原附件重新插入用户消息，随后走正常 AI 循环
+4. `_retry` 重试时：目标行仍在 → 说明上次未落库，重新执行编辑；目标行已消失 →
+   说明上次已应用，跳过插入（极端中断用末条消息内容兜底补插）
+
+### 编辑 AI 消息
+
+`PATCH /api/conversations/:id/messages/:messageId`：
+
+- 仅接受 `role = 'assistant'` 的消息，`{ content }` 非空
+- 更新 `messages.content`；trace 保留思考 / 工具 / 卡片条目，去掉旧正文分片，
+  末尾追加一份新文本
+- 清空该消息的 suggestions 与语音缓存；**不触发任何上游生成**
+- 广播 `conv_changed` + `conv_sync`，其他设备整条对账
 
 ## 会话状态条（ConversationStats）
 
@@ -431,3 +483,13 @@ POST {api_endpoint}/chat/completions
 **原有链路**
 
 - `POST /api/chat` 各终止路径（`done` / `group_done` / `error`）仍保证下发终止事件；`stats` 缺失（如生成失败）不影响前端渲染
+
+**消息操作（手工 / 端到端）**
+
+- 桌面端右击任意气泡、移动端长按任意气泡 → 弹出菜单：AI 消息为 复制 / 编辑，用户消息为 复制 / 编辑 / 强制重试；用户气泡左侧不再有常驻按钮
+- 复制 → 剪贴板内容与气泡正文一致；Clipboard API 不可用时走隐藏 textarea 兜底并有成功/失败提示
+- 编辑自己的消息 → 输入框出现在气泡处；取消不发请求；提交后该消息及其后所有消息消失，并以新文本重新生成回复
+- 编辑 AI 消息 → 输入框出现在气泡处；提交后只有该气泡文本变化，**不发起上游请求**；刷新后新文本仍在，后续对话的模型上下文使用新文本
+- 强制重试自己的消息 → 走既有回退 + 重发路线
+- AI 消息（含群聊 / 世界模拟）不出现「强制重试」；QQ 群全部消息只保留复制
+- 生成中编辑 / 重试不可点击；内联编辑时右击输入框出现系统原生菜单而非消息菜单

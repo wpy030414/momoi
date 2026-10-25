@@ -191,3 +191,12 @@ export function markVoiceComplete(agentId: string, messageId: number): void {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
 }
+
+/** 消息内容被编辑 / 重写后清掉旧语音缓存，避免播放按钮回放与当前文本不符的音频 */
+export function clearVoiceCache(agentId: string, messageId: number): void {
+  try {
+    fs.rmSync(path.resolve(repoRoot(), 'data', 'voice', agentId, String(messageId)), { recursive: true, force: true })
+  } catch {
+    /* 缓存不存在或权限问题：不影响内容编辑 */
+  }
+}

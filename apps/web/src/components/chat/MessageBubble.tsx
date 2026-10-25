@@ -1,17 +1,13 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageContent } from './MessageContent'
 import { ThinkingBlock } from './ThinkingBlock'
 import { AttachmentCard, AttachmentList } from './AttachmentCard'
 import { CardRenderer } from '../cards/CardRenderer'
 import { VoicePlayButton } from '../voice/VoicePlayButton'
-import { Bot, MoreHorizontal, Undo2, Check, X, ChevronRight } from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from '../ui/dropdown-menu'
+import { MessageActions } from './MessageActions'
+import { Button } from '../ui/button'
+import { Bot, ChevronRight } from 'lucide-react'
 import type { Attachment, TraceEntry } from '@momoi/shared/types'
 
 interface ChatMessage {
@@ -30,10 +26,12 @@ interface MessageBubbleProps {
   onSuggestion?: (text: string) => void
   /** Only the last assistant message should show its suggestion chips */
   showSuggestions?: boolean
-  /** Called when user clicks revert button on a user message */
-  onRevert?: () => void
-  /** Called when user clicks force compliance retry on a user message */
+  /** 编辑提交：用户消息 = 截断并重新作答；AI 消息 = 只改历史内容 */
+  onEdit?: (content: string) => Promise<boolean>
+  /** 用户消息：强制重试（沿用旧路线：回退 + 重发） */
   onForceRetry?: () => void
+  /** 生成中禁用编辑 / 重试（复制不受影响） */
+  actionsDisabled?: boolean
   /** Agent avatar URL (base64 data URL) */
   agentAvatar?: string | null
   /** Group chat: agent display name */
@@ -48,173 +46,220 @@ interface MessageBubbleProps {
   isWorld?: boolean
 }
 
-export const MessageBubble = React.memo(function MessageBubble({ message, onSuggestion, showSuggestions, onRevert, onForceRetry, agentAvatar, agentName, voiceEnabled, activeAgentId, verbose, isWorld }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({
+  message,
+  onSuggestion,
+  showSuggestions,
+  onEdit,
+  onForceRetry,
+  actionsDisabled,
+  agentAvatar,
+  agentName,
+  voiceEnabled,
+  activeAgentId,
+  verbose,
+  isWorld,
+}: MessageBubbleProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
-  const [confirmingRevert, setConfirmingRevert] = useState(false)
-  const [confirmingForceRetry, setConfirmingForceRetry] = useState(false)
-  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const editRef = useRef<HTMLTextAreaElement | null>(null)
+
+  const resizeEditor = () => {
+    const el = editRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`
+  }
+
+  useEffect(() => {
+    if (!editing) return
+    resizeEditor()
+    const el = editRef.current
+    if (el) {
+      el.focus()
+      el.selectionStart = el.selectionEnd = el.value.length
+    }
+  }, [editing])
+
+  const startEditing = () => {
+    setDraft(message.content)
+    setEditing(true)
+  }
+
+  const cancelEditing = () => {
+    if (saving) return
+    setEditing(false)
+    setDraft('')
+  }
+
+  const submitEdit = async () => {
+    const value = draft.trim()
+    if (!value || saving || !onEdit) return
+    setSaving(true)
+    try {
+      const ok = await onEdit(value)
+      if (ok) {
+        setEditing(false)
+        setDraft('')
+      }
+    } catch {
+      /* 失败提示由上层负责；保留编辑态供重试 */
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelEditing()
+      return
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      // 输入法组合中的 Enter 属于候选词确认，不能提交
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return
+      e.preventDefault()
+      void submitEdit()
+    }
+  }
+
+  const canEdit = !!onEdit && message.id != null && !message.streaming
+
+  const editor = (
+    <div className={`w-full max-w-full rounded-lg border border-primary/30 bg-background p-2 text-left ${isUser ? 'ml-auto' : ''}`}>
+      <textarea
+        ref={editRef}
+        value={draft}
+        onChange={(e) => { setDraft(e.target.value); resizeEditor() }}
+        onKeyDown={handleEditorKeyDown}
+        rows={2}
+        className="w-full min-h-[64px] max-h-[240px] resize-none bg-transparent text-sm leading-relaxed outline-none"
+        placeholder={t('chat.editMessagePlaceholder')}
+        aria-label={t('chat.editMessage')}
+      />
+      <div className="mt-1.5 flex items-center justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={cancelEditing} disabled={saving}>
+          {t('common.cancel')}
+        </Button>
+        <Button size="sm" onClick={() => void submitEdit()} disabled={saving || !draft.trim()}>
+          {saving ? t('chat.saving') : t('common.save')}
+        </Button>
+      </div>
+    </div>
+  )
 
   return (
-    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''} group`}>
-      {/* Avatar — only show for assistant messages */}
-      {!isUser && (
-        <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center overflow-hidden bg-secondary">
-          {agentAvatar ? (
-            <img src={agentAvatar} alt={t('common.altAgentAvatar')} className="h-full w-full object-cover" />
-          ) : (
-            <Bot className="h-4 w-4" />
-          )}
-        </div>
-      )}
-
-      {/* Content wrapper — groups content column + revert row as one flex item */}
-      <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-row-reverse gap-2' : ''}`}>
-        {/* Content column */}
-        <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
-          {/* Sender/agent name label — assistant in group chat, or user in QQ group */}
-          {agentName && (
-            <div className={`text-xs text-muted-foreground mb-1 ${isUser ? 'mr-1' : 'ml-1'}`}>{agentName}</div>
-          )}
-
-          {/* Trace-driven rendering: thinking + tool calls + text in chronological order. */}
-          {!isUser && message.trace && message.trace.length > 0 ? (
-            <>
-              {groupAndRenderTrace(message.trace, message.streaming, verbose, agentName)}
-            </>
-          ) : !isUser ? (
-            /* Streaming placeholder — content not yet arrived */
-            <div className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-card/60 backdrop-blur-sm border`}>
-              {message.streaming && !message.content ? (
-                <div className="flex gap-1">
-                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              ) : (
-                <MessageContent content={message.content} streaming={message.streaming} isUser={false} />
-              )}
-            </div>
-          ) : null}
-
-          {/* Attachments */}
-          {message.attachments && message.attachments.length > 0 && (
-            <div className={`mb-2 ${isUser ? 'flex flex-wrap gap-1.5 justify-end' : ''}`}>
-              <AttachmentList attachments={message.attachments} />
-            </div>
-          )}
-
-          {/* Voice play button — assistant messages only when voice is enabled */}
-          {!isUser && !message.streaming && message.content && voiceEnabled && activeAgentId && message.id && (
-            <VoicePlayButton
-              agentId={activeAgentId}
-              messageId={message.id}
-              text={message.content}
-              enabled={true}
-            />
-          )}
-
-          {/* Message content — user messages only (assistant text is rendered via trace or legacy path above) */}
-          {isUser && (
-            <div className="mb-1">
-              <div
-                className={`inline-block max-w-full rounded-lg px-4 py-2.5 text-left backdrop-blur-sm ${
-                  isWorld ? 'border border-amber-500/30 bg-amber-500/60 text-amber-900 dark:text-amber-100' : 'bg-primary/60 text-primary-foreground'
-                }`}
-              >
-              {message.streaming && !message.content ? (
-                <div className="flex gap-1">
-                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              ) : (
-                <MessageContent content={message.content} streaming={message.streaming} isUser={isUser} />
-              )}
-              </div>
-            </div>
-          )}
-
-          {/* Suggestions — only on the last assistant message */}
-          {showSuggestions && message.suggestions && message.suggestions.length > 0 && (
-            <div className={`flex flex-wrap gap-2 mt-2 ${isUser ? 'justify-end' : ''}`}>
-              {message.suggestions.map((s, idx) => (
-                <button
-                  key={idx}
-                  className="suggestion-chip"
-                  onClick={() => onSuggestion?.(s)}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Actions column — user messages only, positioned on the visual left */}
-        {isUser && onRevert && (
-          <div className="flex-shrink-0 flex items-center">
-            {(confirmingRevert || confirmingForceRetry) ? (
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => {
-                    setConfirmingRevert(false)
-                    setConfirmingForceRetry(false)
-                    if (confirmingRevert) onRevert()
-                    else onForceRetry?.()
-                  }}
-                  className="h-7 px-2 text-xs rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors inline-flex items-center gap-1"
-                  title={confirmingRevert ? t('chat.revertConfirmAction') : t('chat.forceComplianceConfirmAction')}
-                >
-                  <Check className="h-3 w-3" />
-                  {confirmingRevert ? t('chat.revertConfirmAction') : t('chat.forceComplianceConfirmAction')}
-                </button>
-                <button
-                  onClick={() => { setConfirmingRevert(false); setConfirmingForceRetry(false) }}
-                  className="h-7 px-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors inline-flex items-center gap-1"
-                  title={t('common.cancel')}
-                >
-                  <X className="h-3 w-3" />
-                  {t('common.cancel')}
-                </button>
-              </div>
+    <MessageActions
+      text={message.content}
+      onEdit={canEdit && !editing ? startEditing : undefined}
+      onForceRetry={onForceRetry && !message.streaming && !editing ? onForceRetry : undefined}
+      disabled={actionsDisabled}
+      suppressMenu={editing}
+    >
+      <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''} group`}>
+        {/* Avatar — only show for assistant messages */}
+        {!isUser && (
+          <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center overflow-hidden bg-secondary">
+            {agentAvatar ? (
+              <img src={agentAvatar} alt={t('common.altAgentAvatar')} className="h-full w-full object-cover" />
             ) : (
-              <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors"
-                    title={t('chat.moreActions')}
-                  >
-                    <MoreHorizontal className="h-3.5 w-3.5" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="left" align="start">
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setConfirmingRevert(true)
-                    }}
-                  >
-                    <Undo2 className="h-3 w-3 mr-2" />
-                    {t('chat.revert')}
-                  </DropdownMenuItem>
-                  {onForceRetry && (
-                    <DropdownMenuItem
-                      destructive
-                      onClick={() => {
-                        setConfirmingForceRetry(true)
-                      }}
-                    >
-                      <Undo2 className="h-3 w-3 mr-2" />
-                      {t('chat.forceComplianceRetry')}
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Bot className="h-4 w-4" />
             )}
           </div>
         )}
+
+        {/* Content wrapper */}
+        <div className="flex-1 min-w-0">
+          {/* Content column */}
+          <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
+            {/* Sender/agent name label — assistant in group chat, or user in QQ group */}
+            {agentName && (
+              <div className={`text-xs text-muted-foreground mb-1 ${isUser ? 'mr-1' : 'ml-1'}`}>{agentName}</div>
+            )}
+
+            {editing ? editor : (
+              <>
+                {/* Trace-driven rendering: thinking + tool calls + text in chronological order. */}
+                {!isUser && message.trace && message.trace.length > 0 ? (
+                  <>
+                    {groupAndRenderTrace(message.trace, message.streaming, verbose, agentName)}
+                  </>
+                ) : !isUser ? (
+                  /* Streaming placeholder — content not yet arrived */
+                  <div className={`inline-block max-w-full rounded-lg px-4 py-2.5 bg-card/60 backdrop-blur-sm border`}>
+                    {message.streaming && !message.content ? (
+                      <div className="flex gap-1">
+                        <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    ) : (
+                      <MessageContent content={message.content} streaming={message.streaming} isUser={false} />
+                    )}
+                  </div>
+                ) : null}
+
+                {/* Message content — user messages only (assistant text is rendered via trace or legacy path above) */}
+                {isUser && (
+                  <div className="mb-1">
+                    <div
+                      className={`inline-block max-w-full rounded-lg px-4 py-2.5 text-left backdrop-blur-sm ${
+                        isWorld ? 'border border-amber-500/30 bg-amber-500/60 text-amber-900 dark:text-amber-100' : 'bg-primary/60 text-primary-foreground'
+                      }`}
+                    >
+                      {message.streaming && !message.content ? (
+                        <div className="flex gap-1">
+                          <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                          <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                          <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                        </div>
+                      ) : (
+                        <MessageContent content={message.content} streaming={message.streaming} isUser={isUser} />
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Attachments */}
+            {message.attachments && message.attachments.length > 0 && (
+              <div className={`mb-2 ${isUser ? 'flex flex-wrap gap-1.5 justify-end' : ''}`}>
+                <AttachmentList attachments={message.attachments} />
+              </div>
+            )}
+
+            {/* Voice play button — assistant messages only when voice is enabled */}
+            {!editing && !isUser && !message.streaming && message.content && voiceEnabled && activeAgentId && message.id && (
+              <VoicePlayButton
+                agentId={activeAgentId}
+                messageId={message.id}
+                text={message.content}
+                enabled={true}
+              />
+            )}
+
+            {/* Suggestions — only on the last assistant message */}
+            {!editing && showSuggestions && message.suggestions && message.suggestions.length > 0 && (
+              <div className={`flex flex-wrap gap-2 mt-2 ${isUser ? 'justify-end' : ''}`}>
+                {message.suggestions.map((s, idx) => (
+                  <button
+                    key={idx}
+                    className="suggestion-chip"
+                    onClick={() => onSuggestion?.(s)}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+    </MessageActions>
   )
 })
 

@@ -13,7 +13,7 @@ import type { ChatMessage, StreamEvent } from '../provider.js'
 import { DoubaoClient, DoubaoUpstreamError } from './client.js'
 import type { DoubaoSession } from './credentials.js'
 import { UnsupportedMessageError } from './messages.js'
-import { getSession, markAuthError } from './session.js'
+import { getSession, markAuthError, noteSessionOk, absorbRotatedCookies } from './session.js'
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -86,7 +86,10 @@ export async function* streamDoubaoChat(
     throw mapError(err)
   }
 
-  const client = new DoubaoClient(session)
+  const client = new DoubaoClient(session, {
+    // 上游可能在对话响应里轮换 Cookie；写回加密存储，后台巡检也会继续续上
+    onCookiesChanged: (cookies) => absorbRotatedCookies(cookies, session),
+  })
   let usage: StreamEvent['usage']
 
   try {
@@ -108,5 +111,7 @@ export async function* streamDoubaoChat(
     throw mapError(err)
   }
 
+  // 本轮成功：若此前被巡检 / 某次失败标成失效，撤销标记
+  noteSessionOk()
   yield { type: 'finish', finishReason: 'stop', usage }
 }

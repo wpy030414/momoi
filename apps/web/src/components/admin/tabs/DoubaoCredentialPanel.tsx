@@ -122,22 +122,34 @@ export function DoubaoCredentialPanel() {
 
   const loggedIn = credential?.logged_in === true
   const needsCaptcha = credential?.needs_captcha === true
+  const invalid = credential?.invalid === true
+  const keepalive = credential?.keepalive
   const waiting = login?.status === 'pending' || login?.status === 'scanned'
   const failed = login?.status === 'failed' || login?.status === 'expired'
+  const keepaliveLabel =
+    keepalive?.last_result === 'ok'
+      ? t('settings.doubaoKeepaliveOk')
+      : keepalive?.last_result === 'auth'
+        ? t('settings.doubaoKeepaliveAuth')
+        : keepalive?.last_result === 'error'
+          ? t('settings.doubaoKeepaliveError')
+          : ''
 
   return (
     <div>
       <label className="text-sm font-medium">{t('settings.gatewayCredential')}</label>
       <div className="mt-1 rounded-lg border bg-muted/30 p-4 space-y-3">
         <div className="flex items-center gap-2 text-sm">
-          <ShieldCheck className={loggedIn ? 'h-4 w-4 text-green-500' : 'h-4 w-4 text-muted-foreground'} />
+          <ShieldCheck className={loggedIn && !invalid ? 'h-4 w-4 text-green-500' : 'h-4 w-4 text-muted-foreground'} />
           <span className="font-medium">
             {waiting
               ? login?.status === 'scanned'
                 ? t('settings.gatewayScanScanned')
                 : t('settings.gatewayScanWaiting')
               : loggedIn
-                ? t('settings.gatewayLoggedIn')
+                ? invalid
+                  ? t('settings.gatewayCredentialExpired')
+                  : t('settings.gatewayLoggedIn')
                 : t('settings.gatewayNotLoggedIn')}
           </span>
         </div>
@@ -159,6 +171,27 @@ export function DoubaoCredentialPanel() {
             {credential?.source === 'env' && (
               <div>{t('settings.doubaoFromEnv')}</div>
             )}
+            {keepalive?.enabled && (
+              <>
+                <div>{t('settings.doubaoKeepalive')}：{t('settings.doubaoKeepaliveOn')}</div>
+                {keepalive.last_checked_at && (
+                  <div>
+                    {t('settings.doubaoKeepaliveLast')}：{new Date(keepalive.last_checked_at).toLocaleString()}
+                    {keepaliveLabel ? ` · ${keepaliveLabel}` : ''}
+                  </div>
+                )}
+                {keepalive.last_result === 'error' && keepalive.last_message && (
+                  <div className="text-xs">{keepalive.last_message}</div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {invalid && !waiting && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <p>{t('settings.doubaoCredentialInvalid')}</p>
           </div>
         )}
 

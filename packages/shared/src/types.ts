@@ -272,14 +272,43 @@ export interface WorkBuddyLoginStatus {
   message?: string
   /** 登录页的微信二维码 data URL（服务端无头浏览器截获；不可用时缺省） */
   qr_data_url?: string
+  /**
+   * 二维码捕获阶段：
+   *   loading     = 正在启动登录浏览器 / 等待二维码（面板按钮保持「正在启动登录浏览器」）
+   *   ready       = 二维码已下发
+   *   unavailable = 无浏览器或等待超时（面板才提供「在浏览器中打开登录页」回退）
+   */
+  qr_state?: 'loading' | 'ready' | 'unavailable'
+  /** 登录页地址：仅 qr_state=unavailable 时下发，供管理员在自己的浏览器完成登录 */
+  auth_url?: string
   credential?: WorkBuddyStatus
 }
 
 // ---- Doubao（豆包网页）上游 ----
 
+/**
+ * 豆包凭证后台巡检状态。
+ *
+ * 豆包网页登录只下发会话 Cookie，上游没有 refresh token——巡检无法续期，
+ * 只能探测有效性，并把上游响应里 Set-Cookie 的轮换结果写回本地凭证。
+ */
+export interface DoubaoKeepalive {
+  enabled: boolean
+  /** 最近一次巡检时间（ISO） */
+  last_checked_at?: string
+  /** 最近一次巡检结果：ok = 凭证有效；auth = 上游判定登录失效；error = 网络 / 上游异常 */
+  last_result?: 'ok' | 'auth' | 'error'
+  /** 最近一次巡检的摘要（HTTP 状态 / 业务码，不含 Cookie） */
+  last_message?: string
+}
+
 /** 豆包凭证状态（不含任何 Cookie 明文，仅用于管理端展示） */
 export interface DoubaoStatus {
   logged_in: boolean
+  /** 凭证已被判定失效（巡检或对话返回鉴权错误）：需重新扫码登录 */
+  invalid?: boolean
+  /** 后台凭证巡检（探测有效性 + 吸收上游轮换的 Cookie） */
+  keepalive?: DoubaoKeepalive
   /** 凭证来源：store = 扫码登录后加密存储；env = DOUBAO_COOKIES 灾备 */
   source?: 'store' | 'env'
   uid?: string
@@ -290,6 +319,16 @@ export interface DoubaoStatus {
   cookie_count?: number
   /** 上游风控标记：需在浏览器完成人机验证后重置 */
   needs_captcha?: boolean
+  /** 每轮会话自动清理的统计（诊断用；失败不影响对话内容） */
+  conversation_cleanup?: {
+    enabled: boolean
+    attempted: number
+    deleted: number
+    failed: number
+    lastResult?: 'deleted' | 'failed'
+    lastCode?: number
+    lastAt?: string
+  }
 }
 
 /** 豆包扫码登录进度（二维码由登录链路产出：默认抖音授权码，回退豆包自助扫码码） */

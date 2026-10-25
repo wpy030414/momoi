@@ -41,17 +41,28 @@ process.env.DOUBAO_LOGIN_FLOW = 'doubao'
 
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nGQAAAAASUVORK5CYII='
 
-type ChatBehavior = 'ok' | 'legacyOnly' | 'http401' | 'risk'
+type ChatBehavior = 'ok' | 'legacyOnly' | 'http401' | 'risk' | 'thinkingBlock'
 
 interface MockState {
   qrPolls: number
+  accountChecks: number
   chatBehavior: ChatBehavior
   chatRequests: Array<{ url: string; cookie: string; body: Record<string, any> }>
   legacyRequests: Array<{ url: string; cookie: string; body: Record<string, any> }>
+  uploadRequests: Array<{ kind: 'prepare' | 'apply' | 'commit' | 'tos' | 'preHandle'; body?: any; headers?: Record<string, string>; url: string }>
+  cleanupRequests: Array<{ body: any; contentType: string }>
 }
 
 function createMockApp() {
-  const state: MockState = { qrPolls: 0, chatBehavior: 'ok', chatRequests: [], legacyRequests: [] }
+  const state: MockState = {
+    qrPolls: 0,
+    accountChecks: 0,
+    chatBehavior: 'ok',
+    chatRequests: [],
+    legacyRequests: [],
+    uploadRequests: [],
+    cleanupRequests: [],
+  }
   const app = new Hono()
 
   const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -116,10 +127,71 @@ function createMockApp() {
   })
 
   app.get('/passport/account/info/v2/', (c) => {
+    state.accountChecks += 1
     if ((c.req.header('cookie') || '').includes('sessionid=mock-session')) {
-      return json({ data: { user_id: 12345, user_name: '测试用户' }, message: 'success' })
+      const res = json({ data: { user_id: 12345, user_name: '测试用户' }, message: 'success' })
+      // 模拟上游在账号请求里轮换设备 Cookie（巡检 / 对话都要吸收）
+      res.headers.append('Set-Cookie', `ttwid=rotated-${state.accountChecks}; Path=/`)
+      return res
     }
-    return json({ data: { error_code: 13, user_id: 0, description: '会话过期' }, message: 'error' })
+    return json({ data: { error_code: 710012001, description: '登录已过期' }, message: 'error' })
+  })
+
+  // ---- ImageX 附件上传（prepare → Apply → TOS → Commit → pre_handle）----
+  app.post('/alice/resource/prepare_upload', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    state.uploadRequests.push({ kind: 'prepare', body, url: c.req.url })
+    return json({
+      code: 0,
+      data: {
+        service_id: 'svc-mock',
+        upload_host: 'doubao.test',
+        upload_auth_token: { access_key: 'ak-mock', secret_key: 'sk-mock', session_token: 'st-mock' },
+      },
+    })
+  })
+
+  app.get('/top/v1', (c) => {
+    if (c.req.query('Action') === 'ApplyImageUpload') {
+      state.uploadRequests.push({ kind: 'apply', url: c.req.url, headers: c.req.header() })
+      return json({
+        Result: {
+          UploadAddress: {
+            StoreInfos: [{ StoreUri: 'tos-cn-i-mock/hash.png', Auth: 'SpaceKey mock', UploadID: 'up-mock' }],
+            UploadHosts: ['doubao.test'],
+          },
+        },
+      })
+    }
+    return json({ msg: 'unknown action' }, 404)
+  })
+
+  app.post('/top/v1', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    state.uploadRequests.push({ kind: 'commit', body, url: c.req.url, headers: c.req.header() })
+    return json({
+      Result: {
+        PluginResult: [{ ImageWidth: 1, ImageHeight: 1, ImageFormat: 'png', ImageSize: 68, ImageMd5: 'mock-md5' }],
+      },
+    })
+  })
+
+  app.post('/upload/v1/*', async (c) => {
+    state.uploadRequests.push({ kind: 'tos', url: c.req.url, headers: c.req.header() })
+    return json({ code: 2000 })
+  })
+
+  app.post('/alice/message/pre_handle_v2_without_conv', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    state.uploadRequests.push({ kind: 'preHandle', body, url: c.req.url })
+    return json({ code: 0, data: { pre_generate_id: 'pre-mock' } })
+  })
+
+  // ---- 每轮会话清理 ----
+  app.post('/im/conversation/batch_del_user_conv', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    state.cleanupRequests.push({ body, contentType: c.req.header('content-type') || '' })
+    return json({ cmd: 4171, status_code: 0, status_desc: 'OK' })
   })
 
   app.post('/chat/completion', async (c) => {
@@ -138,16 +210,44 @@ function createMockApp() {
         'data: {"error_code":710022004,"error_msg":"rate limited","extra":{"decision":"{\\"type\\":\\"verify\\"}"}}\n\n',
       ])
     }
-    return sse([
+    if (state.chatBehavior === 'thinkingBlock') {
+      // 新协议：10040 携带 thinking_block（步骤标题）→ reasoning；CHUNK_DELTA → 正文
+      return sse([
+        'event: SSE_ACK\n',
+        'data: {"ack_client_meta":{"conversation_id":"conv-thinking"}}\n\n',
+        'event: FULL_MSG_NOTIFY\n',
+        'data: {"message":{"content_block":[{"block_type":10000,"content":{"text_block":{"text":"用户消息回显"}}}]}}\n\n',
+        'event: STREAM_MSG_NOTIFY\n',
+        'data: {"content":{"content_block":[{"block_type":10040,"content":{"thinking_block":{"finish_title":"步骤一"}}}]}}\n\n',
+        'event: STREAM_MSG_NOTIFY\n',
+        'data: {"content":{"content_block":[{"block_type":10040,"content":{"thinking_block":{"streaming_title":"步骤二"}}}]}}\n\n',
+        'event: STREAM_CHUNK\n',
+        'data: {"patch_op":[{"patch_value":{"content_block":[{"block_type":10000,"content":{"text_block":{"text":"答案"}}}]}}]}\n\n',
+        'event: CHUNK_DELTA\n',
+        'data: {"text":"完整"}\n\n',
+        'data: {"usage":{"prompt_tokens":5,"completion_tokens":6,"total_tokens":11}}\n\n',
+        'event: SSE_REPLY_END\n',
+        'data: {"end_type":1}\n\n',
+      ])
+    }
+    const res = sse([
       ': heartbeat\n\n',
+      'event: SSE_ACK\n',
+      'data: {"ack_client_meta":{"conversation_id":"conv-mock"}}\n\n',
+      'event: FULL_MSG_NOTIFY\n',
+      'data: {"message":{"content_block":[{"block_type":10000,"content":{"text_block":{"text":"用户消息回显"}}}]}}\n\n',
       'data: {"content_block":[{"block_type":10040,"content":{}}]}\n\n',
       'data: {"content_block":[{"block_type":10000,"content":{"text_block":{"text":"思考中"}}}]}\n\n',
       'data: {"content_block":[{"block_type":10040,"content":{}}]}\n\n',
       'data: {"content_block":[{"block_type":10000,"content":{"text_block":{"text":"你好"}}}]}\n\n',
       'data: {"content_block":[{"block_type":10000,"content":{"text_block":{"text":"，世界"}}}]}\n\n',
       'data: {"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}\n\n',
-      'data: [DONE]\n\n',
+      'event: SSE_REPLY_END\n',
+      'data: {"end_type":1}\n\n',
     ])
+    // 模拟上游在对话响应里轮换 Cookie：客户端必须写回凭证
+    res.headers.append('Set-Cookie', 'ttwid=chat-rotated; Path=/')
+    return res
   })
 
   app.post('/samantha/chat/completion', async (c) => {
@@ -236,9 +336,12 @@ beforeEach(async () => {
     mock.app.request(typeof input === 'string' ? input : input.toString(), init),
   )
   mock.state.qrPolls = 0
+  mock.state.accountChecks = 0
   mock.state.chatBehavior = 'ok'
   mock.state.chatRequests = []
   mock.state.legacyRequests = []
+  mock.state.uploadRequests = []
+  mock.state.cleanupRequests = []
   await sessionModule.logout()
   sessionModule.resetCaptcha()
 })
@@ -402,6 +505,31 @@ describe('session — 服务端登录编排与凭证落库', () => {
     )
     await expect(collect(events)).rejects.toThrow(/未登录/)
   })
+
+  it('后台巡检：有效会话吸收上游轮换的 Cookie 并写回', async () => {
+    await credentials.writeSession(makeSession())
+    await sessionModule.runKeepaliveCheck()
+
+    const status = await sessionModule.getStatus()
+    expect(status.keepalive?.last_result).toBe('ok')
+    expect(status.invalid).toBeUndefined()
+
+    const stored = await credentials.readSession()
+    expect(stored?.cookies.some((c) => c.name === 'ttwid' && c.value.startsWith('rotated-'))).toBe(true)
+  })
+
+  it('后台巡检：上游判定失效时标记 invalid，提示重新扫码', async () => {
+    await credentials.writeSession(
+      makeSession({
+        cookies: [{ name: 'sessionid', value: 'expired-session', domain: 'doubao.test', path: '/', hostOnly: true }],
+      }),
+    )
+    await sessionModule.runKeepaliveCheck()
+
+    const status = await sessionModule.getStatus()
+    expect(status.keepalive?.last_result).toBe('auth')
+    expect(status.invalid).toBe(true)
+  })
 })
 
 describe('chat — 协议适配', () => {
@@ -435,7 +563,8 @@ describe('chat — 协议适配', () => {
     const prompt = req.body.messages[0].content_block[0].content.text_block.text as string
     expect(prompt).toContain('你是助手')
     expect(prompt).toContain('你好')
-    expect(req.body.option.need_deep_think).toBe(1)
+    expect(req.body.option.need_deep_think).toBe(3)
+    expect(req.body.ext.use_deep_think).toBe('3')
     expect(req.body.option.conversation_init_ext.model_item_key).toBe('3')
   })
 
@@ -453,6 +582,21 @@ describe('chat — 协议适配', () => {
     expect(req.body.option.need_deep_think).toBe(0)
     expect(req.body.option.conversation_init_ext.reasoning_effort).toBe('3')
     expect(events.filter((e) => e.type === 'token').map((e) => e.text).join('')).toBe('你好，世界')
+  })
+
+  it('工作任务模型以 menu_type 作为思考参数并携带窗口参数', async () => {
+    await collect(
+      chatModule.streamDoubaoChat(
+        'doubao-work',
+        [{ role: 'user', content: '你好' }],
+        true,
+        new AbortController().signal,
+      ),
+    )
+    const req = mock.state.chatRequests[0]
+    expect(req.body.option.need_deep_think).toBe(9)
+    expect(req.body.ext.use_deep_think).toBe('9')
+    expect(req.body.option.model_config.model_extra_params).toEqual({ total_window_size: '256000' })
   })
 
   it('主端点 404 时自动回退 /samantha，语义不变', async () => {
@@ -497,27 +641,134 @@ describe('chat — 协议适配', () => {
     expect((await sessionModule.getStatus()).needs_captcha).toBe(false)
   })
 
-  it('图片输入给出明确的文本-only 提示', async () => {
+  it('图片输入走 ImageX 上传，附件与文本分属两个 message', async () => {
+    const events = await collect(
+      chatModule.streamDoubaoChat(
+        'doubao-fast',
+        [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: '看图' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${TINY_PNG_BASE64}` } },
+            ],
+          },
+        ],
+        false,
+        new AbortController().signal,
+      ),
+    )
+    expect(events.filter((e) => e.type === 'token').map((e) => e.text).join('')).toBe('你好，世界')
+
+    // 五步上传链路顺序：prepare → apply → tos → commit → preHandle
+    expect(mock.state.uploadRequests.map((r) => r.kind)).toEqual(['prepare', 'apply', 'tos', 'commit', 'preHandle'])
+    expect(mock.state.uploadRequests[0].body).toMatchObject({ tenant_id: '5', scene_id: '5', resource_type: 2 })
+    expect(mock.state.uploadRequests[2].headers?.['x-storage-u']).toBe('12345')
+    expect(mock.state.uploadRequests[2].headers?.['content-crc32']).toMatch(/^[0-9a-f]{8}$/)
+    expect(mock.state.uploadRequests[4].body).toMatchObject({
+      uplink_entity: { entity_type: 2, entity_content: { image: { key: 'tos-cn-i-mock/hash.png' } } },
+    })
+
+    const req = mock.state.chatRequests[0]
+    // messages[0] = 10052 附件块；messages[1] = 文本块
+    expect(req.body.messages).toHaveLength(2)
+    const attachmentBlock = req.body.messages[0].content_block[0]
+    expect(attachmentBlock.block_type).toBe(10052)
+    expect(attachmentBlock.content.attachment_block.attachments[0]).toMatchObject({
+      type: 1,
+      image: { name: 'image.png', uri: 'tos-cn-i-mock/hash.png', image_ori: { width: 1, height: 1, format: 'png' } },
+    })
+    expect(req.body.messages[1].content_block[0].content.text_block.text).toContain('看图')
+  })
+
+  it('带附件的请求不上 /samantha 回退（避免静默丢附件）', async () => {
+    mock.state.chatBehavior = 'legacyOnly'
     const events = chatModule.streamDoubaoChat(
       'doubao-fast',
       [
         {
           role: 'user',
-          content: [
-            { type: 'text', text: '看图' },
-            { type: 'image_url', image_url: { url: 'data:image/png;base64,xx' } },
-          ],
+          content: [{ type: 'image_url', image_url: { url: `data:image/png;base64,${TINY_PNG_BASE64}` } }],
         },
       ],
       false,
       new AbortController().signal,
     )
-    await expect(collect(events)).rejects.toThrow(/只支持文本/)
+    await expect(collect(events)).rejects.toThrow(/404|not found/)
+    expect(mock.state.legacyRequests).toHaveLength(0)
+  })
+
+  it('新协议 thinking_block 步骤标题映射为思考增量，CHUNK_DELTA 为正文', async () => {
+    mock.state.chatBehavior = 'thinkingBlock'
+    const events = await collect(
+      chatModule.streamDoubaoChat(
+        'doubao-fast',
+        [{ role: 'user', content: '你好' }],
+        true,
+        new AbortController().signal,
+      ),
+    )
+    expect(events.filter((e) => e.type === 'thinking').map((e) => e.text).join('')).toBe('步骤一\n步骤二\n')
+    expect(events.filter((e) => e.type === 'token').map((e) => e.text).join('')).toBe('答案完整')
+    const finish = events.find((e) => e.type === 'finish')
+    expect(finish?.usage).toEqual({ promptTokens: 5, completionTokens: 6 })
+  })
+
+  it('流结束后异步删除本轮会话（cmd 4171）', async () => {
+    await collect(
+      chatModule.streamDoubaoChat(
+        'doubao-fast',
+        [{ role: 'user', content: '你好' }],
+        false,
+        new AbortController().signal,
+      ),
+    )
+    await waitFor(async () => mock.state.cleanupRequests.length > 0)
+    const cleanup = mock.state.cleanupRequests[0]
+    expect(cleanup.contentType).toContain('encoding=utf-8')
+    expect(cleanup.body).toMatchObject({
+      cmd: 4171,
+      uplink_body: {
+        batch_delete_user_conversation_uplink_body: {
+          conversation_id: ['conv-mock'],
+          delete_all: false,
+          conversation_type: 3,
+        },
+      },
+    })
   })
 
   it('退出登录后凭证被删除', async () => {
     await sessionModule.logout()
     expect(await credentials.readSession()).toBeNull()
     expect((await sessionModule.getStatus()).logged_in).toBe(false)
+  })
+
+  it('对话响应里轮换的 Cookie 写回加密存储', async () => {
+    await collect(
+      chatModule.streamDoubaoChat(
+        'doubao-fast',
+        [{ role: 'user', content: '你好' }],
+        false,
+        new AbortController().signal,
+      ),
+    )
+    const stored = await credentials.readSession()
+    expect(stored?.cookies.some((c) => c.name === 'ttwid' && c.value === 'chat-rotated')).toBe(true)
+  })
+
+  it('对话成功后清除「凭证已失效」标记', async () => {
+    sessionModule.markAuthError()
+    expect((await sessionModule.getStatus()).invalid).toBe(true)
+
+    await collect(
+      chatModule.streamDoubaoChat(
+        'doubao-fast',
+        [{ role: 'user', content: '你好' }],
+        false,
+        new AbortController().signal,
+      ),
+    )
+    expect((await sessionModule.getStatus()).invalid).toBeUndefined()
   })
 })

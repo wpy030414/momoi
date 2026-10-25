@@ -5,13 +5,18 @@
  *   douyin（默认）= 无头浏览器打开抖音官方授权页，二维码是抖音授权码；
  *   doubao        = 纯 HTTP 豆包自助扫码（浏览器不可用时的灾备）。
  * 豆包登录没有 refresh token；sessionid 等 Cookie 即会话本身，失效只能重新登录。
- * 登录由服务端完成整轮状态机，管理端只负责展示二维码与轮询进度。
+ *
+ * 后台巡检（keeper）：每 DOUBAO_KEEPALIVE_MS 用账号端点探测一次会话是否有效，
+ * 并把上游响应里 Set-Cookie 的轮换结果写回加密存储——它不能续期，只能提前
+ * 发现失效、尽量延长可用期。登录与对话成功都会清除「已失效」标记。
  */
 
 import type { DoubaoLoginStatus, DoubaoStatus } from '@momoi/shared/types'
 import { doubaoConfig as cfg } from './config.js'
-import { CookieJar } from './cookie-jar.js'
+import { CookieJar, type CookieRecord } from './cookie-jar.js'
 import { clearSession, readSession, writeSession, type DoubaoSession } from './credentials.js'
+import { getCleanupStats } from './conversation-cleanup.js'
+import { probeDoubaoSession } from './account.js'
 import { normalizeDeviceIdentity } from './device.js'
 import { getNeedsCaptcha, resetNeedsCaptcha } from './risk.js'
 import { DoubaoWebLogin } from './web-login.js'
@@ -20,6 +25,17 @@ import type { LoginFlowDriver, LoginFlowKind } from './login-flow.js'
 
 let cached: DoubaoSession | null = null
 let cachedSource: 'store' | 'env' | null = null
+
+/** 凭证被判定失效（巡检或对话鉴权失败）；重新扫码成功后清除 */
+let invalid = false
+
+interface KeepaliveState {
+  at: number
+  result: 'ok' | 'auth' | 'error'
+  message?: string
+}
+
+let keepalive: KeepaliveState | null = null
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -46,11 +62,8 @@ function envSession(): DoubaoSession | null {
   }
 }
 
-/**
- * 取一个可用会话：缓存 → 加密存储 → 灾备 Cookie。
- * 无凭证时抛错（由调用方转成面向管理员的可读提示）。
- */
-export async function getSession(): Promise<DoubaoSession> {
+/** 加载会话（不抛错）：缓存 → 加密存储 → 灾备 Cookie */
+async function loadSession(): Promise<DoubaoSession | null> {
   if (cached) return cached
   const stored = await readSession()
   if (stored) {
@@ -64,40 +77,140 @@ export async function getSession(): Promise<DoubaoSession> {
     cachedSource = 'env'
     return cached
   }
-  throw new Error('豆包未登录，请在后台「设置 → 网关」中扫码登录')
+  return null
+}
+
+/**
+ * 取一个可用会话：缓存 → 加密存储 → 灾备 Cookie。
+ * 无凭证时抛错（由调用方转成面向管理员的可读提示）。
+ */
+export async function getSession(): Promise<DoubaoSession> {
+  const session = await loadSession()
+  if (!session) throw new Error('豆包未登录，请在后台「设置 → 网关」中扫码登录')
+  return session
 }
 
 /** 上游判定登录态失效时调用：清缓存，下次请求会重新读取存储 */
 export function markAuthError(): void {
   cached = null
   cachedSource = null
+  invalid = true
+  keepalive = { at: Date.now(), result: 'auth' }
+}
+
+/** 对话成功（含后台巡检成功）时调用：撤销「凭证已失效」标记 */
+export function noteSessionOk(): void {
+  invalid = false
+  keepalive = { at: Date.now(), result: 'ok' }
+}
+
+function sameCookies(a: CookieRecord[], b: CookieRecord[]): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/**
+ * 把上游轮换后的 Cookie 合并回当前会话。
+ * 只有内容真的变化时才加密写回；DOUBAO_COOKIES 灾备来源不落库。
+ * `expected` 用于并发保护：请求期间若已完成新一轮登录，旧会话的轮换结果作废。
+ *
+ * 原地更新 `cached.cookies` 而不是替换会话对象：同一轮对话可能连续吸收多次
+ * Set-Cookie（主端点失败后回退 /samantha），对象身份必须保持稳定。
+ */
+export async function absorbRotatedCookies(cookies: CookieRecord[], expected?: DoubaoSession): Promise<void> {
+  const current = cached
+  if (!current) return
+  if (expected && current !== expected) return
+  if (sameCookies(current.cookies, cookies)) return
+  current.cookies = cookies
+  if (cachedSource === 'store') {
+    try {
+      await writeSession(current)
+    } catch (err) {
+      console.warn(`[doubao] 回写轮换 Cookie 失败：${errMessage(err)}`)
+    }
+  }
+}
+
+/**
+ * 巡检一次：探测会话是否有效，并吸收上游轮换的 Cookie。
+ *
+ * 已判定失效时跳过——凭证没有 refresh token，重复探测只会在上游留下
+ * 无意义的鉴权失败；重新扫码 / 对话成功会清除失效标记。
+ */
+export async function runKeepaliveCheck(): Promise<void> {
+  if (invalid) return
+  const session = await loadSession()
+  if (!session) return
+
+  const jar = CookieJar.fromJSON(session.cookies)
+  const probe = await probeDoubaoSession(jar, { timeoutMs: cfg.keepaliveTimeoutMs })
+  // 先吸收轮换（含失败的响应），再处理状态；期间完成新登录则丢弃旧结果
+  await absorbRotatedCookies(jar.toJSON(), session)
+
+  if (probe.status === 'ok') {
+    invalid = false
+    keepalive = { at: Date.now(), result: 'ok' }
+    return
+  }
+  if (probe.status === 'auth') {
+    invalid = true
+    cached = null
+    cachedSource = null
+    keepalive = { at: Date.now(), result: 'auth', message: probe.message }
+    console.warn(`[doubao] 凭证巡检判定登录失效：${probe.message}`)
+    return
+  }
+  keepalive = { at: Date.now(), result: 'error', message: probe.message }
+}
+
+let keeperTimer: ReturnType<typeof setInterval> | null = null
+
+/** 启动后台凭证巡检（幂等；随服务启动，不以「当前是否选中豆包」为前提） */
+export function startDoubaoKeeper(): void {
+  if (keeperTimer) return
+  void tick()
+  keeperTimer = setInterval(() => void tick(), cfg.keepaliveMs)
+  keeperTimer.unref?.()
+}
+
+async function tick(): Promise<void> {
+  try {
+    await runKeepaliveCheck()
+  } catch (err) {
+    keepalive = { at: Date.now(), result: 'error', message: errMessage(err) }
+    console.warn(`[doubao] 凭证巡检失败：${errMessage(err)}`)
+  }
 }
 
 /** 当前凭证的对外状态（不含任何 Cookie 明文） */
 export async function getStatus(): Promise<DoubaoStatus> {
+  await loadSession()
+  const keepaliveStatus = {
+    enabled: true,
+    last_checked_at: keepalive ? new Date(keepalive.at).toISOString() : undefined,
+    last_result: keepalive?.result,
+    last_message: keepalive?.message,
+  }
   if (!cached) {
-    const stored = await readSession()
-    if (stored) {
-      cached = stored
-      cachedSource = 'store'
-    } else {
-      const fromEnv = envSession()
-      if (fromEnv) {
-        cached = fromEnv
-        cachedSource = 'env'
-      }
+    return {
+      logged_in: false,
+      needs_captcha: getNeedsCaptcha(),
+      conversation_cleanup: getCleanupStats(),
+      keepalive: keepaliveStatus,
     }
   }
-  if (!cached) return { logged_in: false, needs_captcha: getNeedsCaptcha() }
   const jar = CookieJar.fromJSON(cached.cookies)
   return {
     logged_in: jar.size() > 0,
+    invalid: invalid || undefined,
     source: cachedSource ?? undefined,
     uid: cached.uid || undefined,
     nickname: cached.nickname || undefined,
     saved_at: new Date(cached.savedAt).toISOString(),
     cookie_count: jar.size(),
     needs_captcha: getNeedsCaptcha(),
+    conversation_cleanup: getCleanupStats(),
+    keepalive: keepaliveStatus,
   }
 }
 
@@ -187,6 +300,8 @@ async function runLogin(current: LoginSession): Promise<void> {
         await writeSession(result.session)
         cached = result.session
         cachedSource = 'store'
+        invalid = false
+        keepalive = null
         resetNeedsCaptcha()
         current.status = 'success'
         current.message = '登录成功'
@@ -245,6 +360,8 @@ export async function logout(): Promise<void> {
   if (current) await current.driver.close().catch(() => {})
   cached = null
   cachedSource = null
+  invalid = false
+  keepalive = null
   await clearSession()
 }
 

@@ -11,7 +11,8 @@ Momoi 不再使用自配置的 OpenAI 兼容端点，而是把对话请求转发
 
 登录页默认展示「微信扫码登录」：服务端用无头系统浏览器打开腾讯托管登录页，
 截获微信二维码图片并回传到管理端面板，管理员用微信扫码即可——**不再自动弹出网页**。
-浏览器不可用时，面板仍提供「打开登录页」链接作为回退。
+二维码就绪前按钮保持「正在启动登录浏览器」；只有服务端确认二维码拿不到
+（无浏览器 / 等待超时）时，面板才显示「在浏览器中打开登录页」作为最终回退。
 
 ## 涉及文件
 
@@ -52,9 +53,11 @@ POST /api/admin/workbuddy/login
   → 凭证加密落库，关闭登录浏览器，前端轮询 /login/status 拿到 success
 ```
 
-- 微信二维码由服务端截获后回传，前端**不自动打开网页**；仅在二维码不可用时提供「打开登录页」链接
+- 微信二维码由服务端截获后回传，前端**不自动打开网页**；正常流程不展示外链
+- 二维码捕获阶段通过 `qr_state` 下发：`loading`（面板按钮保持「正在启动登录浏览器」）→
+  `ready`（展示二维码）或 `unavailable`（才下发 `auth_url`，面板显示「在浏览器中打开登录页」）
 - 微信扫码长轮询的 `wx_errcode=404` 会映射为 `scanned`，面板显示「已扫码，请在手机上确认」，与豆包面板一致
-- 浏览器不可用（无 Edge/Chrome）时登录仍可通过该链接完成，行为与旧版一致
+- 浏览器不可用（无 Edge/Chrome）时二维码进入 `unavailable`，登录仍可用回退链接在管理员自己的浏览器完成
 - 登录会话 5 分钟超时；服务端连续 5 次换票异常判失败（网络抖动会重试）
 - 密码/扫码全程在腾讯页面，Momoi 不接收、不存储任何口令
 
@@ -112,7 +115,7 @@ POST /api/admin/workbuddy/login
 |---|---|---|
 | GET | `/api/admin/workbuddy/status` | `{ logged_in, expired?, uid?, nickname?, expires_at?, refresh_expires_at?, has_refresh_token?, auto_refresh }` |
 | POST | `/api/admin/workbuddy/login` | 发起登录 → `{ auth_url, state }` |
-| GET | `/api/admin/workbuddy/login/status` | `{ status: 'idle' \| 'pending' \| 'scanned' \| 'success' \| 'failed', message?, qr_data_url?, credential? }` |
+| GET | `/api/admin/workbuddy/login/status` | `{ status: 'idle' \| 'pending' \| 'scanned' \| 'success' \| 'failed', message?, qr_data_url?, qr_state?: 'loading' \| 'ready' \| 'unavailable', auth_url?, credential? }`（`auth_url` 仅在 `qr_state=unavailable` 时下发） |
 | POST | `/api/admin/workbuddy/logout` | 清除本地凭证 → `{ success: true }` |
 
 全部端点位于 `adminAuthMiddleware` 之后（`/api/admin/workbuddy*`）。
@@ -130,7 +133,9 @@ POST /api/admin/workbuddy/login
 
 - 选择 WorkBuddy 后，API 端点/密钥输入框消失，出现凭证面板；右上角「从环境变量加载」按钮一并隐藏（登录入口在凭证面板内）
 - 编辑 Agent 时模型下拉展示该账号的云端目录；未登录时提示先登录，仍可「自定义」手动填写
-- 点击登录 → 面板直接显示**微信扫码二维码**（不自动弹窗）→ 微信扫码确认后凭证面板显示「已登录 + 账号 + 有效期」
-- 服务端没有可用浏览器时，面板不显示二维码，但仍提供「打开登录页」链接可完成登录
+- 点击登录 → 按钮显示「正在启动登录浏览器…」→ 面板直接显示**微信扫码二维码**（不自动弹窗）→ 微信扫码确认后凭证面板显示「已登录 + 账号 + 有效期」
+- 二维码出现前按钮保持「正在启动登录浏览器…」且禁用；二维码出现后才变为「刷新二维码」，
+  正常流程（`qr_state=loading/ready`）不显示任何「打开登录页」链接
+- 服务端没有可用浏览器时，`qr_state=unavailable`，面板显示错误提示与「在浏览器中打开登录页」最终回退
 - 服务端重启后无需重新登录；access token 临近过期时表内凭证自动更新（refresh token 轮换）
 - 退出登录后状态回到「未登录」，对话请求给出「请先登录」的可读错误

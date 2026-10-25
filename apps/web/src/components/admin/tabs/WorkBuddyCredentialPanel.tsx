@@ -17,15 +17,15 @@ const LOGIN_DEADLINE_MS = 5 * 60_000
  * 轮询进度、展示二维码、失败/超时可刷新、退出登录清除凭证。差异仅在凭证字段
  * 与二维码来源（WorkBuddy 是登录页的微信二维码，豆包是抖音授权二维码）。
  *
- * 登录页由服务端无头浏览器打开并截获微信二维码；前端不再自动弹窗，仅在
- * 二维码不可用时提供「打开登录页」链接。
+ * 登录页由服务端无头浏览器打开并截获微信二维码；前端不自动弹窗。二维码捕获
+ * 完成前按钮保持「正在启动登录浏览器」；只有服务端确认二维码拿不到时，面板才
+ * 提供「在浏览器中打开登录页」的最终回退。
  */
 export function WorkBuddyCredentialPanel() {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [credential, setCredential] = useState<WorkBuddyStatus | null>(null)
   const [login, setLogin] = useState<WorkBuddyLoginStatus | null>(null)
-  const [authUrl, setAuthUrl] = useState('')
   const [starting, setStarting] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -55,11 +55,10 @@ export function WorkBuddyCredentialPanel() {
   const startLogin = useCallback(async () => {
     stopPolling()
     setStarting(true)
-    setAuthUrl('')
     try {
-      const { auth_url } = await api.workbuddyLogin()
-      setAuthUrl(auth_url)
-      setLogin({ status: 'pending' })
+      await api.workbuddyLogin()
+      // 握手只返回登录页地址；二维码由服务端异步截获，等 qr_state=ready 才结束启动态
+      setLogin({ status: 'pending', qr_state: 'loading' })
       const deadline = Date.now() + LOGIN_DEADLINE_MS
       pollTimer.current = setInterval(async () => {
         if (Date.now() > deadline) {
@@ -108,7 +107,6 @@ export function WorkBuddyCredentialPanel() {
       await api.workbuddyLogout()
       setCredential({ logged_in: false, auto_refresh: true })
       setLogin(null)
-      setAuthUrl('')
       toast({ title: t('settings.gatewayLogoutSuccess'), variant: 'success' })
     } catch (err) {
       console.error(err)
@@ -122,6 +120,10 @@ export function WorkBuddyCredentialPanel() {
   const waiting = login?.status === 'pending' || login?.status === 'scanned'
   const failed = login?.status === 'failed'
   const qrDataUrl = waiting ? login?.qr_data_url : undefined
+  // 二维码未就绪（启动浏览器 / 截获中）时按钮保持「正在启动登录浏览器」
+  const qrLoading = waiting && login?.qr_state !== 'ready' && login?.qr_state !== 'unavailable'
+  const qrUnavailable = waiting && login?.qr_state === 'unavailable'
+  const busy = starting || qrLoading
 
   return (
     <div>
@@ -130,15 +132,17 @@ export function WorkBuddyCredentialPanel() {
         <div className="flex items-center gap-2 text-sm">
           <ShieldCheck className={loggedIn && !expired ? 'h-4 w-4 text-green-500' : 'h-4 w-4 text-muted-foreground'} />
           <span className="font-medium">
-            {waiting
-              ? login?.status === 'scanned'
-                ? t('settings.gatewayScanScanned')
-                : t('settings.gatewayScanWaiting')
-              : loggedIn
-                ? expired
-                  ? t('settings.gatewayCredentialExpired')
-                  : t('settings.gatewayLoggedIn')
-                : t('settings.gatewayNotLoggedIn')}
+            {busy
+              ? t('settings.gatewayStarting')
+              : waiting
+                ? login?.status === 'scanned'
+                  ? t('settings.gatewayScanScanned')
+                  : t('settings.gatewayScanWaiting')
+                : loggedIn
+                  ? expired
+                    ? t('settings.gatewayCredentialExpired')
+                    : t('settings.gatewayLoggedIn')
+                  : t('settings.gatewayNotLoggedIn')}
           </span>
         </div>
 
@@ -171,11 +175,19 @@ export function WorkBuddyCredentialPanel() {
           </div>
         )}
 
-        {waiting && authUrl && (
-          <a href={authUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
-            <ExternalLink className="h-3.5 w-3.5" />
-            {t('settings.workbuddyOpenLoginLink')}
-          </a>
+        {qrUnavailable && login?.auth_url && (
+          <div className="space-y-1">
+            <p className="text-sm text-destructive break-words">{t('settings.workbuddyQrUnavailable')}</p>
+            <a
+              href={login.auth_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              {t('settings.workbuddyOpenLoginLink')}
+            </a>
+          </div>
         )}
 
         {failed && login?.message && (
@@ -184,9 +196,9 @@ export function WorkBuddyCredentialPanel() {
 
         <div className="flex items-center gap-2 pt-1">
           {waiting || failed ? (
-            <Button size="sm" onClick={startLogin} disabled={starting}>
-              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-              {starting ? t('settings.gatewayStarting') : t('settings.gatewayRefreshQr')}
+            <Button size="sm" onClick={startLogin} disabled={busy}>
+              <RefreshCw className={`mr-1.5 h-3.5 w-3.5${busy ? ' animate-spin' : ''}`} />
+              {busy ? t('settings.gatewayStarting') : t('settings.gatewayRefreshQr')}
             </Button>
           ) : (
             <Button size="sm" onClick={startLogin} disabled={starting}>

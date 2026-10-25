@@ -23,8 +23,12 @@ interface AgentBrief {
 interface MessageListProps {
   messages: ChatMessage[]
   onSuggestion?: (text: string) => void
-  onRevert?: (index: number) => void
+  /** 编辑消息：用户消息触发截断 + 重新作答，AI 消息只改历史内容 */
+  onEditMessage?: (index: number, content: string) => Promise<boolean>
+  /** 用户消息：强制重试（旧路线） */
   onForceRetry?: (index: number) => void
+  /** 生成中禁用编辑 / 重试 */
+  actionsDisabled?: boolean
   agentAvatar?: string | null
   /** Group chat: agent lookup by id */
   agents?: AgentBrief[]
@@ -49,7 +53,7 @@ function parseQqSender(content: string): { senderName: string; cleanContent: str
   return { senderName: m[1], cleanContent: m[2] }
 }
 
-export const MessageList = React.memo(function MessageList({ messages, onSuggestion, onRevert, onForceRetry, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose, isQqGroup, isWorld }: MessageListProps) {
+export const MessageList = React.memo(function MessageList({ messages, onSuggestion, onEditMessage, onForceRetry, actionsDisabled, agentAvatar, agents, fallbackAgentName, agentVoiceEnabled, agentVoiceMap, verbose, isQqGroup, isWorld }: MessageListProps) {
   // Only the last assistant message shows its suggestion chips — older ones
   // were for a past turn and are meaningless as "what to ask next".
   const lastAssistantIdx = [...messages]
@@ -113,8 +117,9 @@ export const MessageList = React.memo(function MessageList({ messages, onSuggest
           message={{ ...msg, content: displayContent }}
           onSuggestion={onSuggestion}
           showSuggestions={showSuggestions}
-          onRevert={msg.role === 'user' ? () => onRevert?.(idx) : undefined}
-          onForceRetry={msg.role === 'user' ? () => onForceRetry?.(idx) : undefined}
+          onEdit={!isQqGroup && onEditMessage ? (content) => onEditMessage(idx, content) : undefined}
+          onForceRetry={msg.role === 'user' && !isQqGroup && onForceRetry ? () => onForceRetry(idx) : undefined}
+          actionsDisabled={actionsDisabled}
           agentAvatar={msgAgentAvatar}
           agentName={msgAgentName}
           voiceEnabled={msgVoiceEnabled}

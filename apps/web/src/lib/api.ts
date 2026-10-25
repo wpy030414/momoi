@@ -268,6 +268,8 @@ export const api = {
   renameConversation: (id: string, title: string) => request<{ conversation: import('@momoi/shared/types').Conversation }>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   mergeConversations: (sourceIds: string[]) => request<{ conversation: import('@momoi/shared/types').Conversation }>('/api/conversations/merge', { method: 'POST', body: JSON.stringify({ source_ids: sourceIds }) }),
   revertMessages: (conversationId: string, messageId: number) => request<{ success: boolean }>(`/api/conversations/${conversationId}/messages/${messageId}`, { method: 'DELETE' }),
+  // 编辑 AI 消息：只改历史内容，不触发上游生成（用户消息的编辑走 POST /api/chat）
+  updateMessage: (conversationId: string, messageId: number, content: string) => request<{ success: boolean }>(`/api/conversations/${conversationId}/messages/${messageId}`, { method: 'PATCH', body: JSON.stringify({ content }) }),
   searchConversations: (q: string) => request<{ results: import('@momoi/shared/types').ConversationSearchResult[] }>(`/api/conversations/search?q=${encodeURIComponent(q)}`),
 
   // Workspaces（会话分组工作区：创建时锁定到会话，之后不可移动）

@@ -14,6 +14,7 @@ export function VoicePlayButton({ agentId, messageId, text, enabled }: VoicePlay
   const {
     playState,
     allReady,
+    unavailable,
     currentTimeFormatted,
     totalDurationFormatted,
     play,
@@ -21,7 +22,7 @@ export function VoicePlayButton({ agentId, messageId, text, enabled }: VoicePlay
     resume,
   } = useVoice({ agentId, messageId, text, enabled })
 
-  if (!enabled) return null
+  if (!enabled || unavailable) return null
 
   const handleClick = () => {
     switch (playState) {

@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming'
 import path from 'path'
 import fs from 'fs'
 import { db, conversations, messages, groupConversationAgents, worlds } from '../db/index.js'
-import { eq, and, count, sql, desc } from 'drizzle-orm'
+import { eq, and, count, sql, desc, gte, lt } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { augmentRowsWithCards } from '../ai/history-cards.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
@@ -21,7 +21,7 @@ import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { SandboxFS } from '../tools/workspace.js'
 import { synthesizeAndSave, markVoiceComplete, createTtsProvider } from '../ai/tts.js'
-import { broadcastStream, broadcastConversationSync, broadcastUnreadUpdate } from '../lib/realtime.js'
+import { broadcastStream, broadcastConversationSync, broadcastConversationChanged, broadcastUnreadUpdate } from '../lib/realtime.js'
 import { countUnread } from '../lib/unread.js'
 import { trackUserActivity } from './user.js'
 import { resolveWorkspaceAnchor } from './workspaces.js'
@@ -67,6 +67,98 @@ function parseWorkspaceUrl(url: string): { conversationId: string; wsPath: strin
   return { conversationId: m[1], wsPath: m[2] }
 }
 
+type AttachmentMeta = { url: string; name: string; size: number; type: string; workspace_url?: string }
+
+const DOC_EXTS = ['.docx', '.pptx', '.xlsx', '.xls', '.pdf']
+
+/**
+ * 把用户消息与附件解析成上游可消费的内容（文本 + 可选 image_url 多模态部件）。
+ * 主聊天与「编辑用户消息」共用同一实现，保证附件解析语义一致。
+ */
+async function buildUserContent(
+  convId: string,
+  message: string,
+  attachments?: AttachmentMeta[] | null,
+): Promise<string | ContentPart[]> {
+  if (!attachments || attachments.length === 0) return message
+
+  const textParts: string[] = []
+  const imageParts: ContentPart[] = []
+
+  // Copy document attachments to workspace for tool access
+  const workspace = await SandboxFS.forConversation(convId)
+  for (const att of attachments) {
+    const wsUrl = att.workspace_url || att.url
+    const parsed = parseWorkspaceUrl(wsUrl)
+    if (!parsed) continue
+    const ext = path.extname(att.name).toLowerCase()
+
+    if (DOC_EXTS.includes(ext)) {
+      const sourceWs = await SandboxFS.forConversation(parsed.conversationId)
+      try {
+        if (await sourceWs.exists(parsed.wsPath)) {
+          await workspace.copyIn(sourceWs.resolve(parsed.wsPath), att.name)
+        }
+      } catch (err) {
+        console.warn(`Failed to copy ${att.name} to workspace:`, (err as Error).message)
+      }
+    }
+  }
+
+  for (const att of attachments) {
+    // Prefer workspace_url (CDN mode) for AI image reading, fall back to url
+    const wsUrl = att.workspace_url || att.url
+    const parsed = parseWorkspaceUrl(wsUrl)
+    if (!parsed) {
+      textParts.push(`[附件 ${att.name}: 文件未找到]`)
+      continue
+    }
+
+    const sourceWs = await SandboxFS.forConversation(parsed.conversationId)
+    const exists = await sourceWs.exists(parsed.wsPath)
+    if (!exists) {
+      textParts.push(`[附件 ${att.name}: 文件未找到]`)
+      continue
+    }
+
+    try {
+      const diskPath = sourceWs.resolve(parsed.wsPath)
+      const parsedResult = await parseAttachment(diskPath, att.name, att.type)
+
+      if (parsedResult.kind === 'image') {
+        imageParts.push({ type: 'image_url', image_url: { url: parsedResult.base64! } })
+        textParts.push(`[图片: ${att.name}]`)
+      } else if (parsedResult.kind === 'text') {
+        textParts.push(`\n--- 附件: ${att.name} ---\n${parsedResult.content}\n---`)
+      } else {
+        textParts.push(parsedResult.content)
+      }
+    } catch (err) {
+      textParts.push(`[附件 ${att.name}: 解析失败 - ${(err as Error).message}]`)
+    }
+  }
+
+  // Build the message to send to the model
+  if (imageParts.length > 0) {
+    // Multimodal: text + images
+    const content: ContentPart[] = [{ type: 'text', text: message + textParts.join('\n') }, ...imageParts]
+    return content
+  }
+  // Text-only
+  return message + textParts.join('\n')
+}
+
+/** 从 messages.attachments JSON 列还原附件元数据（解析失败按无附件处理） */
+function parseStoredAttachments(raw: string | null | undefined): AttachmentMeta[] | undefined {
+  if (!raw) return undefined
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
 // Apply user auth to all routes
 chatRoute.use('*', userAuthMiddleware)
 
@@ -110,9 +202,14 @@ chatRoute.post('/', async (c) => {
     throw new ApiError(ErrCode.UNAUTHORIZED)
   }
 
-  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string; workspace_id?: string | null; world_laws?: string; world_states?: unknown }>()
-  const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id, workspace_id, world_laws, world_states } = body
+  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string; workspace_url?: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string; workspace_id?: string | null; world_laws?: string; world_states?: unknown; edit_message_id?: number }>()
+  const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id, workspace_id, world_laws, world_states, edit_message_id } = body
   const requestedAgentId = body.agent_id
+
+  // 编辑必须是已有会话中的消息：否则会先建出一个空会话再报错
+  if (edit_message_id !== undefined && !conversation_id) {
+    throw new ApiError(ErrCode.CHAT_EDIT_UNSUPPORTED)
+  }
   // 本轮实际采用的 Agent：新建会话取请求 agent_id；已有单聊会话锚定到
   // conversations.agent_id（见下方归属校验分支）。
   let agentId: string | undefined = requestedAgentId
@@ -307,13 +404,73 @@ chatRoute.post('/', async (c) => {
       }
 
       // --- Save user message (skip on retry to avoid duplicates) ---
+      // 编辑用户消息 = 「截断到目标消息 + 以新内容重新发问」：
+      //   · 目标消息及其之后的所有消息都在同一次请求里删除（等价旧回退）
+      //   · 附件沿用原消息（内联编辑只改文本）
+      //   · 网络层自动重试（_retry）先看目标行是否还在：还在说明上一次根本没
+      //     落库（重新执行编辑）；已消失说明上一次已删并写入新行（跳过插入）
+      let effectiveAttachments = attachments
+      let editApplied = false
+      if (edit_message_id !== undefined) {
+        const target = await db.select().from(messages)
+          .where(and(eq(messages.id, edit_message_id), eq(messages.conversation_id, convId)))
+          .get()
+        if (target) {
+          if (target.role !== 'user') {
+            send({ type: 'error', code: ErrCode.CHAT_EDIT_UNSUPPORTED })
+            return
+          }
+          effectiveAttachments = attachments ?? parseStoredAttachments(target.attachments)
+
+          // 编辑的是首条消息 → 会话标题同步（标题取自首条消息前 40 字符）
+          const earlier = await db.select({ id: messages.id }).from(messages)
+            .where(and(eq(messages.conversation_id, convId), lt(messages.id, edit_message_id)))
+            .limit(1)
+            .all()
+          if (earlier.length === 0) {
+            await db.update(conversations)
+              .set({ title: message.slice(0, 40) || 'New Chat' })
+              .where(eq(conversations.id, convId))
+              .run()
+          }
+
+          await db.delete(messages)
+            .where(and(
+              eq(messages.conversation_id, convId),
+              gte(messages.id, edit_message_id),
+            ))
+            .run()
+          editApplied = true
+          // 他端可能正在查看被截断的旧内容 → 立即整条对账；标题也可能已更新
+          broadcastConversationChanged(userId, convId)
+          broadcastConversationSync(userId)
+        } else if (!_retry) {
+          send({ type: 'error', code: ErrCode.CHAT_EDIT_UNSUPPORTED })
+          return
+        }
+      }
+
+      // 插入判定：正常发送必插；编辑重试只要「上一次已应用」就跳过。
+      // 本次刚执行过编辑（含重试时目标仍在）→ 目标行刚被删除，必须重新插入。
+      // 极端情况（上一次删完旧行但在插入前中断）用末条消息内容兜底补插。
+      let needInsert = !_retry
+      if (editApplied) needInsert = true
+      if (_retry && edit_message_id !== undefined && !editApplied) {
+        const last = await db.select().from(messages)
+          .where(eq(messages.conversation_id, convId))
+          .orderBy(desc(messages.id))
+          .limit(1)
+          .get()
+        needInsert = !(last && last.role === 'user' && last.content === message)
+      }
+
       const now = Math.floor(Date.now() / 1000)
-      if (!_retry) {
+      if (needInsert) {
         const result = await db.insert(messages).values({
           conversation_id: convId,
           role: 'user',
           content: message,
-          attachments: attachments ? JSON.stringify(attachments) : null,
+          attachments: effectiveAttachments ? JSON.stringify(effectiveAttachments) : null,
           created_at: now,
         }).returning({ id: messages.id })
         const userMsgId = Number(result[0]?.id ?? 0)
@@ -324,7 +481,7 @@ chatRoute.post('/', async (c) => {
         streamConvId = convId
         broadcastStream(userId, device_id || '', {
           conversation_id: convId,
-          event: { type: 'user_message', id: userMsgId, content: message, attachments },
+          event: { type: 'user_message', id: userMsgId, content: message, attachments: effectiveAttachments },
         })
         trackUserActivity(userId).catch(() => {})
       }
@@ -361,76 +518,7 @@ chatRoute.post('/', async (c) => {
       send({ type: 'conversation_id', id: convId })
 
       // --- Parse attachments and build user message ---
-      let userMessage: string | ContentPart[] = message
-      const DOC_EXTS = ['.docx', '.pptx', '.xlsx', '.xls', '.pdf']
-
-      if (attachments && attachments.length > 0) {
-        const textParts: string[] = []
-        const imageParts: ContentPart[] = []
-
-        // Copy document attachments to workspace for tool access
-        const workspace = await SandboxFS.forConversation(convId)
-        for (const att of attachments) {
-          const wsUrl = (att as any).workspace_url || att.url
-          const parsed = parseWorkspaceUrl(wsUrl)
-          if (!parsed) continue
-          const ext = path.extname(att.name).toLowerCase()
-
-          if (DOC_EXTS.includes(ext)) {
-            const sourceWs = await SandboxFS.forConversation(parsed.conversationId)
-            try {
-              if (await sourceWs.exists(parsed.wsPath)) {
-                await workspace.copyIn(sourceWs.resolve(parsed.wsPath), att.name)
-              }
-            } catch (err) {
-              console.warn(`Failed to copy ${att.name} to workspace:`, (err as Error).message)
-            }
-          }
-        }
-
-        for (const att of attachments) {
-          // Prefer workspace_url (CDN mode) for AI image reading, fall back to url
-          const wsUrl = (att as any).workspace_url || att.url
-          const parsed = parseWorkspaceUrl(wsUrl)
-          if (!parsed) {
-            textParts.push(`[附件 ${att.name}: 文件未找到]`)
-            continue
-          }
-
-          const sourceWs = await SandboxFS.forConversation(parsed.conversationId)
-          const exists = await sourceWs.exists(parsed.wsPath)
-          if (!exists) {
-            textParts.push(`[附件 ${att.name}: 文件未找到]`)
-            continue
-          }
-
-          try {
-            const diskPath = sourceWs.resolve(parsed.wsPath)
-            const parsedResult = await parseAttachment(diskPath, att.name, att.type)
-
-            if (parsedResult.kind === 'image') {
-              imageParts.push({ type: 'image_url', image_url: { url: parsedResult.base64! } })
-              textParts.push(`[图片: ${att.name}]`)
-            } else if (parsedResult.kind === 'text') {
-              textParts.push(`\n--- 附件: ${att.name} ---\n${parsedResult.content}\n---`)
-            } else {
-              textParts.push(parsedResult.content)
-            }
-          } catch (err) {
-            textParts.push(`[附件 ${att.name}: 解析失败 - ${(err as Error).message}]`)
-          }
-        }
-
-        // Build the message to send to the model
-        if (imageParts.length > 0) {
-          // Multimodal: text + images
-          const content: ContentPart[] = [{ type: 'text', text: message + textParts.join('\n') }, ...imageParts]
-          userMessage = content
-        } else {
-          // Text-only
-          userMessage = message + textParts.join('\n')
-        }
-      }
+      const userMessage = await buildUserContent(convId, message, effectiveAttachments)
 
       // --- Run AI loop (with infinite mode support) ---
       const isInfinite = infinite_mode === true

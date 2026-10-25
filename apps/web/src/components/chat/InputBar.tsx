@@ -30,8 +30,6 @@ interface AgentBrief {
 interface InputBarProps {
   onSend: (text: string, attachments?: Attachment[]) => void
   disabled?: boolean
-  externalValue?: string
-  onExternalValueConsumed?: () => void
   infiniteMode: boolean
   onInfiniteModeChange: (enabled: boolean) => void
   /** 工作区下拉选项；空数组时整个下拉隐藏（只有未分组可选，无选择意义） */
@@ -84,7 +82,7 @@ function detectMention(text: string, cursorPos: number): { query: string; start:
   return null
 }
 
-export const InputBar = memo(function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, infiniteMode, onInfiniteModeChange, workspaces, newChatWorkspaceId, onNewChatWorkspaceChange, conversationWorkspaceId, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation, collapsed = false, onExpand, stats, contextWindow = 128000, conversationWorkspaceName, onCancel }: InputBarProps) {
+export const InputBar = memo(function InputBar({ onSend, disabled, infiniteMode, onInfiniteModeChange, workspaces, newChatWorkspaceId, onNewChatWorkspaceChange, conversationWorkspaceId, supportAttachments, supportInfiniteMode, noAgents, agents, isWorld, conversationId, onEnsureConversation, collapsed = false, onExpand, stats, contextWindow = 128000, conversationWorkspaceName, onCancel }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -120,20 +118,6 @@ export const InputBar = memo(function InputBar({ onSend, disabled, externalValue
       left: rect.left + 16,
     })
   }, [])
-
-  useEffect(() => {
-    if (externalValue !== undefined && externalValue !== '') {
-      setText(externalValue)
-      onExternalValueConsumed?.()
-      requestAnimationFrame(() => {
-        if (textareaRef.current) {
-          textareaRef.current.style.height = 'auto'
-          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
-          textareaRef.current.focus()
-        }
-      })
-    }
-  }, [externalValue, onExternalValueConsumed])
 
   // Auto-focus textarea when expanding from collapsed state (skip initial mount)
   const wasCollapsedRef = useRef(collapsed)

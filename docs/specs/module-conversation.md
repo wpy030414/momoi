@@ -125,7 +125,25 @@
 
 **依据**：`messages.id` 为自增主键，故 `id >= messageId` 等价于「该条及其后所有消息」。**不使用 `created_at >= X` 比较** —— Unix 秒级时间戳在同一秒内写入的多条消息无法区分顺序，用自增 ID 才可靠。
 
-**客户端配合**（`useChat.revertMessage`）：回退成功后返回被删消息的 `content`，供前端把文本填回输入框以便编辑重发；本地状态同步截断为 `prev.slice(0, index)`。UI 需二次确认。
+**客户端配合**（`useChat.revertMessage`）：回退内部仍被「强制重试」复用——回退成功后返回被删消息的 `content`，并以 `_force_compliance` 标记重发。用户侧不再有独立的「回退后填回输入框」入口：编辑改为气泡内联编辑，提交时由 `POST /api/chat` 的 `edit_message_id` 原子完成「截断 + 以新文本重新发问」（见 `module-chat.md`〈消息操作〉）。
+
+### PATCH /api/conversations/:id/messages/:messageId
+
+**编辑 AI 消息**：只修改历史内容，不触发任何上游生成。
+
+**请求**：`{ "content": "新的回复文本" }`（非空）
+
+**行为**：
+1. 校验会话属于当前用户 → 否则 404 `CONV_NOT_FOUND`
+2. 校验消息属于该会话 → 否则 404 `CONV_MESSAGE_NOT_FOUND`
+3. 只接受 `role = 'assistant'`，否则 400 `CHAT_EDIT_UNSUPPORTED`
+4. 更新 `messages.content`；trace 保留思考 / 工具 / 卡片条目，去掉旧正文分片，
+   末尾追加一份新文本；清空 suggestions
+5. 清理该消息的语音缓存；刷新 `conversations.updated_at`
+6. 广播 `conv_changed` + `conv_sync`
+
+**响应**：`{ "success": true }`。后续对话从 DB 重新装配历史，因此修改会自然影响
+「未来 AI 看到的历史」。
 
 ## 数据库 Schema
 

@@ -829,7 +829,12 @@ export function App() {
               viewLoading={chat.viewLoading}
               onSend={chat.sendMessage}
               onCancel={chat.cancel}
-              onRevert={chat.revertMessage}
+              onEditMessage={(index, content) =>
+                chat.editMessage(
+                  index,
+                  content,
+                  chat.isGroupMode ? chat.groupAgents.map((a: { id: string }) => a.id) : undefined,
+                )}
               onForceRetry={chat.forceComplianceRetry}
               onForceRetryGroup={chat.forceComplianceRetryGroup}
               backgroundImage={backgroundImage}

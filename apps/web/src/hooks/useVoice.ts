@@ -21,6 +21,9 @@ interface UseVoiceOptions {
 export function useVoice({ agentId, messageId, text, enabled }: UseVoiceOptions) {
   const [segments, setSegments] = useState<VoiceSegment[]>([])
   const [allReady, setAllReady] = useState(false)
+  /** 服务端没有该消息的语音缓存（未合成 / 内容被编辑后已清理）：隐藏播放按钮，
+   *  避免空 manifest 让加载动画无限轮询 */
+  const [unavailable, setUnavailable] = useState(false)
   const [playState, setPlayState] = useState<PlayState>(() => {
     // Check if pre-synthesized segments exist
     return 'idle'  // start idle — user clicks to trigger
@@ -28,6 +31,16 @@ export function useVoice({ agentId, messageId, text, enabled }: UseVoiceOptions)
   const [currentTime, setCurrentTime] = useState(0)
   const [totalDuration, setTotalDuration] = useState(0)
   const playbackRef = useRef<AudioPlaybackManager | null>(null)
+
+  // 消息内容 / 发言者变化（如编辑）：丢弃旧片段与播放态
+  useEffect(() => {
+    setSegments([])
+    setAllReady(false)
+    setUnavailable(false)
+    setPlayState('idle')
+    setCurrentTime(0)
+    setTotalDuration(0)
+  }, [agentId, messageId, text])
 
   // Listen for SSE voice_segment events
   useEffect(() => {
@@ -44,6 +57,7 @@ export function useVoice({ agentId, messageId, text, enabled }: UseVoiceOptions)
         audio_url: detail.audioUrl,
         duration_seconds: detail.duration,
       })
+      setUnavailable(false)
     }
 
     const onDone = (e: Event) => {
@@ -53,6 +67,7 @@ export function useVoice({ agentId, messageId, text, enabled }: UseVoiceOptions)
       const sorted = Array.from(collected.entries())
         .sort(([a], [b]) => a - b)
         .map(([, seg]) => seg)
+      if (sorted.length > 0) setUnavailable(false)
       setSegments(sorted)
       setAllReady(true)
       const total = sorted.reduce((sum, s) => sum + s.duration_seconds, 0)
@@ -88,17 +103,24 @@ export function useVoice({ agentId, messageId, text, enabled }: UseVoiceOptions)
       })
       if (!res.ok) throw new Error('Failed to fetch segments')
       const data = await res.json()
-      if (data.segments?.length > 0) {
-        setSegments(data.segments)
-        setTotalDuration(data.segments.reduce((sum: number, s: VoiceSegment) => sum + s.duration_seconds, 0))
+      const segs = Array.isArray(data.segments) ? data.segments : []
+      if (segs.length > 0) {
+        setSegments(segs)
+        setTotalDuration(segs.reduce((sum: number, s: VoiceSegment) => sum + s.duration_seconds, 0))
+        setUnavailable(false)
+      } else if (!data.complete) {
+        // 没有 manifest / 空片段且未完成：视为不可用，停止轮询
+        setUnavailable(true)
       }
       setAllReady(data.complete ?? false)
       if (data.complete) {
         setPlayState('ready')
-      } else {
+      } else if (segs.length > 0) {
         setPlayState('synthesizing')
+      } else {
+        setPlayState('idle')
       }
-      return data.complete
+      return data.complete === true || segs.length === 0
     } catch (err) {
       console.warn('[useVoice] Failed to fetch segments:', err)
       setPlayState('idle')
@@ -122,6 +144,7 @@ export function useVoice({ agentId, messageId, text, enabled }: UseVoiceOptions)
 
   // Play control
   const play = useCallback(async () => {
+    if (unavailable) return
     // If we have segments from SSE (ready), or need to fetch them
     let segs = segments
     if (segs.length === 0 || !allReady) {
@@ -166,7 +189,7 @@ export function useVoice({ agentId, messageId, text, enabled }: UseVoiceOptions)
     setPlayState('ready')
 
     pm.play()
-  }, [segments, allReady, agentId, messageId, fetchSegments])
+  }, [segments, allReady, agentId, messageId, fetchSegments, unavailable])
 
   const pause = useCallback(() => {
     playbackRef.current?.pause()
@@ -190,6 +213,7 @@ export function useVoice({ agentId, messageId, text, enabled }: UseVoiceOptions)
     playState,
     segments,
     allReady,
+    unavailable,
     currentTime,
     totalDuration,
     currentTimeFormatted: formatTime(currentTime),

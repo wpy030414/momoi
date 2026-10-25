@@ -96,6 +96,8 @@ export enum ErrCode {
   CHAT_WORLD_ONLY = 'CHAT_WORLD_ONLY',
   /** SSE：世界无成员 */
   CHAT_WORLD_NO_MEMBERS = 'CHAT_WORLD_NO_MEMBERS',
+  /** SSE / REST：编辑目标不存在、不属于该会话或角色不允许编辑 */
+  CHAT_EDIT_UNSUPPORTED = 'CHAT_EDIT_UNSUPPORTED',
   /** SSE：流水线未捕获异常（原 message 只进日志） */
   CHAT_INTERNAL_ERROR = 'CHAT_INTERNAL_ERROR',
 
@@ -345,6 +347,7 @@ export const ERR_REGISTRY: Readonly<Record<ErrCode, ErrMeta>> = {
   [ErrCode.CHAT_QUESTION_ALREADY_ANSWERED]: { status: 410 },
   [ErrCode.CHAT_WORLD_ONLY]: { status: 400 },
   [ErrCode.CHAT_WORLD_NO_MEMBERS]: { status: 400 },
+  [ErrCode.CHAT_EDIT_UNSUPPORTED]: { status: 400 },
   [ErrCode.CHAT_INTERNAL_ERROR]: { status: 500 },
 
   // AI / SSE 上游

@@ -52,6 +52,12 @@ export const doubaoConfig = {
   loginPollMs: envInt('DOUBAO_LOGIN_POLL_MS', 1500),
   loginTimeoutMs: envInt('DOUBAO_LOGIN_TIMEOUT_MS', 5 * 60_000),
 
+  // —— 后台凭证巡检（豆包没有 refresh token：只探测有效性并吸收轮换的 Cookie）——
+  /** 巡检间隔 */
+  keepaliveMs: envInt('DOUBAO_KEEPALIVE_MS', 15 * 60_000),
+  /** 单次巡检请求超时 */
+  keepaliveTimeoutMs: envInt('DOUBAO_KEEPALIVE_TIMEOUT_MS', 15_000),
+
   /**
    * 登录链路：
    *   douyin（默认）= 无头浏览器打开豆包登录弹窗 → 抖音官方授权页，展示抖音授权二维码；
@@ -76,6 +82,26 @@ export const doubaoConfig = {
   webIdEnv: env('DOUBAO_WEB_ID', ''),
   fpEnv: env('DOUBAO_FP', ''),
 
+  // —— 附件上传（ImageX）——
+  uploadEnabled: envBool('DOUBAO_UPLOAD', true),
+  maxAttachmentBytes: Math.max(1, envInt('DOUBAO_MAX_ATTACHMENT_MB', 20)) * 1024 * 1024,
+  maxAttachments: Math.max(1, envInt('DOUBAO_MAX_ATTACHMENTS', 10)),
+  allowPrivateUrls: envBool('DOUBAO_ALLOW_PRIVATE_URLS', false),
+  uploadTimeoutMs: Math.max(1000, envInt('DOUBAO_UPLOAD_TIMEOUT_MS', 120_000)),
+  prepareUploadPath: env('DOUBAO_PREPARE_UPLOAD_PATH', '/alice/resource/prepare_upload'),
+  preHandlePath: env('DOUBAO_PRE_HANDLE_PATH', '/alice/message/pre_handle_v2_without_conv'),
+  topPath: env('DOUBAO_TOP_PATH', '/top/v1'),
+  uploadTenantId: env('DOUBAO_UPLOAD_TENANT_ID', '5'),
+  uploadSceneId: env('DOUBAO_UPLOAD_SCENE_ID', '5'),
+
+  // —— 会话清理（每轮结束后删除豆包侧会话）——
+  autoDeleteConversation: envBool('DOUBAO_AUTO_DELETE_CONVERSATION', true),
+  cleanupTimeoutMs: Math.max(1000, envInt('DOUBAO_CLEANUP_TIMEOUT_MS', 10_000)),
+
+  // —— 思考展示 ——
+  /** cot_ui_style=summary 时上游只下发步骤标题；开启后把标题映射为 thinking 增量 */
+  emitThinkingSummary: envBool('DOUBAO_THINKING_SUMMARY', true),
+
   debug: envBool('DOUBAO_DEBUG', false),
 }
 
@@ -86,17 +112,22 @@ export const doubaoConfig = {
 export interface DoubaoModelPreset {
   id: string
   name: string
+  /** 网页菜单的 menu_type，同时也是 need_deep_think / ext.use_deep_think 的值 */
+  menuType: number
   modelItemKey: string
   modeId: string
   agentMode: number
   reasoningEffort: 3 | 4 | 5
   deepThink: boolean
+  /** 网页端 model_config.model_extra_params */
+  modelExtraParams?: Record<string, string>
 }
 
 export const MODEL_PRESETS: Record<string, DoubaoModelPreset> = {
   'doubao-fast': {
     id: 'doubao-fast',
     name: '豆包 · 快速',
+    menuType: 0,
     modelItemKey: '0',
     modeId: '1',
     agentMode: 2,
@@ -106,38 +137,46 @@ export const MODEL_PRESETS: Record<string, DoubaoModelPreset> = {
   'doubao-expert': {
     id: 'doubao-expert',
     name: '豆包 · 专家',
+    menuType: 3,
     modelItemKey: '3',
     modeId: '1',
     agentMode: 2,
     reasoningEffort: 4,
     deepThink: true,
+    modelExtraParams: { total_window_size: '256000' },
   },
   'doubao-work': {
     id: 'doubao-work',
     name: '豆包 · 工作任务 Auto',
+    menuType: 9,
     modelItemKey: '9',
     modeId: '3',
     agentMode: 1,
     reasoningEffort: 5,
     deepThink: false,
+    modelExtraParams: { total_window_size: '256000' },
   },
   'doubao-work-pro': {
     id: 'doubao-work-pro',
     name: '豆包 · 工作任务 Pro',
+    menuType: 5,
     modelItemKey: '5',
     modeId: '3',
     agentMode: 1,
     reasoningEffort: 5,
     deepThink: false,
+    modelExtraParams: { total_window_size: '256000' },
   },
   'doubao-2.1-lite': {
     id: 'doubao-2.1-lite',
     name: '豆包 2.1 Lite',
+    menuType: 10001,
     modelItemKey: 'seed-lite-7b',
     modeId: '3',
     agentMode: 1,
     reasoningEffort: 5,
     deepThink: false,
+    modelExtraParams: { memory_profile: '256k', total_window_size: '256000' },
   },
 }
 

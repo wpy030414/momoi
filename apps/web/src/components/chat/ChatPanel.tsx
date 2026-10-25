@@ -34,7 +34,8 @@ interface ChatPanelProps {
   viewLoading?: boolean
   onSend: (text: string, thinkingMode?: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>, agentId?: string | null, groupMode?: boolean, groupAgentIds?: string[], infiniteMode?: boolean) => void | Promise<void>
   onCancel: () => void
-  onRevert: (index: number) => Promise<string | null>
+  /** 编辑消息：用户消息触发截断 + 重新作答；AI 消息只改历史内容 */
+  onEditMessage: (index: number, content: string) => Promise<boolean>
   /** 强制合规重试（单聊）：回退消息后以 _force_compliance 标记重发 */
   onForceRetry?: (index: number) => Promise<void>
   /** 强制合规重试（群聊）：与 onSendGroup 对应的群聊版重发 */
@@ -89,7 +90,7 @@ interface ChatPanelProps {
 const NOOP = () => {}
 
 export function ChatPanel({
-  messages, loading, viewLoading, onSend, onCancel, onRevert, onForceRetry, onForceRetryGroup, backgroundImage, supportAttachments, supportInfiniteMode,
+  messages, loading, viewLoading, onSend, onCancel, onEditMessage, onForceRetry, onForceRetryGroup, backgroundImage, supportAttachments, supportInfiniteMode,
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
   isGroup, isQqGroup, isWorld, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
@@ -116,7 +117,6 @@ export function ChatPanel({
   // 收缩判定的锚点：记录「开始记录」时的 scrollTop。只有当前位置相对锚点的
   // 净位移达到 33vh 才收缩——来回小幅滚动会互相抵消，不会被累计距离误触发。
   const scrollAnchorRef = useRef(0)
-  const [revertedText, setRevertedText] = useState<string>('')
   // 深度思考已移除开关、强制开启（服务端 thinking_mode 恒 true）
   const [inputCollapsed, setInputCollapsed] = useState(false)
   const inputCollapsedRef = useRef(false)
@@ -244,13 +244,6 @@ export function ChatPanel({
     }
   }, [messages])
 
-  const handleRevert = useCallback(async (index: number) => {
-    const text = await onRevert(index)
-    if (text) {
-      setRevertedText(text)
-    }
-  }, [onRevert])
-
   const handleForceRetry = useCallback(async (index: number) => {
     // 与 handleSend 同款双通道分派：群聊走群聊版（groupMode 重发），
     // 单聊走单聊版 —— 误走群聊版会因不预建流式气泡而丢失全部 token 事件。
@@ -260,10 +253,6 @@ export function ChatPanel({
       await onForceRetry?.(index)
     }
   }, [isGroup, onForceRetryGroup, onForceRetry])
-
-  const handleExternalValueConsumed = useCallback(() => {
-    setRevertedText('')
-  }, [])
 
   const handleSend = useCallback((text: string, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => {
     if (isGroup && onSendGroup) {
@@ -338,8 +327,6 @@ export function ChatPanel({
               <InputBar
                 onSend={handleSend}
                 disabled={loading}
-                externalValue={revertedText}
-                onExternalValueConsumed={handleExternalValueConsumed}
                 infiniteMode={infiniteMode}
                 onInfiniteModeChange={onInfiniteModeChange ?? NOOP}
                 workspaces={workspaces}
@@ -383,8 +370,9 @@ export function ChatPanel({
           <MessageList
             messages={messages}
             onSuggestion={handleSuggestion}
-            onRevert={handleRevert}
+            onEditMessage={onEditMessage}
             onForceRetry={handleForceRetry}
+            actionsDisabled={loading || !!pendingQuestion}
             agentAvatar={isGroup ? null : directAgentAvatar}
             agents={isGroup ? (groupAgents || []) : agents}
             fallbackAgentName={isGroup ? undefined : directAgent?.name}
@@ -430,8 +418,6 @@ export function ChatPanel({
             <InputBar
               onSend={handleSend}
               disabled={loading || !!pendingQuestion}
-              externalValue={revertedText}
-              onExternalValueConsumed={handleExternalValueConsumed}
               infiniteMode={infiniteMode}
               onInfiniteModeChange={onInfiniteModeChange ?? NOOP}
               workspaces={workspaces}
