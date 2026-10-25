@@ -47,7 +47,7 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 | `app_name` | string | — | `Momoi` | 应用名称（白标） |
 | `app_favicon` | string | — | `""`（空=默认） | Favicon，base64 data URL |
 | `app_background` | string | — | `""`（空=无背景） | 聊天背景图，base64 data URL |
-| `gateway_source` | `'custom'` \| `'workbuddy'` | — | `custom` | 网关智能源；`custom` 用下列端点/密钥，`workbuddy` 由内置转发器接管（见 `module-workbuddy.md`） |
+| `gateway_source` | `'custom'` \| `'workbuddy'` \| `'doubao'` | — | `custom` | 网关上游类型；`custom` 用下列端点/密钥，`workbuddy` / `doubao` 由内置转发器接管（见 `module-workbuddy.md` / `module-doubao.md`） |
 | `api_endpoint` | string | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | API 地址（仅 `custom` 生效） |
 | `api_key` | string | `OPENAI_API_KEY` | `""` | API 密钥（明文存 `settings` 表） |
 | `context_window` | number | — | `128000` | 模型上下文窗口（tokens）；状态条「上下文（已用）%」的分母，非法值读取时夹回 128000 |
@@ -154,18 +154,19 @@ async function setSetting(key: string, value: string): Promise<void> {
 
 - 存在则 `UPDATE`，不存在则 `INSERT`（UPSERT 语义，但用两步实现）
 
-## 智能源（gateway_source）
+## 上游类型（gateway_source）
 
-网关设置的第一项。`custom`（默认）保持原有语义：管理员自配置 OpenAI 兼容端点与密钥；
-`workbuddy` 时请求改由 `apps/server/src/ai/workbuddy/` 转发到 WorkBuddy 官方网关，
-凭证由服务端托管，`api_endpoint` / `api_key` 不参与请求。
+网关设置的第一项（界面文案为「上游类型」）。`custom`（默认）保持原有语义：管理员自配置
+OpenAI 兼容端点与密钥；`workbuddy` 时请求改由 `apps/server/src/ai/workbuddy/` 转发到
+WorkBuddy 官方网关；`doubao` 时改由 `apps/server/src/ai/doubao/` 转发到豆包网页端。
+两种内置上游的凭证都由服务端托管，`api_endpoint` / `api_key` 不参与请求。
 
-- 读取收口：`parseGatewaySource` 只认显式 `'workbuddy'`，缺失或未知值一律回落 `custom`
+- 读取收口：`parseGatewaySource` 只认显式 `'workbuddy'` / `'doubao'`，缺失或未知值一律回落 `custom`
 - 写入收口：`updateConfig` 落库前做同样归一化，避免脏值
 - 配置导入导出：`gateway.gateway_source` 属于 gateway 白名单，枚举外取值报
   `CONFIG_IMPORT_BAD_GATEWAY_SOURCE`；凭证本身不在导出范围内
 
-详见 `module-workbuddy.md`。
+详见 `module-workbuddy.md` 与 `module-doubao.md`。
 
 ## Agent 管理
 

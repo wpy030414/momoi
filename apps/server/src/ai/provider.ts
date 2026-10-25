@@ -3,6 +3,7 @@ import type { ToolDefinition } from '@momoi/shared/types'
 import { ErrCode } from '@momoi/shared/errors'
 import { ApiError } from '../lib/apiError.js'
 import { postWorkBuddyChat } from './workbuddy/chat.js'
+import { streamDoubaoChat } from './doubao/chat.js'
 
 // Multimodal content parts (OpenAI-compatible)
 export type ContentPart =
@@ -131,7 +132,29 @@ export async function* streamChatCompletion(
   thinkingMode = true,
   timeoutMs = 120_000,
 ): AsyncGenerator<StreamEvent> {
-  // 智能源为 WorkBuddy 时请求不落到 config.api_endpoint：认证头、凭证轮换与
+  // 上游类型为 Doubao 时整段委托 ai/doubao/：豆包是私有 SSE 协议，适配层直接
+  // 产出 StreamEvent，不再经过下面的 OpenAI chunk 解析。连接超时与自配置端点
+  // 同语义——只覆盖「建立上游连接」，拿到响应头即清除。
+  if (config.gateway_source === 'doubao') {
+    const controller = new AbortController()
+    let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(() => controller.abort(), timeoutMs)
+    const clearConnectTimeout = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+    }
+    try {
+      yield* streamDoubaoChat(model, messages, thinkingMode, controller.signal, {
+        onConnected: clearConnectTimeout,
+      })
+    } finally {
+      clearConnectTimeout()
+    }
+    return
+  }
+
+  // 上游类型为 WorkBuddy 时请求不落到 config.api_endpoint：认证头、凭证轮换与
   // 上游协议差异全部封装在 ai/workbuddy/ 内。WorkBuddy 网关只接受流式，而本
   // 函数本来就恒为流式，因此解析与工具调用聚合逻辑零改动。
   const useWorkBuddy = config.gateway_source === 'workbuddy'

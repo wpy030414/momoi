@@ -303,7 +303,7 @@ routes/chat.ts
   │     ├── @earendil-works/pi-agent-core（runAgentLoop）
   │     ├── @earendil-works/pi-ai（createAssistantMessageEventStream）
   │     ├── @sinclair/typebox（工具参数 schema）
-  │     ├── ai/provider.ts（API 客户端；gateway_source=workbuddy 时委托 ai/workbuddy/ 转发）
+  │     ├── ai/provider.ts（API 客户端；gateway_source=workbuddy/doubao 时委托对应内置上游转发）
   │     ├── ai/tools.ts → tools/registry.ts（12 个内置工具）
   │     ├── skills/registry.ts（技能注册表）
   │     └── config.ts（获取 Agent 配置）
@@ -330,7 +330,10 @@ routes/admin.ts
   ├── auth.ts（JWT 认证）
   ├── config.ts（配置 + Agent CRUD + MCP Server CRUD + TTS 配置）
   ├── prompts/（提示词规则引擎，见 routes/prompts.ts —— 目录 / 单片段 / 预览）
-  ├── ai/workbuddy/（WorkBuddy 智能源，见 routes/workbuddy.ts —— 登录 / 凭证状态 / 退出）
+  ├── ai/workbuddy/（WorkBuddy 上游，见 routes/workbuddy.ts —— 微信二维码登录 / 凭证状态 / 退出）
+  ├── ai/doubao/（豆包网页上游，见 routes/doubao.ts —— 抖音授权二维码登录 / Cookie 凭证 / 风控标记）
+  ├── lib/encrypted-settings.ts（两类上游凭证共用的 AES-256-GCM settings 读写）
+  ├── lib/headless-browser.ts（两类上游登录共用的系统 Edge/Chrome 启动器）
   └── skills/loader.ts（技能注册表）
 
 routes/app.ts → config.ts
@@ -583,7 +586,7 @@ App
 │     ├── InputBar（文本输入 + 附件 + 思考模式 + 无限模式开关 + 发送）
 ├── AdminScreen（密钥认证；侧边栏顺序 = ADMIN_TABS 顺序）
 │     ├── ConfigTransfer（配置 YAML 导出/导入；两个方向都需 PIN 二次校验）
-│     ├── GatewaySettings（API 地址 + 密钥 + 上下文窗口 + 4 个功能开关）
+│     ├── GatewaySettings（上游类型 + API 地址/密钥或内置上游凭证 + 上下文窗口 + 功能开关）
 │     ├── ExperienceSettings（应用名称 + Favicon + 背景图 + 首页推荐问题 + 聊天常用追问）
 │     ├── AgentManager（Agent CRUD + TTS 语音配置）
 │     ├── McpManager（MCP 服务器 CRUD）

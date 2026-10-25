@@ -1,0 +1,221 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Button } from '../../ui/button'
+import { Loading } from '../../ui/spinner'
+import { useToast } from '../../ui/toast'
+import { AlertTriangle, LogIn, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
+import { api } from '../../../lib/api'
+import type { DoubaoLoginStatus, DoubaoStatus } from '@momoi/shared/types'
+
+const POLL_MS = 1500
+const LOGIN_DEADLINE_MS = 5 * 60_000
+
+/**
+ * Doubao（豆包网页）上游的凭证面板。
+ *
+ * 与 WorkBuddyCredentialPanel 保持同一套 UI/UX 状态机：进入面板拉状态、点登录后
+ * 轮询进度、展示二维码、失败/超时可刷新、退出登录清除凭证。差异仅在凭证字段
+ * 与二维码来源（豆包是抖音授权二维码，WorkBuddy 是微信二维码）。
+ *
+ * 登录完全在服务端完成：POST /login 取回二维码 data URL，服务端后台轮询扫码状态；
+ * 本组件只负责展示二维码并轮询进度。二维码等同临时登录凭据，登录成功后服务端
+ * 不再下发。
+ */
+export function DoubaoCredentialPanel() {
+  const { t } = useTranslation()
+  const { toast } = useToast()
+  const [credential, setCredential] = useState<DoubaoStatus | null>(null)
+  const [login, setLogin] = useState<DoubaoLoginStatus | null>(null)
+  const [starting, setStarting] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stopPolling = useCallback(() => {
+    if (pollTimer.current) {
+      clearInterval(pollTimer.current)
+      pollTimer.current = null
+    }
+  }, [])
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      setCredential(await api.doubaoStatus())
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setLoaded(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshStatus()
+    return stopPolling
+  }, [refreshStatus, stopPolling])
+
+  const startLogin = useCallback(async () => {
+    stopPolling()
+    setStarting(true)
+    try {
+      const initial = await api.doubaoLogin()
+      setLogin(initial)
+      const deadline = Date.now() + LOGIN_DEADLINE_MS
+      pollTimer.current = setInterval(async () => {
+        if (Date.now() > deadline) {
+          stopPolling()
+          setLogin((prev) => ({ ...(prev ?? { status: 'failed' }), status: 'failed', message: t('settings.gatewayLoginTimeout') }))
+          return
+        }
+        try {
+          const status = await api.doubaoLoginStatus()
+          setLogin(status)
+          if (status.status === 'success') {
+            stopPolling()
+            if (status.credential) setCredential(status.credential)
+            else void refreshStatus()
+            toast({ title: t('settings.gatewayLoginSuccess'), variant: 'success' })
+          } else if (status.status === 'failed' || status.status === 'expired') {
+            stopPolling()
+            toast({ title: status.status === 'expired' ? t('settings.gatewayLoginExpired') : t('settings.gatewayLoginFailed'), variant: 'error' })
+          } else if (status.status === 'idle') {
+            // 服务端重启或登录会话已被清理：停止轮询，回到未登录态
+            stopPolling()
+          }
+        } catch (err) {
+          console.error(err)
+        }
+      }, POLL_MS)
+    } catch (err) {
+      console.error(err)
+      setLogin({
+        status: 'failed',
+        message: err instanceof Error ? err.message : String(err),
+      })
+      toast({ title: t('settings.gatewayLoginFailed'), variant: 'error' })
+    } finally {
+      setStarting(false)
+    }
+  }, [refreshStatus, stopPolling, t, toast])
+
+  const handleLogout = useCallback(async () => {
+    stopPolling()
+    try {
+      await api.doubaoLogout()
+      setCredential({ logged_in: false, needs_captcha: false })
+      setLogin(null)
+      toast({ title: t('settings.gatewayLogoutSuccess'), variant: 'success' })
+    } catch (err) {
+      console.error(err)
+    }
+  }, [stopPolling, t, toast])
+
+  const handleResetCaptcha = useCallback(async () => {
+    try {
+      await api.doubaoResetCaptcha()
+      await refreshStatus()
+      toast({ title: t('settings.doubaoResetCaptchaDone'), variant: 'success' })
+    } catch (err) {
+      console.error(err)
+    }
+  }, [refreshStatus, t, toast])
+
+  if (!loaded && !login) return <Loading className="py-8" />
+
+  const loggedIn = credential?.logged_in === true
+  const needsCaptcha = credential?.needs_captcha === true
+  const waiting = login?.status === 'pending' || login?.status === 'scanned'
+  const failed = login?.status === 'failed' || login?.status === 'expired'
+
+  return (
+    <div>
+      <label className="text-sm font-medium">{t('settings.gatewayCredential')}</label>
+      <div className="mt-1 rounded-lg border bg-muted/30 p-4 space-y-3">
+        <div className="flex items-center gap-2 text-sm">
+          <ShieldCheck className={loggedIn ? 'h-4 w-4 text-green-500' : 'h-4 w-4 text-muted-foreground'} />
+          <span className="font-medium">
+            {waiting
+              ? login?.status === 'scanned'
+                ? t('settings.gatewayScanScanned')
+                : t('settings.gatewayScanWaiting')
+              : loggedIn
+                ? t('settings.gatewayLoggedIn')
+                : t('settings.gatewayNotLoggedIn')}
+          </span>
+        </div>
+
+        {loggedIn && (
+          <div className="text-sm text-muted-foreground space-y-1">
+            {(credential?.nickname || credential?.uid) && (
+              <div>
+                {t('settings.gatewayAccount')}：{credential.nickname || credential.uid}
+                {credential.nickname && credential.uid ? ` (${credential.uid})` : ''}
+              </div>
+            )}
+            {credential?.saved_at && (
+              <div>{t('settings.doubaoSavedAt')}：{new Date(credential.saved_at).toLocaleString()}</div>
+            )}
+            {typeof credential?.cookie_count === 'number' && (
+              <div>{t('settings.doubaoCookieCount')}：{credential.cookie_count}</div>
+            )}
+            {credential?.source === 'env' && (
+              <div>{t('settings.doubaoFromEnv')}</div>
+            )}
+          </div>
+        )}
+
+        {waiting && login?.qr_data_url && (
+          <div className="space-y-2">
+            <img
+              src={login.qr_data_url}
+              alt={t('settings.doubaoQrAlt')}
+              className="mx-auto h-44 w-44 rounded-md bg-white p-2"
+            />
+            <p className="text-center text-xs text-muted-foreground">
+              {login.flow === 'doubao' ? t('settings.doubaoScanHintDoubao') : t('settings.doubaoScanHint')}
+            </p>
+            {login.expire_at && (
+              <p className="text-center text-xs text-muted-foreground">
+                {t('settings.gatewayQrExpiresAt')}：{new Date(login.expire_at).toLocaleTimeString()}
+              </p>
+            )}
+          </div>
+        )}
+
+        {failed && login?.message && (
+          <p className="text-sm text-destructive break-words">{login.message}</p>
+        )}
+
+        {needsCaptcha && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div className="space-y-1">
+              <p>{t('settings.doubaoNeedsCaptcha')}</p>
+              <Button size="sm" variant="outline" onClick={handleResetCaptcha}>
+                {t('settings.doubaoResetCaptcha')}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 pt-1">
+          {waiting || failed ? (
+            <Button size="sm" onClick={startLogin} disabled={starting}>
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              {starting ? t('settings.gatewayStarting') : t('settings.gatewayRefreshQr')}
+            </Button>
+          ) : (
+            <Button size="sm" onClick={startLogin} disabled={starting}>
+              <LogIn className="mr-1.5 h-3.5 w-3.5" />
+              {starting ? t('settings.gatewayStarting') : loggedIn ? t('settings.gatewayRelogin') : t('settings.gatewayScanLogin')}
+            </Button>
+          )}
+          {loggedIn && !waiting && (
+            <Button size="sm" variant="outline" onClick={handleLogout}>
+              <LogOut className="mr-1.5 h-3.5 w-3.5" />
+              {t('settings.gatewayLogout')}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

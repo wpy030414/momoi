@@ -54,7 +54,7 @@ pnpm monorepo：应用 (`apps/`) 与可复用包 (`packages/`)，纯 workspace �
 | 路径 | 用途 |
 |---|---|
 | `apps/server/src/` | Hono 后端（入口：`index.ts`） |
-| `apps/server/src/ai/` | Pi Agent Core 适配层 + 群聊编排 + 中立 Agent + TTS |
+| `apps/server/src/ai/` | Pi Agent Core 适配层 + 群聊编排 + 中立 Agent + TTS + 内置上游（WorkBuddy / 豆包） |
 | `apps/server/src/prompts/` | 提示词规则引擎（全部提示词文本所在：片段 / 配方 / 分层组装） |
 | `apps/server/src/tools/` | 内置工具系统 + MCP 客户端 |
 | `apps/server/src/skills/` | 技能加载和注册 |

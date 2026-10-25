@@ -45,6 +45,7 @@ afterAll(() => {
 
 const store = await import('../src/ai/workbuddy/credentials.js')
 const manager = await import('../src/ai/workbuddy/token-manager.js')
+const wechatQr = await import('../src/ai/workbuddy/wechat-qr.js')
 
 function credential(overrides: Partial<Parameters<typeof store.writeCredential>[0]> = {}) {
   return {
@@ -66,6 +67,68 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+
+describe('wechat-qr — 登录页微信二维码捕获', () => {
+  const TINY_BYTES = Buffer.from('mock-jpeg-bytes')
+
+  function fakeBrowser(emitQr: boolean) {
+    const state = { closed: false }
+    let handler: ((res: any) => unknown) | null = null
+    const context = {
+      on: (event: string, h: (res: any) => unknown) => {
+        if (event === 'response') handler = h
+      },
+      newPage: async () => ({
+        goto: async () => {
+          if (!emitQr) return
+          handler?.({
+            url: () => 'https://open.weixin.qq.com/connect/qrcode/mock',
+            headers: () => ({ 'content-type': 'image/jpeg' }),
+            body: async () => TINY_BYTES,
+          })
+          // 微信扫码长轮询：404 = 已扫码待确认
+          handler?.({
+            url: () => 'https://lp.open.weixin.qq.com/connect/l/qrconnect?uuid=mock',
+            headers: () => ({ 'content-type': 'text/plain' }),
+            text: async () => 'window.wx_errcode=404;',
+          })
+          await new Promise((r) => setTimeout(r, 10))
+        },
+      }),
+    }
+    const browser = {
+      newContext: async () => context,
+      close: async () => {
+        state.closed = true
+      },
+    }
+    return { browser, state }
+  }
+
+  it('截获微信二维码图片并转成 data URL，close 关闭浏览器', async () => {
+    const fake = fakeBrowser(true)
+    const session = await wechatQr.openWechatQrLogin('https://www.workbuddy.cn/login?state=x', {
+      launchBrowser: async () => fake.browser as never,
+      timeoutMs: 500,
+    })
+    expect(session).not.toBeNull()
+    expect(session!.getQr()).toBe(`data:image/jpeg;base64,${TINY_BYTES.toString('base64')}`)
+    expect(session!.getStatus()).toBe('scanned')
+    await session!.close()
+    expect(fake.state.closed).toBe(true)
+  })
+
+  it('浏览器未产出二维码时超时返回 null，并关闭浏览器', async () => {
+    const fake = fakeBrowser(false)
+    const session = await wechatQr.openWechatQrLogin('https://www.workbuddy.cn/login?state=x', {
+      launchBrowser: async () => fake.browser as never,
+      timeoutMs: 30,
+    })
+    expect(session).toBeNull()
+    expect(fake.state.closed).toBe(true)
+  })
 })
 
 describe('credentials — 加密落库', () => {

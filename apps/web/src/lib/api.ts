@@ -308,11 +308,18 @@ export const api = {
   // automatically; the server additionally checks ADMIN-list membership.
   getConfig: () => request<import('@momoi/shared/types').AppConfig>('/api/admin/config'),
   getEnvGateway: () => request<{ api_endpoint: string; api_key: string; model: string }>('/api/admin/config/env-gateway'),
-  // Admin - WorkBuddy 智能源（凭证由服务端托管并后台自动轮换）
+  // Admin - WorkBuddy 上游（凭证由服务端托管并后台自动轮换）
   workbuddyStatus: () => request<import('@momoi/shared/types').WorkBuddyStatus>('/api/admin/workbuddy/status'),
   workbuddyLogin: () => request<{ auth_url: string; state: string }>('/api/admin/workbuddy/login', { method: 'POST', body: '{}' }),
   workbuddyLoginStatus: () => request<import('@momoi/shared/types').WorkBuddyLoginStatus>('/api/admin/workbuddy/login/status'),
   workbuddyLogout: () => request<{ success: boolean }>('/api/admin/workbuddy/logout', { method: 'POST', body: '{}' }),
+
+  // Admin - Doubao（豆包网页）上游（扫码登录，Cookie 凭证由服务端加密托管）
+  doubaoStatus: () => request<import('@momoi/shared/types').DoubaoStatus>('/api/admin/doubao/status'),
+  doubaoLogin: () => request<import('@momoi/shared/types').DoubaoLoginStatus>('/api/admin/doubao/login', { method: 'POST', body: '{}' }),
+  doubaoLoginStatus: () => request<import('@momoi/shared/types').DoubaoLoginStatus>('/api/admin/doubao/login/status'),
+  doubaoLogout: () => request<{ success: boolean }>('/api/admin/doubao/logout', { method: 'POST', body: '{}' }),
+  doubaoResetCaptcha: () => request<{ success: boolean }>('/api/admin/doubao/reset-captcha', { method: 'POST', body: '{}' }),
   updateConfig: (config: Partial<import('@momoi/shared/types').AppConfig>) => request<import('@momoi/shared/types').AppConfig>('/api/admin/config', { method: 'PUT', body: JSON.stringify(config) }),
 
   // Admin - Agent CRUD

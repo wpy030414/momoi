@@ -1810,3 +1810,69 @@
 - shared：`AppConfig.gateway_source`、`WorkBuddyStatus` / `WorkBuddyLoginStatus`、`CONFIG_IMPORT_BAD_GATEWAY_SOURCE`
 - web：网关页新增智能源选择与凭证面板；右上角「从环境变量加载」仅在自配置时显示；三语新增文案
 - 测试：`test/workbuddy-token.test.ts`（密文落库 / 续期写回 / 无凭证提示）、`test/config-transfer.test.ts` 增补 gateway_source 用例
+
+---
+
+## D65：上游类型改名 + 豆包（Doubao）上游——移植抖音授权登录与私有 SSE 适配
+
+**日期**：2026-10-25
+
+**背景**：网关第一项配置原先叫「智能源」，现在需要同时支持三类上游：自配置 OpenAI 兼容端点、WorkBuddy、以及豆包（Doubao）网页端。参考实现 `xrp-doubao` 是 xrl-router 的插件进程（独立端口 + WS 注册 + Playwright 登录）；Momoi 是自托管单体应用，没有 xrl-router，需要把登录与转发收进单进程，同时**必须展示抖音官方授权二维码**——豆包自助扫码码是另一条链路，不能拿来冒充。
+
+**决策**：
+1. **界面文案改名**：`设置 → 网关 → 智能源` 改为 `上游类型`；数据库键 `gateway_source` 与枚举值 `custom` / `workbuddy` 保持不变（存量配置与导出文件零迁移），新增 `doubao`。
+2. **豆包内核移植进服务端**：新增 `apps/server/src/ai/doubao/`（配置、Cookie 罐、设备指纹、请求参数、SSE 解析、消息压平、登录驱动、凭证、风控标记、私有协议客户端、流式适配），路由挂在 `/api/admin/doubao/*`，前端新增二维码凭证面板。
+3. **默认登录采用抖音 OAuth 授权页**：服务端用 `playwright-core` 拉起无头系统 Edge/Chrome，复刻豆包官方登录弹窗 → 抖音官方授权页（`open.douyin.com`）；拦截授权页请求 `/oauth/get_qrcode/` 的响应，把**抖音授权二维码**原样回传管理端。用户扫码 / 短信验证码授权后，由豆包官方页面自行完成 code 换票，服务端从浏览器上下文提取 Cookie。纯 HTTP 的豆包自助扫码链路保留为 `DOUBAO_LOGIN_FLOW=doubao` 灾备选项。
+4. **协议适配直出 `StreamEvent`**：`provider.ts` 在 `gateway_source=doubao` 时整段委托 `streamDoubaoChat`，不把豆包私有 SSE 伪装成 OpenAI chunk；连接超时语义与自配置端点一致（只覆盖建连）。
+5. **凭证与 WorkBuddy 共用加密实现**：抽出 `lib/encrypted-settings.ts`（AES-256-GCM + 与库同存密钥），WorkBuddy / Doubao 各自使用独立的值键与密钥键；豆包没有 refresh token，因此不设后台轮换 keeper。
+
+**为什么默认用无头 Playwright 展示抖音二维码**：
+- ✅ **产品语义要求**：管理端必须展示抖音官方授权码（二维码解码为 `aweme://authorizedy?...`），豆包自助扫码码不是同一个东西。
+- ✅ **换票只能由官方页面完成**：参考实现实测，在 Node 端重放抖音回调 `code` 会被豆包判为「非法应用」（缺少页面上下文）；把授权页放在真实浏览器里，由豆包页面自己换票并写 Cookie，是已验证可行的链路。
+- ✅ **无头即可**：二维码回传到管理端展示，用户用手机扫描；浏览器不需要桌面会话，服务器 / 容器里也能跑。
+- ⚠️ **代价如实记录**：`playwright-core` 需要系统 Edge/Chrome（或显式指定 Chromium 可执行文件）；无浏览器环境会登录失败。为此保留纯 HTTP 的 `DOUBAO_LOGIN_FLOW=doubao` 灾备链路，并在错误信息里明确指引（安装浏览器或切回退链路）。
+- ⚠️ 若上游页面结构变化导致选择器失效，先更新 `douyin-login.ts` 的选择器；灾备链路与 `DOUBAO_COOKIES` 可临时顶上。
+
+**为什么凭证不能当 api_endpoint + api_key 填进配置**：
+- ❌ 豆包上游认证是整套网页 Cookie（`sessionid` / `ttwid` / CSRF）加设备指纹，不是 Bearer key；请求 URL 还带一整套设备参数。
+- ❌ 会话会失效且没有 refresh token；服务端必须能检测失效并提示重新登录。
+- ✅ 服务端托管 Cookie + 请求时组头，管理端只展示账号、时间戳、Cookie 条数与风控标记。
+
+**关键取舍**：
+- **只支持文本**：图片 / 音频 / 文件输入返回可读错误。
+- **不实现 tools / function calling**：豆包网页端没有稳定的原生 tool_call 协议，不伪造该语义；工具定义被忽略，Agent 只拿文本回复。
+- **不绕过风控**：71002200x 系列只置位 `needs_captcha`，等待管理员在浏览器完成人机验证后手动清除，或重新登录。
+- **二维码等同临时凭据**：只在 `pending` / `scanned` 期间下发，登录成功后不再出现在任何响应里；登录成功 / 超时 / 失败都会关闭浏览器。
+- **静态模型映射**：`doubao-fast` / `doubao-expert` / `doubao-work` / `doubao-work-pro` / `doubao-2.1-lite` 及短别名；未知模型名回落 `doubao-fast`。
+
+**影响**：
+- shared：`GatewaySource` 增加 `doubao`；新增 `DoubaoStatus` / `DoubaoLoginStatus`（含 `flow` 字段）
+- server：新增 `ai/doubao/*`（含默认 `douyin-login.ts` 与灾备 `web-login.ts`）、`routes/doubao.ts`、`lib/encrypted-settings.ts`（WorkBuddy 凭证层同步改用）；新增依赖 `playwright-core`；`ai/provider.ts` 增加 doubao 分支；`lib/config.ts` 与 `lib/config-transfer.ts` 接受 `doubao`；`routes/admin.ts` 挂载端点
+- web：网关页文案改为「上游类型」，新增豆包选项与二维码凭证面板；三语新增文案；导入错误文案补充 doubao
+- 测试：`test/doubao.test.ts`（抖音二维码拦截 / 登录状态机 / 密文落库 / 协议适配 / 回退 / 错误映射 / 风控标记）；`test/config-transfer.test.ts` 增补 doubao 枚举
+- 文档：新增 `docs/specs/module-doubao.md`；`module-config.md`、`module-workbuddy.md`、`ARCHITECTURE.md`、`PRD.md` 同步改名与结构
+
+---
+
+## D66：WorkBuddy 登录改为服务端截获微信二维码，面板不再弹出网页
+
+**日期**：2026-10-25
+
+**背景**：D64 的 WorkBuddy 登录让前端 `window.open(auth_url)` 打开腾讯托管登录页。实际登录页默认就是「微信扫码登录」，管理员每次都要多开一个标签页，体验与豆包面板不一致。已实测：登录页加载时会请求 `/console/auth/wechat-url` 拿到微信 OAuth 地址，随后从 `https://open.weixin.qq.com/connect/qrcode/<uuid>` 拉取二维码图片（image/jpeg）。
+
+**决策**：服务端在 `beginLogin()` 后异步用无头系统浏览器打开 `auth_url`，拦截 `open.weixin.qq.com/connect/qrcode/` 的图片响应，转成 data URL 通过 `/login/status` 的 `qr_data_url` 下发给凭证面板；浏览器保持打开，让微信 OAuth 回跳并完成 state 换票，随后仍由既有的 token 轮询取票。前端**不再自动 `window.open`**，只在二维码未出现（无浏览器 / 超时）时提供「打开登录页」链接。
+
+**关键取舍**：
+- **复用同一次浏览器会话完成 OAuth**：只把二维码搬进面板，不尝试在 Node 端重放微信回调；浏览器是官方登录链路的执行者。
+- **浏览器不可用则优雅回退**：`openWechatQrLogin` 返回 null，登录仍可用旧方式（点击链接在管理员自己的浏览器完成），不会因为缺少 Edge/Chrome 而完全不可用。
+- **浏览器启动器与豆包共用**：抽出 `lib/headless-browser.ts`，两个上游各自通过 `WORKBUDDY_BROWSER_*` / `DOUBAO_BROWSER_*` 配置通道、可执行文件与参数。
+- **二维码只在下发窗口期出现**：`pending` 时随状态轮询下发，成功 / 失败后不再返回；日志不打印二维码内容。
+- **仍是全局单凭证**：与 `api_key` 同级，一次扫码全站生效；退出登录会关闭登录浏览器并删除凭证。
+- **两个凭证面板共用同一套 UI/UX**：`WorkBuddyCredentialPanel` 与 `DoubaoCredentialPanel` 使用相同的状态机与通用文案键（等待扫码 / 刷新二维码 / 扫码登录 / 重新登录 / 退出登录 / 超时与失败提示），差异仅在凭证字段、二维码来源与回退链接。
+
+**影响**：
+- server：新增 `ai/workbuddy/wechat-qr.ts`、`lib/headless-browser.ts`；`token-manager.ts` 登录会话增加 `qrDataUrl` 与浏览器生命周期；`workbuddy/config.ts` 新增浏览器 / 二维码等待配置；`doubao/douyin-login.ts` 改用共用启动器
+- shared：`WorkBuddyLoginStatus.qr_data_url`
+- web：WorkBuddy 凭证面板直接展示微信二维码，移除自动弹窗，保留「打开登录页」回退链接；三语文案同步
+- 测试：`test/workbuddy-token.test.ts` 新增二维码截获 / 超时回退用例；本机真实冒烟在 3.2s 内截获 image/jpeg 二维码
+- 文档：`module-workbuddy.md` 登录流程、环境变量、接口契约与验收标准同步

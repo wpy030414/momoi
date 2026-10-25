@@ -1,5 +1,5 @@
 /**
- * WorkBuddy 智能源管理端点（挂在 /api/admin/workbuddy 下，由 admin.ts 统一鉴权）。
+ * WorkBuddy 上游管理端点（挂在 /api/admin/workbuddy 下，由 admin.ts 统一鉴权）。
  *
  * 凭证是全局的（与 api_key 同级）——网关只有一份工作账号，管理员登录后
  * 全站请求共用；服务端持票并在后台自动轮换，token 从不上前端。

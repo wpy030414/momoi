@@ -224,7 +224,7 @@ function validateGateway(v: unknown, errors: ImportIssue[]): ConfigExportGateway
     const val = v[key]
     switch (key) {
       case 'gateway_source': {
-        if (val !== 'custom' && val !== 'workbuddy') {
+        if (val !== 'custom' && val !== 'workbuddy' && val !== 'doubao') {
           errors.push({ path: 'gateway.gateway_source', code: ErrCode.CONFIG_IMPORT_BAD_GATEWAY_SOURCE })
         } else {
           out.gateway_source = val

@@ -20,6 +20,7 @@ import AdmZip from 'adm-zip'
 import { stopBotForUser, stopAllBotsForUser } from '../im/qq/manager.js'
 import { promptsRoute } from './prompts.js'
 import { workbuddyRoute } from './workbuddy.js'
+import { doubaoRoute } from './doubao.js'
 
 import { repoRoot } from '../lib/paths.js'
 
@@ -52,12 +53,17 @@ adminRoute.use('/prompts', adminAuthMiddleware)
 adminRoute.use('/prompts/*', adminAuthMiddleware)
 adminRoute.use('/workbuddy', adminAuthMiddleware)
 adminRoute.use('/workbuddy/*', adminAuthMiddleware)
+adminRoute.use('/doubao', adminAuthMiddleware)
+adminRoute.use('/doubao/*', adminAuthMiddleware)
 
 // 提示词目录与预览（提示词规则引擎的运行时入口，见 routes/prompts.ts）
 adminRoute.route('/prompts', promptsRoute)
 
-// WorkBuddy 智能源：登录 / 状态 / 退出（凭证由服务端托管，见 ai/workbuddy/）
+// WorkBuddy 上游：登录 / 状态 / 退出（凭证由服务端托管，见 ai/workbuddy/）
 adminRoute.route('/workbuddy', workbuddyRoute)
+
+// Doubao（豆包网页）上游：扫码登录 / 状态 / 退出 / 风控标记（见 ai/doubao/）
+adminRoute.route('/doubao', doubaoRoute)
 
 // Get current config
 adminRoute.get('/config', async (c) => {

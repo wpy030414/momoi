@@ -95,9 +95,9 @@ function parseContextWindow(raw: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 128000
 }
 
-/** 智能源取值收口：只有显式的 workbuddy 才切换，其余（缺失/未知）一律 custom */
+/** 上游类型取值收口：只认显式的 workbuddy / doubao，其余（缺失/未知）一律 custom */
 function parseGatewaySource(raw: string | undefined): AppConfig['gateway_source'] {
-  return raw === 'workbuddy' ? 'workbuddy' : 'custom'
+  return raw === 'workbuddy' || raw === 'doubao' ? raw : 'custom'
 }
 
 function buildConfig(map: Map<string, string>): AppConfig {
@@ -141,7 +141,7 @@ export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConf
         stored = JSON.stringify(value)
       } else if (key === 'gateway_source') {
         // 落库前同样收口，避免脏值在 DELETE/迁移时被当成「已配置」
-        stored = value === 'workbuddy' ? 'workbuddy' : 'custom'
+        stored = value === 'workbuddy' || value === 'doubao' ? value : 'custom'
       } else if (numberKeys.includes(key)) {
         stored = String(value)
       } else if (boolKeys.includes(key)) {

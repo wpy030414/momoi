@@ -15,6 +15,7 @@ import {
   type WorkBuddyCredential,
 } from './credentials.js'
 import { fetchAccount, pollOnce, requestHandshake, uidFromToken } from './web-login.js'
+import { openWechatQrLogin, type WechatQrSession } from './wechat-qr.js'
 import type { WorkBuddyLoginStatus, WorkBuddyStatus } from '@momoi/shared/types'
 
 let cached: WorkBuddyCredential | null = null
@@ -23,9 +24,12 @@ let refreshing: Promise<WorkBuddyCredential> | null = null
 interface LoginSession {
   state: string
   authUrl: string
-  status: 'pending' | 'success' | 'failed'
+  status: 'pending' | 'scanned' | 'success' | 'failed'
   startedAt: number
   message?: string
+  /** 登录页的微信二维码（浏览器不可用时缺省，前端回退为打开登录页） */
+  qrDataUrl?: string
+  wechat?: WechatQrSession | null
 }
 
 let session: LoginSession | null = null
@@ -152,7 +156,7 @@ let keeperTimer: ReturnType<typeof setInterval> | null = null
  * 启动后台自动轮换（幂等）。
  *
  * 只要本地存在凭证就巡检——不以「网关当前是否选中 WorkBuddy」为前提：
- * 管理员选中智能源后可能还没点保存，而登录已经完成；此时若按已保存的
+ * 管理员选中上游类型后可能还没点保存，而登录已经完成；此时若按已保存的
  * 配置跳过轮换，凭证会在无人察觉中过期。没有凭证时本函数每分钟只做一次
  * 空查询，代价可忽略。
  */
@@ -191,8 +195,35 @@ export async function getStatus(): Promise<WorkBuddyStatus> {
   }
 }
 
-/** 发起网页登录：返回浏览器登录地址，并启动后台换票循环 */
+/** 异步捕获登录页的微信二维码；浏览器不可用时保持「打开登录页」回退形态 */
+async function attachWechatQr(current: LoginSession): Promise<void> {
+  try {
+    const wechat = await openWechatQrLogin(current.authUrl)
+    if (!wechat) return
+    if (session !== current || current.status !== 'pending') {
+      await wechat.close().catch(() => {})
+      return
+    }
+    current.wechat = wechat
+    current.qrDataUrl = wechat.getQr() ?? undefined
+  } catch (err) {
+    console.warn(`[workbuddy] 微信二维码捕获失败：${errMessage(err)}`)
+  }
+}
+
+async function closeWechat(current: LoginSession): Promise<void> {
+  const wechat = current.wechat
+  current.wechat = null
+  if (wechat) await wechat.close().catch(() => {})
+}
+
+/** 发起网页登录：返回登录页地址（并附微信二维码），启动后台换票循环 */
 export async function beginLogin(): Promise<{ auth_url: string; state: string }> {
+  // 同一时间只保留一个登录会话；旧的登录浏览器先关掉
+  const previous = session
+  session = null
+  if (previous?.wechat) await previous.wechat.close().catch(() => {})
+
   const handshake = await requestHandshake()
   const next: LoginSession = {
     state: handshake.state,
@@ -201,6 +232,7 @@ export async function beginLogin(): Promise<{ auth_url: string; state: string }>
     startedAt: Date.now(),
   }
   session = next
+  void attachWechatQr(next)
   void runLogin(next)
   return { auth_url: handshake.authUrl, state: handshake.state }
 }
@@ -208,12 +240,14 @@ export async function beginLogin(): Promise<{ auth_url: string; state: string }>
 /** 后台换票：轮询到 token 即取账号、落盘，并让后续请求立即用上新凭证 */
 async function runLogin(current: LoginSession): Promise<void> {
   const deadline = current.startedAt + cfg.loginTimeoutMs
+  const waitingStatus = () => current.status === 'pending' || current.status === 'scanned'
   let failures = 0
 
-  while (session === current && current.status === 'pending') {
+  while (session === current && waitingStatus()) {
     if (Date.now() > deadline) {
       current.status = 'failed'
       current.message = '登录超时，请重新发起登录'
+      void closeWechat(current)
       return
     }
     try {
@@ -233,9 +267,14 @@ async function runLogin(current: LoginSession): Promise<void> {
         await writeCredential(credential)
         cached = credential
         current.status = 'success'
+        void closeWechat(current)
         console.log(`[workbuddy] 登录成功：uid=${credential.uid || '<空>'}`)
         return
       }
+      // 微信页面可能刷新二维码；扫码后状态从 pending 切到 scanned
+      const qr = current.wechat?.getQr()
+      if (qr) current.qrDataUrl = qr
+      if (current.wechat?.getStatus() === 'scanned') current.status = 'scanned'
       failures = 0
     } catch (err) {
       // 网络抖动重试；连续多次失败（state 失效等）直接判定失败
@@ -243,6 +282,7 @@ async function runLogin(current: LoginSession): Promise<void> {
       current.message = errMessage(err)
       if (failures >= 5) {
         current.status = 'failed'
+        void closeWechat(current)
         return
       }
     }
@@ -250,17 +290,26 @@ async function runLogin(current: LoginSession): Promise<void> {
   }
 }
 
-/** 当前（或最近一次）登录会话状态；成功时附带最新凭证状态 */
+/** 当前（或最近一次）登录会话状态；等待期间附带微信二维码，成功时附凭证状态 */
 export async function getLoginStatus(): Promise<WorkBuddyLoginStatus> {
   if (!session) return { status: 'idle' }
-  const base = { status: session.status, message: session.message }
+  // 微信长轮询可能先于 token 轮询感知到「已扫码」，这里即时反映到 UI
+  if (session.status === 'pending' && session.wechat?.getStatus() === 'scanned') {
+    session.status = 'scanned'
+  }
+  const base: WorkBuddyLoginStatus = { status: session.status, message: session.message }
+  if ((session.status === 'pending' || session.status === 'scanned') && session.qrDataUrl) {
+    base.qr_data_url = session.qrDataUrl
+  }
   if (session.status !== 'success') return base
   return { ...base, credential: await getStatus() }
 }
 
-/** 退出登录：清凭证与缓存（下次使用时需要重新登录） */
+/** 退出登录：关闭登录浏览器、清凭证与缓存（下次使用时需要重新登录） */
 export async function logout(): Promise<void> {
-  cached = null
+  const current = session
   session = null
+  if (current?.wechat) await current.wechat.close().catch(() => {})
+  cached = null
   await clearCredential()
 }
