@@ -566,7 +566,12 @@
     "noAccessMessage": "アカウントが有効化されていません。管理者にお問い合わせください。",
     "operationFailed": "操作に失敗しました",
     "oauthDivider": "OAuth2",
-    "oauthLoginWith": "{{provider}} でログイン"
+    "oauthLoginWith": "{{provider}} でログイン",
+    "keypad": "数字キーパッド",
+    "backspace": "削除",
+    "submitPin": "確認",
+    "confirmPinTitle": "PIN の確認",
+    "confirmPinSubtitle": "確認のため同じ PIN をもう一度入力してください"
   },
   "changePin": {
     "title": "PIN 変更",

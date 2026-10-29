@@ -12,6 +12,9 @@ export default {
       },
       animation: {
         'slide-up': 'slide-up 0.3s ease-out',
+        // PIN 输错：瞬间变红 → 剧烈摇晃 → 渐变回原色。关键帧定义在 globals.css，
+        // 因为它需要驱动自定义属性 --pin-dot-color（Tailwind 配置不便表达）。
+        'pin-shake': 'pin-shake 1.1s cubic-bezier(.36,.07,.19,.97) both',
       },
       colors: {
         border: 'hsl(var(--border))',

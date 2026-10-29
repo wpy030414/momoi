@@ -566,7 +566,12 @@
     "noAccessMessage": "Your account has not been activated. Please contact an administrator.",
     "operationFailed": "Operation failed",
     "oauthDivider": "OAuth2",
-    "oauthLoginWith": "Login with {{provider}}"
+    "oauthLoginWith": "Login with {{provider}}",
+    "keypad": "Number keypad",
+    "backspace": "Delete",
+    "submitPin": "OK",
+    "confirmPinTitle": "Confirm PIN",
+    "confirmPinSubtitle": "Enter the same PIN again to confirm"
   },
   "changePin": {
     "title": "Change PIN",
