@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '../../ui/button'
 import { Loading } from '../../ui/spinner'
 import { useToast } from '../../ui/toast'
-import { ExternalLink, LogIn, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
+import { Copy, ExternalLink, LogIn, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
 import { api } from '../../../lib/api'
 import type { WorkBuddyLoginStatus, WorkBuddyStatus } from '@momoi/shared/types'
 
@@ -113,6 +113,28 @@ export function WorkBuddyCredentialPanel() {
     }
   }, [stopPolling, t, toast])
 
+  /** 复制登录页地址：局域网 http 下 navigator.clipboard 不可用，退回 textarea + execCommand */
+  const copyLoginUrl = useCallback(async (url: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url)
+      } else {
+        const el = document.createElement('textarea')
+        el.value = url
+        el.style.position = 'fixed'
+        el.style.opacity = '0'
+        document.body.appendChild(el)
+        el.select()
+        document.execCommand('copy')
+        document.body.removeChild(el)
+      }
+      toast({ title: t('settings.workbuddyCopyLoginLinkSuccess'), variant: 'success' })
+    } catch (err) {
+      console.error(err)
+      toast({ title: t('settings.workbuddyCopyLoginLinkFailed'), variant: 'error' })
+    }
+  }, [t, toast])
+
   if (!loaded && !login) return <Loading className="py-8" />
 
   const loggedIn = credential?.logged_in === true
@@ -120,7 +142,7 @@ export function WorkBuddyCredentialPanel() {
   const waiting = login?.status === 'pending' || login?.status === 'scanned'
   const failed = login?.status === 'failed'
   const qrDataUrl = waiting ? login?.qr_data_url : undefined
-  // 二维码未就绪（启动浏览器 / 截获中）时按钮保持「正在启动登录浏览器」
+  // 二维码未就绪（申请中）时按钮保持「正在获取二维码」
   const qrLoading = waiting && login?.qr_state !== 'ready' && login?.qr_state !== 'unavailable'
   const qrUnavailable = waiting && login?.qr_state === 'unavailable'
   const busy = starting || qrLoading
@@ -178,6 +200,17 @@ export function WorkBuddyCredentialPanel() {
         {qrUnavailable && login?.auth_url && (
           <div className="space-y-1">
             <p className="text-sm text-destructive break-words">{t('settings.workbuddyQrUnavailable')}</p>
+            <div className="flex items-start gap-2">
+              <code className="flex-1 break-all rounded bg-muted px-2 py-1 text-xs">{login.auth_url}</code>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => copyLoginUrl(login.auth_url!)}
+              >
+                <Copy className="mr-1 h-3 w-3" />
+                {t('settings.workbuddyCopyLoginLink')}
+              </Button>
+            </div>
             <a
               href={login.auth_url}
               target="_blank"

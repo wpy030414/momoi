@@ -1,5 +1,5 @@
 /**
- * 豆包自助扫码登录（灾备链路，`DOUBAO_LOGIN_FLOW=doubao` 时启用）。
+ * 豆包自助扫码登录（应急旁路，`DOUBAO_LOGIN_FLOW=doubao` 时启用）。
  *
  * 注意：这条链路展示的是**豆包 App 的扫码登录码**，不是抖音授权码；
  * 默认链路见 douyin-login.ts（抖音官方授权页）。

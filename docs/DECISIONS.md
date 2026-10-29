@@ -2138,3 +2138,47 @@
 - 前端：\`OidcRegisterScreen\`；管理端供应商表单由三 URL 输入合并为 issuer 输入
 - 测试：新增 \`oidc-verify.test.ts\`（密钥 / iss / aud / 过期 / 算法降级）、\`oidc-discovery.test.ts\`（缓存 / issuer 校验 / 覆盖项）
 - 文档：\`module-oauth.md\` → \`module-oidc.md\` 全文重写；D35 同步修订
+
+## D73：内置上游登录改用纯 HTTP，服务器不再需要浏览器
+
+**背景**：WorkBuddy 与豆包两个上游的扫码登录此前都依赖 `playwright-core`
+拉起无头系统浏览器——WorkBuddy 打开腾讯登录页截获微信二维码，豆包打开登录弹窗
+进抖音授权页截获授权码。`playwright-core` **不自带浏览器**，服务器上通常也没有
+Edge / Chrome，因此部署到服务器后两者必然在「获取二维码」这一步失败。项目定位是
+自托管服务器部署，这条依赖等于让核心功能在生产环境不可用。
+
+**决策**：两条登录链路全部改为纯 HTTP 复刻，移除 `playwright-core` 依赖与
+`lib/headless-browser.ts`。
+
+1. **WorkBuddy 微信二维码**（已对线上逐跳验证）：
+   `openid-connect/auth` 建立 Keycloak 会话 Cookie → `console/auth/wechat-url`
+   取微信授权地址 → `open.weixin.qq.com/connect/qrconnect` 页面提取 uuid →
+   `/connect/qrcode/<uuid>` 下载二维码 JPEG → `/connect/l/qrconnect` 轮询
+   扫码状态（408 未扫 / 404 已扫 / 405 已确认 / 402 失效）。
+   `wechat-url` **必须先建会话**，否则 502「failed to create wechat authorization url」。
+2. **豆包抖音扫码**（已对线上逐跳验证）：首页取 ttwid → `passport/safe/csrf_token/`
+   取 CSRF → `accounts.doubao.com/passport/web/get_qrcode/` 取二维码 →
+   `check_qrconnect` 轮询。二维码由上游文案确认为「请使用『抖音 APP』扫码验证」。
+
+**关键发现（豆包）**：`check_qrconnect` 返回 `2035 非法请求` 的唯一原因是缺
+`x-tt-passport-csrf-token` 请求头（且必须等于 Cookie 里的 `passport_csrf_token`）。
+逐项消融验证 `a_bogus`、`sign`、`qs`、`fp`、`account_sdk_source_info` **全部非必需**，
+因此不实现字节的签名算法——这避免了逆向 `a_bogus` 的高维护成本。
+
+**备选与权衡**：
+- ❌ 在服务器安装 Chromium 并要求部署流程承担：体积 +300MB、构建更慢，且与「最小部署」冲突
+- ❌ 让管理员复制链接到本机浏览器完成登录：WorkBuddy 可作为最终回退保留，但不应是主路径
+- ⚠️ 协议是逆向所得：上游改版会让扫码失败。两张二维码的获取失败都会以可读错误
+  呈现，WorkBuddy 面板额外提供「复制登录页链接 + 在浏览器打开」回退
+- ⚠️ 豆包的 `doubao` 自助扫码链路保留为应急旁路，但它展示的是**豆包 App 码**，
+  不是产品语义要求的抖音扫码，默认不启用
+
+**影响**：
+- server：重写 `ai/workbuddy/wechat-qr.ts`、`ai/doubao/douyin-login.ts`；
+  删除 `lib/headless-browser.ts`；`package.json` 移除 `playwright-core`
+- 配置：新增 `WORKBUDDY_AUTH_URL_BASE` / `REALM` / `CONSOLE_CLIENT_ID` /
+  `WECHAT_CLIENT_ID` / `WECHAT_IDP_HINT`、`DOUBAO_PASSPORT_SDK_VERSION` /
+  `PASSPORT_PCA` / `LOGIN_REQUEST_TIMEOUT_MS`；`WORKBUDDY_BROWSER_*` 标记弃用
+- 前端：二维码阶段文案改为「正在获取二维码」；不可用时提供可复制链接
+  （局域网 http 下 `navigator.clipboard` 不可用，退回 `execCommand`）
+- 测试：抖音链路用例从「假浏览器」改为纯 HTTP 契约测试，并固化 CSRF 头约束

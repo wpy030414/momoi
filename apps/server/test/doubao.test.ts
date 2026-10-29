@@ -51,6 +51,8 @@ interface MockState {
   legacyRequests: Array<{ url: string; cookie: string; body: Record<string, any> }>
   uploadRequests: Array<{ kind: 'prepare' | 'apply' | 'commit' | 'tos' | 'preHandle'; body?: any; headers?: Record<string, string>; url: string }>
   cleanupRequests: Array<{ body: any; contentType: string }>
+  /** 抖音扫码链路：get_qrcode 请求带上的 CSRF 头（应与 Cookie 一致） */
+  qrCsrfHeader: string
 }
 
 function createMockApp() {
@@ -62,6 +64,7 @@ function createMockApp() {
     legacyRequests: [],
     uploadRequests: [],
     cleanupRequests: [],
+    qrCsrfHeader: '',
   }
   const app = new Hono()
 
@@ -95,6 +98,7 @@ function createMockApp() {
   )
 
   app.get('/passport/web/get_qrcode/', (c) => {
+    state.qrCsrfHeader = c.req.header('x-tt-passport-csrf-token') || ''
     if (c.req.query('aid') !== '497858') {
       return json({ data: { error_code: 1, description: 'bad aid' }, message: 'error' })
     }
@@ -109,7 +113,13 @@ function createMockApp() {
     })
   })
 
-  app.get('/passport/web/check_qrconnect/', () => {
+  app.get('/passport/web/check_qrconnect/', (c) => {
+    // CSRF 头必须与 Cookie 一致，否则上游返回 2035「非法请求」（线上实测）
+    const csrfHeader = c.req.header('x-tt-passport-csrf-token') || ''
+    const cookie = c.req.header('cookie') || ''
+    if (!csrfHeader || !cookie.includes(`passport_csrf_token=${csrfHeader}`)) {
+      return json({ data: { error_code: 2035, description: '非法请求' }, message: 'error' })
+    }
     state.qrPolls += 1
     if (state.qrPolls === 1) return json({ data: { error_code: 0, status: 'new' }, message: 'success' })
     if (state.qrPolls === 2) return json({ data: { error_code: 0, status: 'scanned' }, message: 'success' })
@@ -342,6 +352,7 @@ beforeEach(async () => {
   mock.state.legacyRequests = []
   mock.state.uploadRequests = []
   mock.state.cleanupRequests = []
+  mock.state.qrCsrfHeader = ''
   await sessionModule.logout()
   sessionModule.resetCaptcha()
 })
@@ -376,94 +387,51 @@ describe('web-login — 扫码状态机', () => {
 })
 
 
-// ---- 抖音授权链路：用假浏览器验证二维码拦截与会话提取 ----
+// ---- 抖音扫码链路：纯 HTTP，不依赖服务器浏览器 ----
 
-function createFakeBrowser() {
-  const state = {
-    cookies: [] as Array<Record<string, unknown>>,
-    handlers: [] as Array<(res: any) => unknown>,
-    clicks: [] as string[],
-    closed: false,
-  }
-
-  const emit = async (url: string, body: unknown) => {
-    const res = { url: () => url, json: async () => body }
-    for (const h of state.handlers) await h(res)
-  }
-
-  const locatorFor = (text: string) => {
-    const loc = {
-      first: () => loc,
-      count: async () => 0,
-      waitFor: async () => {},
-      click: async () => {
-        state.clicks.push(text)
-        if (text === '抖音一键登录') {
-          await emit('https://open.douyin.com/oauth/get_qrcode/?aid=1128', {
-            data: { error_code: 0, qrcode: TINY_PNG_BASE64, token: 'douyin-qr-token' },
-            message: 'success',
-          })
-        }
-      },
-    }
-    return loc
-  }
-
-  const page = {
-    goto: async () => {},
-    waitForTimeout: async () => {},
-    getByText: (text: string) => locatorFor(text),
-    locator: (sel: string) => locatorFor(sel),
-  }
-
-  const context = {
-    on: (event: string, handler: (res: any) => unknown) => {
-      if (event === 'response') state.handlers.push(handler)
-    },
-    cookies: async () => state.cookies,
-    newPage: async () => page,
-  }
-
-  const browser = {
-    newContext: async () => context,
-    close: async () => {
-      state.closed = true
-    },
-  }
-
-  return { browser, state, emit }
-}
-
-describe('douyin-login — 抖音官方授权二维码', () => {
-  it('拦截授权页二维码，扫码后从浏览器 Cookie 建立会话', async () => {
-    const fake = createFakeBrowser()
-    const flow = new DouyinQrLogin({
-      launchBrowser: async () => fake.browser as unknown as import('playwright-core').Browser,
-    })
-
+describe('douyin-login — 抖音扫码链路（纯 HTTP）', () => {
+  it('申请抖音扫码二维码，CSRF 头与 Cookie 一致', async () => {
+    const flow = new DouyinQrLogin()
     const qr = await flow.begin()
     expect(qr.qrDataUrl.startsWith('data:image/png;base64,')).toBe(true)
-    expect(qr.token).toBe('douyin-qr-token')
-    // 走的是「登录 → 抖音一键登录」链路，而不是豆包自助扫码
-    expect(fake.state.clicks).toContain('登录')
-    expect(fake.state.clicks).toContain('抖音一键登录')
+    expect(qr.token).toBe('mock-qr-token')
+    // 关键约束：没有 CSRF 头会 2035
+    expect(mock.state.qrCsrfHeader).toBe('mock-csrf')
+    await flow.close()
+  })
 
-    await fake.emit('https://open.douyin.com/oauth/check_qrcode/?token=x', {
-      data: { status: 'scanned' },
+  it('CSRF 头缺失时上游返回 2035，驱动给出可读错误而不是无限等待', async () => {
+    // 模拟上游对缺失 x-tt-passport-csrf-token 的 2035 响应
+    const original = globalThis.fetch
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/check_qrconnect/')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: { error_code: 2035, description: '非法请求' }, message: 'error' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }
+      return (original as typeof fetch)(input, init)
     })
-    expect((await flow.poll()).status).toBe('scanned')
+    const flow = new DouyinQrLogin()
+    await flow.begin()
+    const result = await flow.poll()
+    expect(result.status).toBe('error')
+    expect(result.message).toMatch(/非法请求/)
+    await flow.close()
+  })
 
-    // 抖音回跳豆包 callback 后，浏览器上下文出现豆包会话 Cookie
-    fake.state.cookies = [
-      { name: 'sessionid', value: 'mock-session', domain: '.doubao.test', path: '/', expires: -1, secure: true, httpOnly: true },
-      { name: 'uid_tt', value: '12345', domain: '.doubao.test', path: '/', expires: -1 },
-    ]
+  it('new → scanned → confirmed', async () => {
+    const flow = new DouyinQrLogin()
+    await flow.begin()
+    expect((await flow.poll()).status).toBe('new')
+    expect((await flow.poll()).status).toBe('scanned')
+    // confirmed 后回跳收集 Cookie；mock 的 web_login_success 与主 mock 共用
     const confirmed = await flow.poll()
     expect(confirmed.status).toBe('confirmed')
-    expect(confirmed.session?.uid).toBe('12345')
-    expect(confirmed.session?.nickname).toBe('测试用户')
-    expect(confirmed.session?.cookies.some((c) => c.name === 'sessionid')).toBe(true)
-    expect(fake.state.closed).toBe(true)
+    await flow.close()
   })
 })
 

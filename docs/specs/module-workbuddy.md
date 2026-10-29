@@ -9,10 +9,10 @@ Momoi 不再使用自配置的 OpenAI 兼容端点，而是把对话请求转发
 凭证由 **服务端** 持有并**后台自动轮换**，前端只看到登录状态、账号与有效期，
 任何 token 都不下发浏览器、不写入日志。
 
-登录页默认展示「微信扫码登录」：服务端用无头系统浏览器打开腾讯托管登录页，
-截获微信二维码图片并回传到管理端面板，管理员用微信扫码即可——**不再自动弹出网页**。
-二维码就绪前按钮保持「正在启动登录浏览器」；只有服务端确认二维码拿不到
-（无浏览器 / 等待超时）时，面板才显示「在浏览器中打开登录页」作为最终回退。
+登录页默认展示「微信扫码登录」：服务端用**纯 HTTP 链路**从 Keycloak 登录网关
+直接取得微信二维码图片、回传到管理端面板，管理员用微信扫码即可。
+二维码获取失败时面板提供「复制登录页链接 → 在浏览器中完成登录」的最终回退
+（不再需要服务器安装任何浏览器）。
 
 ## 涉及文件
 
@@ -20,7 +20,7 @@ Momoi 不再使用自配置的 OpenAI 兼容端点，而是把对话请求转发
 |---|---|
 | `apps/server/src/ai/workbuddy/config.ts` | 网关端点、客户端身份头版本、轮换与登录超时常量（可用环境变量覆盖） |
 | `apps/server/src/ai/workbuddy/web-login.ts` | state 握手 → 轮询换票 → 取账号（自包含网页登录，不依赖 WorkBuddy App） |
-| `apps/server/src/ai/workbuddy/wechat-qr.ts` | 无头浏览器打开登录页，截获微信二维码图片（data URL） |
+| `apps/server/src/ai/workbuddy/wechat-qr.ts` | 纯 HTTP 取微信二维码图片（data URL）——建 Keycloak 会话 → wechat-url → open.weixin.qq.com 图片 |
 | `apps/server/src/ai/workbuddy/credentials.ts` | 凭证落 `settings` 表，AES-256-GCM 加密（`aesgcm:v1:` 信封） |
 | `apps/server/src/ai/workbuddy/token-manager.ts` | 缓存 → 存储 → 续期编排、登录会话状态机、后台轮换 keeper |
 | `apps/server/src/ai/workbuddy/chat.ts` | 对话转发（认证头 / 401 重试 / 链路头） |
@@ -85,11 +85,12 @@ POST /api/admin/workbuddy/login
 | `WORKBUDDY_REFRESH_AHEAD_MS` | `300000` | access token 提前续期窗口 |
 | `WORKBUDDY_KEEPALIVE_MS` | `60000` | 后台巡检间隔 |
 | `WORKBUDDY_LOGIN_TIMEOUT_MS` | `300000` | 网页登录超时 |
-| `WORKBUDDY_LOGIN_HEADLESS` | `1` | 登录浏览器是否无头；二维码仍会回传管理端 |
-| `WORKBUDDY_BROWSER_CHANNEL` | 空 | `msedge` / `chrome` / `chromium`；留空按平台自动尝试 |
-| `WORKBUDDY_BROWSER_EXECUTABLE_PATH` | 空 | 指定浏览器可执行文件（容器 / 自定义 Chromium） |
-| `WORKBUDDY_BROWSER_ARGS` | 空 | 追加浏览器启动参数（空格分隔；容器内常需 `--no-sandbox`） |
-| `WORKBUDDY_QR_WAIT_MS` | `30000` | 等待微信二维码的上限；超时回退为「打开登录页」 |
+| `WORKBUDDY_QR_WAIT_MS` | `30000` | 单次二维码相关请求的超时（建会话 / 取地址 / 下载图片） |
+| `WORKBUDDY_AUTH_URL_BASE` | `https://www.workbuddy.cn/auth` | Keycloak 鉴权根地址 |
+| `WORKBUDDY_REALM` | `copilot` | Keycloak realm |
+| `WORKBUDDY_CONSOLE_CLIENT_ID` | `console` | 建立会话所用的 OIDC 客户端 |
+| `WORKBUDDY_WECHAT_CLIENT_ID` | `login` | 申请微信授权地址所用的客户端 |
+| `WORKBUDDY_WECHAT_IDP_HINT` | `weixinwebchat` | 强制走微信扫码身份提供商 |
 | `WORKBUDDY_MODELS_PATH` | `/v2/enterprises/personal/models` | 云端模型目录路径（Agent 表单的模型下拉） |
 
 ## 模型目录
@@ -133,9 +134,9 @@ POST /api/admin/workbuddy/login
 
 - 选择 WorkBuddy 后，API 端点/密钥输入框消失，出现凭证面板；右上角「从环境变量加载」按钮一并隐藏（登录入口在凭证面板内）
 - 编辑 Agent 时模型下拉展示该账号的云端目录；未登录时提示先登录，仍可「自定义」手动填写
-- 点击登录 → 按钮显示「正在启动登录浏览器…」→ 面板直接显示**微信扫码二维码**（不自动弹窗）→ 微信扫码确认后凭证面板显示「已登录 + 账号 + 有效期」
-- 二维码出现前按钮保持「正在启动登录浏览器…」且禁用；二维码出现后才变为「刷新二维码」，
+- 点击登录 → 按钮显示「正在获取二维码…」→ 面板直接显示**微信扫码二维码**（不自动弹窗）→ 微信扫码确认后凭证面板显示「已登录 + 账号 + 有效期」
+- 二维码出现前按钮保持「正在获取二维码…」且禁用；二维码出现后才变为「刷新二维码」，
   正常流程（`qr_state=loading/ready`）不显示任何「打开登录页」链接
-- 服务端没有可用浏览器时，`qr_state=unavailable`，面板显示错误提示与「在浏览器中打开登录页」最终回退
+- 二维码获取失败时，`qr_state=unavailable`，面板显示写入错误提示，提供**复制登录页链接按钮**与「在浏览器中打开登录页」链接作为最终回退
 - 服务端重启后无需重新登录；access token 临近过期时表内凭证自动更新（refresh token 轮换）
 - 退出登录后状态回到「未登录」，对话请求给出「请先登录」的可读错误

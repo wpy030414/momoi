@@ -197,18 +197,18 @@ export async function getStatus(): Promise<WorkBuddyStatus> {
   }
 }
 
-/** 异步捕获登录页的微信二维码；失败时标记 unavailable，交给面板提供打开登录页回退 */
+/** 异步申请登录页的微信二维码（纯 HTTP）；失败时标记 unavailable，交给面板提供复制链接回退 */
 async function attachWechatQr(current: LoginSession): Promise<void> {
   try {
     const wechat = await openWechatQrLogin(current.authUrl)
     if (session !== current || current.status !== 'pending') {
-      await wechat?.close().catch(() => {})
+      await wechat.close().catch(() => {})
       return
     }
-    const qr = wechat?.getQr()
-    if (!wechat || !qr) {
+    const qr = wechat.getQr()
+    if (!qr) {
       current.qrState = 'unavailable'
-      console.warn('[workbuddy] 未截获登录页微信二维码，回退为打开登录页')
+      console.warn('[workbuddy] 未取得登录页微信二维码，回退为复制登录页链接')
       return
     }
     current.wechat = wechat
@@ -216,7 +216,7 @@ async function attachWechatQr(current: LoginSession): Promise<void> {
     current.qrState = 'ready'
   } catch (err) {
     if (session === current) current.qrState = 'unavailable'
-    console.warn(`[workbuddy] 微信二维码捕获失败：${errMessage(err)}`)
+    console.warn(`[workbuddy] 微信二维码获取失败：${errMessage(err)}`)
   }
 }
 
@@ -261,6 +261,20 @@ async function runLogin(current: LoginSession): Promise<void> {
       return
     }
     try {
+      // 先推进微信扫码状态：长轮询比平台换票更早感知「已扫 / 已确认」
+      const wechat = current.wechat
+      if (wechat) {
+        const scan = await wechat.pollScan()
+        if (scan !== 'new') current.status = 'scanned'
+        // 二维码失效：清掉旧图，让面板提示刷新（重新发起登录即可换新码）
+        if (wechat.isExpired()) {
+          current.wechat = null
+          current.qrDataUrl = undefined
+          current.qrState = 'unavailable'
+          current.message = '二维码已过期，请重新点击「扫码登录」'
+        }
+      }
+
       const tokens = await pollOnce(current.state)
       if (tokens !== 'pending') {
         const account = await fetchAccount(tokens.accessToken, tokens.domain || cfg.domain)
@@ -281,13 +295,6 @@ async function runLogin(current: LoginSession): Promise<void> {
         console.log(`[workbuddy] 登录成功：uid=${credential.uid || '<空>'}`)
         return
       }
-      // 微信页面可能刷新二维码；扫码后状态从 pending 切到 scanned
-      const qr = current.wechat?.getQr()
-      if (qr) {
-        current.qrDataUrl = qr
-        current.qrState = 'ready'
-      }
-      if (current.wechat?.getStatus() === 'scanned') current.status = 'scanned'
       failures = 0
     } catch (err) {
       // 网络抖动重试；连续多次失败（state 失效等）直接判定失败

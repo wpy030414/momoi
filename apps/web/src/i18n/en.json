@@ -382,7 +382,7 @@
     "gatewayScanLogin": "Scan QR to sign in",
     "gatewayRelogin": "Sign in again",
     "gatewayRefreshQr": "Refresh QR code",
-    "gatewayStarting": "Starting the sign-in browser…",
+    "gatewayStarting": "Fetching the QR code…",
     "gatewayLogout": "Sign out",
     "gatewayLoginSuccess": "Signed in",
     "gatewayLoginFailed": "Sign-in failed",
@@ -395,7 +395,7 @@
     "workbuddyAutoRefresh": "Background rotation",
     "workbuddyAutoRefreshOn": "Enabled",
     "workbuddyOpenLoginLink": "Open the sign-in page in your browser",
-    "workbuddyQrUnavailable": "The server could not capture the WeChat QR code (Edge/Chrome may be missing). Use the link below to finish signing in in your browser.",
+    "workbuddyQrUnavailable": "The server could not obtain the WeChat QR code (sign-in gateway error or network blocked). Copy the link below and finish signing in in your own browser.",
     "workbuddyQrAlt": "WeChat sign-in QR code",
     "workbuddyScanHint": "Scan the QR code with WeChat",
     "doubaoFromEnv": "Session comes from the DOUBAO_COOKIES environment variable",
@@ -540,7 +540,10 @@
     "configSummaryProviders": "providers: update {{u}} / create {{c}}",
     "oidcProviderIssuer": "Issuer",
     "oidcProviderIssuerPlaceholder": "https://dingtalk.auth.xrl.im/my_org",
-    "oidcProviderIssuerHint": "Endpoints are auto-discovered from this issuer"
+    "oidcProviderIssuerHint": "Endpoints are auto-discovered from this issuer",
+    "workbuddyCopyLoginLink": "Copy sign-in link",
+    "workbuddyCopyLoginLinkSuccess": "Link copied",
+    "workbuddyCopyLoginLinkFailed": "Copy failed — select the link and copy manually"
   },
   "login": {
     "title": "Welcome",

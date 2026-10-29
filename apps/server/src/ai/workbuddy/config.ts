@@ -46,13 +46,33 @@ export const workbuddyConfig = {
   loginPendingCode: envInt('WORKBUDDY_LOGIN_PENDING_CODE', 11217),
   loginPollMs: envInt('WORKBUDDY_LOGIN_POLL_MS', 1500),
   loginTimeoutMs: envInt('WORKBUDDY_LOGIN_TIMEOUT_MS', 5 * 60_000),
-  /** 登录页默认展示「微信扫码登录」：用无头浏览器截获二维码回传管理端 */
+
+  // —— 登录页微信二维码（纯 HTTP，无需服务器浏览器）——
+  /**
+   * Keycloak 鉴权根地址。wechat-url 端点需要先建立 Keycloak 会话 Cookie，
+   * 否则返回 502「failed to create wechat authorization url」。
+   */
+  authUrlBase: env('WORKBUDDY_AUTH_URL_BASE', 'https://www.workbuddy.cn/auth').replace(/\/+$/, ''),
+  /** Keycloak realm（登录页 /auth/realms/<realm>/...） */
+  realm: env('WORKBUDDY_REALM', 'copilot'),
+  /** 建立会话所用的 OIDC 客户端 */
+  consoleClientId: env('WORKBUDDY_CONSOLE_CLIENT_ID', 'console'),
+  /** 申请微信授权地址所用的客户端 */
+  wechatClientId: env('WORKBUDDY_WECHAT_CLIENT_ID', 'login'),
+  /** 强制走微信扫码身份提供商 */
+  wechatIdpHint: env('WORKBUDDY_WECHAT_IDP_HINT', 'weixinwebchat'),
+  /** 单次二维码相关请求的超时（建立会话 / 取地址 / 下载图片） */
+  qrWaitMs: envInt('WORKBUDDY_QR_WAIT_MS', 30_000),
+
+  /**
+   * @deprecated 二维码已改为纯 HTTP 链路，不再启动任何浏览器。
+   * 保留这些变量只为兼容旧 .env 文件（读入但不使用）。
+   */
   browserChannel: env('WORKBUDDY_BROWSER_CHANNEL', ''),
   browserExecutablePath: env('WORKBUDDY_BROWSER_EXECUTABLE_PATH', ''),
   browserArgs: env('WORKBUDDY_BROWSER_ARGS', ''),
   loginHeadless: envBool('WORKBUDDY_LOGIN_HEADLESS', true),
-  /** 等待微信二维码的上限；超时则回退为「打开登录页」 */
-  qrWaitMs: envInt('WORKBUDDY_QR_WAIT_MS', 30_000),
+
   /** access token 提前续期窗口 */
   refreshAheadMs: envInt('WORKBUDDY_REFRESH_AHEAD_MS', 5 * 60_000),
   /** 后台轮换巡检间隔 */

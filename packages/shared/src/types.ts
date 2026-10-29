@@ -281,16 +281,16 @@ export interface WorkBuddyStatus {
 export interface WorkBuddyLoginStatus {
   status: 'idle' | 'pending' | 'scanned' | 'success' | 'failed'
   message?: string
-  /** 登录页的微信二维码 data URL（服务端无头浏览器截获；不可用时缺省） */
+  /** 登录页的微信二维码 data URL（服务端纯 HTTP 获取；不可用时缺省） */
   qr_data_url?: string
   /**
-   * 二维码捕获阶段：
-   *   loading     = 正在启动登录浏览器 / 等待二维码（面板按钮保持「正在启动登录浏览器」）
+   * 二维码获取阶段：
+   *   loading     = 正在向登录网关申请二维码（面板按钮保持「正在获取二维码」）
    *   ready       = 二维码已下发
-   *   unavailable = 无浏览器或等待超时（面板才提供「在浏览器中打开登录页」回退）
+   *   unavailable = 申请失败 / 过期（面板提供「复制登录页链接」回退）
    */
   qr_state?: 'loading' | 'ready' | 'unavailable'
-  /** 登录页地址：仅 qr_state=unavailable 时下发，供管理员在自己的浏览器完成登录 */
+  /** 登录页地址：仅 qr_state=unavailable 时下发，供管理员复制到自己的浏览器完成登录 */
   auth_url?: string
   credential?: WorkBuddyStatus
 }

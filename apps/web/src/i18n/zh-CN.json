@@ -382,7 +382,7 @@
     "gatewayScanLogin": "扫码登录",
     "gatewayRelogin": "重新登录",
     "gatewayRefreshQr": "刷新二维码",
-    "gatewayStarting": "正在启动登录浏览器…",
+    "gatewayStarting": "正在获取二维码…",
     "gatewayLogout": "退出登录",
     "gatewayLoginSuccess": "登录成功",
     "gatewayLoginFailed": "登录失败",
@@ -395,7 +395,7 @@
     "workbuddyAutoRefresh": "后台自动轮换",
     "workbuddyAutoRefreshOn": "已启用",
     "workbuddyOpenLoginLink": "在浏览器中打开登录页",
-    "workbuddyQrUnavailable": "服务端未能获取微信二维码（可能未安装 Edge / Chrome）。请点击下方链接，在浏览器中完成登录。",
+    "workbuddyQrUnavailable": "服务端未能获取微信二维码（登录网关返回异常或网络受阻）。请复制下方链接，在你的浏览器中完成登录。",
     "workbuddyQrAlt": "微信登录二维码",
     "workbuddyScanHint": "请用微信扫描二维码",
     "doubaoFromEnv": "登录态来自环境变量（DOUBAO_COOKIES）",
@@ -540,7 +540,10 @@
     "configSummaryProviders": "供应商 更新 {{u}} / 新增 {{c}}",
     "oidcProviderIssuer": "Issuer",
     "oidcProviderIssuerPlaceholder": "https://dingtalk.auth.xrl.im/my_org",
-    "oidcProviderIssuerHint": "端点由该 Issuer 的 discovery 文档自动获取"
+    "oidcProviderIssuerHint": "端点由该 Issuer 的 discovery 文档自动获取",
+    "workbuddyCopyLoginLink": "复制登录页链接",
+    "workbuddyCopyLoginLinkSuccess": "链接已复制",
+    "workbuddyCopyLoginLinkFailed": "复制失败，请手动选中链接复制"
   },
   "login": {
     "title": "欢迎",

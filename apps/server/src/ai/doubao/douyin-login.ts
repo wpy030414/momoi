@@ -1,280 +1,280 @@
 /**
- * 抖音 OAuth 授权页登录（默认链路）。
+ * 抖音扫码登录（默认链路）—— 纯 HTTP，不依赖服务器浏览器。
  *
- * 用 Playwright 无头浏览器复刻豆包官方登录链路（移植自 xrp-doubao 的
- * `DouyinOAuthLogin.captureViaLoginModal`，该链路已在参考实现中完成真实账号验证）：
+ * 产品语义：二维码必须是**抖音官方授权码**，用户用抖音 App 扫。豆包网页端
+ * 的「抖音一键登录」会在登录弹窗里拉起账号 SDK 的扫码验证，描述文案为
+ * 「为保障账号安全，请使用『抖音 APP』扫码验证」，正是抖音 App 扫码；
+ * 二维码由 accounts.doubao.com 直接返回 base64 PNG，不需要浏览器渲染。
  *
- *   1) 打开 www.doubao.com/chat/ → 点开登录弹窗
- *   2) 点击「抖音一键登录」→ 同意协议 → 浏览器进入 open.douyin.com 官方授权页
- *   3) 授权页自己请求 /oauth/get_qrcode/ —— 拦截该响应，把**抖音授权二维码**
- *      原样下发给管理端展示（二维码解码为 aweme://authorizedy?...，只能由抖音 App 扫）
- *   4) 用户扫码 / 验证码授权后，抖音回跳豆包官方 callback
- *   5) 豆包官方页面自行完成 code 换票并写入 sessionid 等 Cookie
- *   6) 从浏览器上下文提取 Cookie，关闭浏览器
+ * 链路（全部已在线上实测）：
+ *   0) GET /chat/                       收集 ttwid 等基础 Cookie
+ *   1) GET /passport/safe/csrf_token/   取 passport_csrf_token
+ *   2) GET accounts.doubao.com/passport/web/get_qrcode/
+ *        ?next=<站点>&aid=<aid>...       → { token, qrcode: "data:image/png;base64,..." }
+ *   3) GET accounts.doubao.com/passport/web/check_qrconnect/
+ *        ?next=<站点>&token=<token>&aid=<aid> → status: new / scanned / confirmed
  *
- * 不在 Node 端重放 code：参考实现实测会被豆包判为「非法应用」。
+ * 关键约束（缺一律 2035「非法请求」）：请求头必须带
+ * `x-tt-passport-csrf-token`，且值等于 Cookie 里的 `passport_csrf_token`。
+ * a_bogus / sign / fp / account_sdk_source_info 均已验证**非必需**，故不生成。
+ *
+ * 扫码确认后：follow redirect_url 收集 sessionid 等会话 Cookie（与豆包自助扫码
+ * 链路一致），再查账号信息落库。
  */
 
-import type { Browser, BrowserContext, Page, Response as PlaywrightResponse } from 'playwright-core'
 import { doubaoConfig as cfg } from './config.js'
 import { CookieJar } from './cookie-jar.js'
-import { queryDoubaoAccount } from './account.js'
 import { generateDeviceIdentity, type DeviceIdentity } from './device.js'
-import { launchSystemBrowser } from '../../lib/headless-browser.js'
+import { queryDoubaoAccount } from './account.js'
 import type { DoubaoSession } from './credentials.js'
 import type { LoginFlowDriver, QrCodePayload, QrPollResult } from './login-flow.js'
 
-/** 登录成功后必然出现的豆包会话 Cookie（出现任意一个即认为登录完成） */
-const SESSION_COOKIE_NAMES = new Set(['sessionid', 'sessionid_ss', 'sid_tt', 'uid_tt', 'uid_tt_ss', 'sid_guard'])
+/** 账号 SDK 网关：二维码与扫码状态都在这里，不在 www.doubao.com */
+const ACCOUNT_SDK_ORIGIN = 'https://accounts.doubao.com'
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+interface ApiEnvelope {
+  message?: string
+  data?: Record<string, unknown>
+}
+
+export interface DouyinLoginOptions {
+  device?: DeviceIdentity
+  /** 测试注入：替换 fetch */
+  fetchImpl?: typeof fetch
+}
+
+function pickString(...values: unknown[]): string {
+  for (const v of values) {
+    if (typeof v === 'string' && v.trim()) return v.trim()
+    if (typeof v === 'number' && Number.isFinite(v) && v !== 0) return String(v)
+  }
+  return ''
+}
+
+function parseJson(text: string): ApiEnvelope | null {
+  try {
+    return JSON.parse(text) as ApiEnvelope
+  } catch {
+    return null
+  }
+}
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-function toDataUrl(raw: string): string {
-  return raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`
-}
-
-interface PlaywrightCookie {
-  name: string
-  value: string
-  domain: string
-  path: string
-  expires?: number
-  secure?: boolean
-  httpOnly?: boolean
-  sameSite?: string
-}
-
-export interface DouyinQrLoginOptions {
-  /** 测试注入：替换 Playwright 浏览器启动器 */
-  launchBrowser?: () => Promise<Browser>
-  device?: DeviceIdentity
-}
-
-/**
- * 启动登录用浏览器。playwright-core 不自带浏览器，这里优先用系统 Edge / Chrome；
- * 可用 DOUBAO_BROWSER_CHANNEL / DOUBAO_BROWSER_EXECUTABLE_PATH 指定。
- */
-async function launchLoginBrowser(): Promise<Browser> {
-  return launchSystemBrowser({
-    channel: cfg.browserChannel,
-    executablePath: cfg.browserExecutablePath,
-    headless: cfg.loginHeadless,
-    args: cfg.browserArgs ? cfg.browserArgs.split(/\s+/).filter(Boolean) : [],
-    failureHint:
-      '请安装 Microsoft Edge / Google Chrome，或设置 DOUBAO_BROWSER_CHANNEL / DOUBAO_BROWSER_EXECUTABLE_PATH；' +
-      '也可以设置 DOUBAO_LOGIN_FLOW=doubao 使用豆包自助扫码链路',
-  })
-}
-
 export class DouyinQrLogin implements LoginFlowDriver {
   readonly kind = 'douyin' as const
 
-  private readonly launchBrowser: () => Promise<Browser>
   private readonly device: DeviceIdentity
-  private browser: Browser | null = null
-  private context: BrowserContext | null = null
-  private page: Page | null = null
+  private readonly doFetch: typeof fetch
+  private jar = new CookieJar()
   private qr: QrCodePayload | null = null
-  private status: 'new' | 'scanned' = 'new'
-  private qrExpired = false
   private session: DoubaoSession | null = null
+  private consecutiveErrors = 0
+  private expired = false
 
-  constructor(opts: DouyinQrLoginOptions = {}) {
-    this.launchBrowser = opts.launchBrowser ?? launchLoginBrowser
-    this.device = opts.device ?? generateDeviceIdentity()
+  constructor(opts: DouyinLoginOptions = {}) {
+    this.device = opts.device || generateDeviceIdentity()
+    this.doFetch = opts.fetchImpl || fetch
+  }
+
+  getDevice(): DeviceIdentity {
+    return { ...this.device }
+  }
+
+  getSession(): DoubaoSession | null {
+    return this.session ? { ...this.session, cookies: this.session.cookies.map((c) => ({ ...c })) } : null
   }
 
   getQr(): QrCodePayload | null {
     return this.qr ? { ...this.qr } : null
   }
 
-  /** 拉起浏览器走完豆包登录弹窗 → 抖音授权页，等待并返回抖音授权二维码 */
+  /** 申请抖音扫码二维码 */
   async begin(): Promise<QrCodePayload> {
-    const browser = await this.launchBrowser()
-    this.browser = browser
-    try {
-      const context = await browser.newContext({
-        userAgent: cfg.userAgent,
-        locale: 'zh-CN',
-        viewport: { width: 1280, height: 900 },
-      })
-      this.context = context
-      context.on('response', (res) => this.onResponse(res))
+    this.jar = new CookieJar()
+    this.qr = null
+    this.session = null
+    this.consecutiveErrors = 0
+    this.expired = false
 
-      const page = await context.newPage()
-      this.page = page
-      await this.openDoubaoLogin(page)
-      return await this.waitForQr()
-    } catch (err) {
-      await this.close()
-      throw err
+    // 0) 首页：拿 ttwid（后续 token 与该 Cookie 绑定）
+    const home = await this.request(`${cfg.baseUrl}/chat/`, { method: 'GET', headers: this.baseHeaders() }).catch(() => null)
+    await home?.body?.cancel().catch(() => {})
+
+    // 1) CSRF：check_qrconnect 的 x-tt-passport-csrf-token 必须与这个 Cookie 一致
+    if (!this.jar.get('passport_csrf_token')) {
+      const res = await this.request(`${cfg.baseUrl}/passport/safe/csrf_token/?aid=${encodeURIComponent(cfg.aid)}`, {
+        method: 'GET',
+        headers: this.baseHeaders(),
+      })
+      const json = parseJson(await res.text())
+      const csrf = pickString(json?.data?.passport_csrf_token) || this.jar.get('passport_csrf_token') || ''
+      if (!csrf) throw new Error('获取登录 CSRF token 失败')
     }
+
+    // 2) 二维码
+    const query = new URLSearchParams({
+      next: cfg.baseUrl,
+      aid: cfg.aid,
+      passport_jssdk_version: cfg.passportSdkVersion,
+      passport_jssdk_type: 'normal',
+      is_from_ttaccountsdk: '1',
+      language: 'zh',
+      account_app_language: 'zh-CN',
+      p_ca: cfg.passportPca,
+      multi_login: '1',
+      account_sdk_source: 'web',
+    })
+    const res = await this.request(`${ACCOUNT_SDK_ORIGIN}/passport/web/get_qrcode/?${query}`, {
+      method: 'GET',
+      headers: this.apiHeaders(),
+    })
+    const json = parseJson(await res.text())
+    const data = json?.data ?? {}
+    const code = Number(data.error_code ?? -1)
+    if (!res.ok || !json || json.message !== 'success' || code !== 0) {
+      throw new Error(`获取抖音扫码二维码失败：${pickString(data.description, json?.message) || `HTTP ${res.status}`}`)
+    }
+    const token = pickString(data.token)
+    const raw = pickString(data.qrcode)
+    if (!token) throw new Error('获取抖音扫码二维码失败：响应缺少 token')
+    if (!raw) throw new Error('获取抖音扫码二维码失败：响应缺少二维码图片')
+
+    const expireSeconds = Number(data.expire_time)
+    const expireAt = Number.isFinite(expireSeconds) && expireSeconds > 0 ? expireSeconds * 1000 : undefined
+    this.qr = { token, qrDataUrl: raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`, expireAt }
+    return { ...this.qr }
   }
 
-  /** 轮询一次：拦截到的扫码状态 + 浏览器 Cookie 双通道判定 */
+  /** 轮询一次扫码状态 */
   async poll(): Promise<QrPollResult> {
-    if (this.session) {
-      return { status: 'confirmed', message: '登录成功', session: this.session }
-    }
-    if (!this.context) {
-      return { status: 'error', message: '登录浏览器尚未就绪，请刷新二维码重试' }
-    }
+    if (!this.qr) return { status: 'error', message: '二维码尚未获取，请刷新二维码重试' }
 
     try {
-      const cookies = await this.context.cookies()
-      const doubaoCookies = cookies.filter((c) => c.value && this.isDoubaoDomain(c.domain))
-      if (doubaoCookies.some((c) => SESSION_COOKIE_NAMES.has(c.name))) {
-        // 回跳后 Cookie 可能分几跳写入，稍等再取一次
-        await sleep(800)
-        const settled = await this.context.cookies()
-        const jar = this.buildJar(settled)
-        if (jar.size() > 0) {
-          const account = await queryDoubaoAccount(jar, { baseUrl: cfg.baseUrl })
-          this.session = {
-            cookies: jar.toJSON(),
-            device: { ...this.device },
-            uid: account?.uid || jar.get('uid_tt') || jar.get('uid_tt_ss') || '',
-            nickname: account?.nickname || '',
-            savedAt: Date.now(),
-          }
-          await this.close()
-          return { status: 'confirmed', message: '登录成功', session: this.session }
-        }
-      }
-
-      if (this.qrExpired && this.status === 'new') {
-        return {
-          status: 'new',
-          message: '二维码可能已过期；若页面未自动刷新，请点击「刷新二维码」',
-          qr: this.qr ?? undefined,
-        }
-      }
-      return {
-        status: this.status,
-        message: this.status === 'scanned' ? '已扫码，请在手机上确认登录' : '等待扫码',
-        qr: this.qr ?? undefined,
-      }
-    } catch (err) {
-      return { status: 'error', message: `登录状态检查失败：${errMessage(err)}` }
-    }
-  }
-
-  /** 关闭浏览器（幂等）；成功后也调用，凭证已在 session 中 */
-  async close(): Promise<void> {
-    const browser = this.browser
-    this.browser = null
-    this.context = null
-    this.page = null
-    await browser?.close().catch(() => {})
-  }
-
-  // ---- 浏览器交互 ----
-
-  private async openDoubaoLogin(page: Page): Promise<void> {
-    await page.goto(`${cfg.baseUrl}/chat/`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-    await page.waitForTimeout(2500)
-
-    // 关掉「下载电脑版」弹窗（页面结构变化时失败不阻断）
-    for (const sel of ['div[role="dialog"] button[aria-label="关闭"]', 'button:has-text("关闭")']) {
-      const loc = page.locator(sel).first()
-      if (await loc.count().catch(() => 0)) {
-        await loc.click({ timeout: 1500 }).catch(() => {})
-        await page.waitForTimeout(600)
-        break
-      }
-    }
-
-    // 打开登录弹窗
-    const login = page.getByText('登录', { exact: true }).first()
-    await login.waitFor({ state: 'visible', timeout: 20_000 })
-    await login.click({ timeout: 5_000 })
-    await page.waitForTimeout(1500)
-
-    // 抖音一键登录
-    const douyin = page.getByText('抖音一键登录', { exact: true }).first()
-    await douyin.waitFor({ state: 'visible', timeout: 15_000 })
-    await douyin.click({ timeout: 5_000 })
-    await page.waitForTimeout(1200)
-
-    // 隐私 / 授权协议
-    const agree = page.getByText('同意', { exact: true }).first()
-    if (await agree.count().catch(() => 0)) {
-      await agree.click({ timeout: 5_000 }).catch(() => {})
-    }
-  }
-
-  private async waitForQr(): Promise<QrCodePayload> {
-    const deadline = Date.now() + cfg.qrWaitMs
-    while (Date.now() < deadline) {
-      if (this.qr) return this.qr
-      if (!this.context) throw new Error('登录浏览器已关闭')
-      await sleep(200)
-    }
-    throw new Error('等待抖音授权二维码超时；请确认服务器可访问 www.doubao.com 与 open.douyin.com')
-  }
-
-  /**
-   * 拦截授权页发出的二维码 / 轮询请求。
-   * 这里拿到的就是抖音官方授权二维码，而不是豆包 App 的扫码登录码。
-   */
-  private async onResponse(res: PlaywrightResponse): Promise<void> {
-    const url = res.url()
-    try {
-      if (url.includes('/oauth/get_qrcode/')) {
-        const json = (await res.json().catch(() => null)) as { data?: Record<string, unknown> } | null
-        const data = json?.data
-        const raw = typeof data?.qrcode === 'string' ? data.qrcode : ''
-        if (!raw) return
-        this.qr = {
-          token: typeof data?.token === 'string' ? data.token : '',
-          qrDataUrl: toDataUrl(raw),
-        }
-        this.qrExpired = false
-        this.status = 'new'
-        return
-      }
-      if (url.includes('/oauth/check_qrcode/')) {
-        const json = (await res.json().catch(() => null)) as { data?: Record<string, unknown> } | null
-        const status = String(json?.data?.status || '').toLowerCase()
-        if (status === 'scanned' || status === 'confirmed') this.status = 'scanned'
-        else if (status === 'new') this.status = 'new'
-        else if (status === 'expired') this.qrExpired = true
-      }
-    } catch {
-      /* 响应体读取失败不影响登录 */
-    }
-  }
-
-  // ---- Cookie ----
-
-  private isDoubaoDomain(domain: string): boolean {
-    const host = new URL(cfg.baseUrl).hostname.toLowerCase()
-    const d = (domain || '').toLowerCase().replace(/^\./, '')
-    if (!d) return false
-    return d === host || d.endsWith(`.${host}`) || host.endsWith(`.${d}`)
-  }
-
-  private buildJar(cookies: PlaywrightCookie[]): CookieJar {
-    const jar = new CookieJar()
-    for (const c of cookies) {
-      const domain = (c.domain || '').toLowerCase()
-      if (!c.value || !this.isDoubaoDomain(domain)) continue
-      jar.set({
-        name: c.name,
-        value: c.value,
-        domain: domain.replace(/^\./, ''),
-        path: c.path || '/',
-        expiresAt: typeof c.expires === 'number' && c.expires > 0 ? c.expires * 1000 : undefined,
-        secure: c.secure === true,
-        httpOnly: c.httpOnly === true,
-        hostOnly: !domain.startsWith('.'),
-        sameSite: typeof c.sameSite === 'string' ? c.sameSite : undefined,
+      const query = new URLSearchParams({ next: cfg.baseUrl, token: this.qr.token, aid: cfg.aid })
+      const res = await this.request(`${ACCOUNT_SDK_ORIGIN}/passport/web/check_qrconnect/?${query}`, {
+        method: 'GET',
+        headers: this.apiHeaders(),
       })
+      const json = parseJson(await res.text())
+      const data = json?.data ?? {}
+      const code = Number(data.error_code ?? -1)
+
+      if (!res.ok || !json || json.message !== 'success' || code !== 0) {
+        const desc = pickString(data.description, json?.message, `HTTP ${res.status}`)
+        if (code === 2035) {
+          // 非法请求：通常是 CSRF / 会话失配，重新申请二维码即可恢复
+          return { status: 'error', message: `登录状态校验失败（${desc}），请刷新二维码重试` }
+        }
+        this.consecutiveErrors += 1
+        if (this.consecutiveErrors >= 5) {
+          return { status: 'error', message: `登录状态检查失败：${desc}，请刷新二维码重试` }
+        }
+        return { status: 'new', message: `等待中（${desc}）` }
+      }
+
+      this.consecutiveErrors = 0
+      const status = String(data.status || '').toLowerCase()
+      if (status === 'new') return { status: 'new', message: '等待扫码' }
+      if (status === 'scanned') return { status: 'scanned', message: '已扫码，请在手机上确认登录' }
+      if (status === 'confirmed' || status === 'login') {
+        const session = await this.completeLogin(pickString(data.redirect_url, data.redirectUrl))
+        return { status: 'confirmed', message: '登录成功', session }
+      }
+      if (status === 'expired') return { status: 'expired', message: '二维码已过期，请刷新' }
+      if (status === 'refused') return { status: 'refused', message: '扫码已被拒绝，请刷新二维码重试' }
+      return { status: 'new', message: `等待中（${status || '未知状态'}）` }
+    } catch (err) {
+      this.consecutiveErrors += 1
+      const message = errMessage(err)
+      if (this.consecutiveErrors >= 5) {
+        return { status: 'error', message: `登录轮询失败：${message}，请刷新二维码重试` }
+      }
+      return { status: 'new', message: '网络波动，继续等待…' }
     }
-    return jar
+  }
+
+  /** 确认后：跟随回跳收集会话 Cookie（与豆包自助扫码链路一致） */
+  private async completeLogin(redirectUrl: string): Promise<DoubaoSession> {
+    if (redirectUrl) {
+      try {
+        const followed = await this.request(redirectUrl, { method: 'GET', headers: this.baseHeaders() })
+        await followed.body?.cancel().catch(() => {})
+      } catch {
+        /* 回跳失败不阻断：Cookie 可能已在轮询响应中下发 */
+      }
+    }
+
+    const account = await queryDoubaoAccount(this.jar, { baseUrl: cfg.baseUrl })
+    const uid = account?.uid || this.jar.get('uid_tt') || this.jar.get('uid_tt_ss') || ''
+    const cookies = this.jar.toJSON()
+    if (cookies.length === 0) throw new Error('登录成功但未获得任何 Cookie')
+
+    this.session = { cookies, device: this.getDevice(), uid, nickname: account?.nickname || '', savedAt: Date.now() }
+    return this.getSession()!
+  }
+
+  /** 纯 HTTP 链路没有浏览器资源需要释放 */
+  async close(): Promise<void> {
+    /* noop */
+  }
+
+  // ---- 请求 ----
+
+  private baseHeaders(): Record<string, string> {
+    return {
+      'User-Agent': cfg.userAgent,
+      'Accept-Language': 'zh-CN,zh;q=0.9',
+      'Referer': `${cfg.baseUrl}/`,
+      'Origin': cfg.baseUrl,
+      'Cookie': this.jar.getCookieHeader(`${cfg.baseUrl}/`),
+    }
+  }
+
+  /** accounts.doubao.com 的 JSON 接口头：必须带与 Cookie 一致的 csrf token */
+  private apiHeaders(): Record<string, string> {
+    const csrf = this.jar.get('passport_csrf_token') || this.jar.get('passport_csrf_token_default') || ''
+    return {
+      'User-Agent': cfg.userAgent,
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'zh-CN,zh;q=0.9',
+      'Referer': `${cfg.baseUrl}/`,
+      'Origin': cfg.baseUrl,
+      'content-type': 'application/json',
+      'x-requested-with': 'XMLHttpRequest',
+      'x-tt-passport-csrf-token': csrf,
+      'Cookie': this.jar.getCookieHeader(`${cfg.baseUrl}/`),
+    }
+  }
+
+  /** 手写重定向跟随：每一跳都吸收 Set-Cookie */
+  private async request(
+    url: string,
+    init: { method?: string; headers?: Record<string, string> },
+    maxHops = 10,
+  ): Promise<Response> {
+    let current = /^https?:\/\//i.test(url) ? url : new URL(url, `${cfg.baseUrl}/`).toString()
+    for (let hop = 0; hop <= maxHops; hop++) {
+      const headers: Record<string, string> = { ...(init.headers || {}) }
+      const cookie = this.jar.getCookieHeader(current)
+      if (cookie) headers.Cookie = cookie
+      const res = await this.doFetch(current, {
+        method: init.method || 'GET',
+        headers,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(cfg.loginRequestTimeoutMs),
+      })
+      this.jar.absorb(res.headers, current)
+      const location = res.headers.get('location')
+      if (res.status >= 300 && res.status < 400 && location) {
+        if (hop === maxHops) throw new Error('登录回跳次数过多')
+        current = new URL(location, current).toString()
+        continue
+      }
+      return res
+    }
+    throw new Error('登录回跳次数过多')
   }
 }

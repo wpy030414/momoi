@@ -2,8 +2,8 @@
  * Doubao 凭证编排：内存缓存 → 本地（加密）存储 → DOUBAO_COOKIES 灾备 → 登录。
  *
  * 登录链路由 DOUBAO_LOGIN_FLOW 决定：
- *   douyin（默认）= 无头浏览器打开抖音官方授权页，二维码是抖音授权码；
- *   doubao        = 纯 HTTP 豆包自助扫码（浏览器不可用时的灾备）。
+ *   douyin（默认）= 抖音官方授权页，二维码是抖音授权码；
+ *   doubao        = 纯 HTTP 豆包自助扫码（豆包 App 码，应急旁路）。
  * 豆包登录没有 refresh token；sessionid 等 Cookie 即会话本身，失效只能重新登录。
  *
  * 后台巡检（keeper）：每 DOUBAO_KEEPALIVE_MS 用账号端点探测一次会话是否有效，
@@ -232,7 +232,7 @@ let starting: Promise<DoubaoLoginStatus> | null = null
 /** 登录代数：退出登录 / 新一轮登录会让仍在启动中的旧链路自行作废 */
 let generation = 0
 
-/** 按 DOUBAO_LOGIN_FLOW 选择登录链路：默认抖音授权页，doubao = 纯 HTTP 自助扫码 */
+/** 按 DOUBAO_LOGIN_FLOW 选择登录链路：默认 douyin = 抖音官方授权页；doubao = 纯 HTTP 自助扫码 */
 function createLoginFlow(): LoginFlowDriver {
   return cfg.loginFlow === 'doubao' ? new DoubaoWebLogin() : new DouyinQrLogin()
 }

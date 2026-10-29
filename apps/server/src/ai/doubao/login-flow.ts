@@ -2,8 +2,8 @@
  * 豆包上游登录链路的公共契约。
  *
  * 两条链路共享「取二维码 → 轮询 → 拿会话」的状态机形状：
- *   douyin（默认）= 无头浏览器走豆包登录弹窗 → 抖音官方授权页，二维码是抖音授权码；
- *   doubao        = 纯 HTTP 豆包自助扫码，无浏览器依赖，作为灾备链路。
+ *   douyin（默认）= 抖音官方授权页，二维码是抖音授权码；
+ *   doubao        = 纯 HTTP 豆包自助扫码（豆包 App 码，应急旁路）。
  */
 
 import type { DoubaoSession } from './credentials.js'

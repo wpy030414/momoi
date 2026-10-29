@@ -16,10 +16,11 @@ Momoi 不再使用自配置的 OpenAI 兼容端点，而是把对话请求转发
 凭证 / 私有 SSE 协议适配」三件事移植进 `apps/server/src/ai/doubao/`，不要求
 用户额外跑进程。
 
-**登录二维码是抖音官方授权码**：默认链路由服务端无头浏览器复刻豆包官方登录
-弹窗 → 抖音授权页（`open.douyin.com`），把抖音授权页自己请求到的二维码原样
-回传到管理端展示；用户用**抖音 App** 扫码授权。纯 HTTP 的豆包自助扫码链路
-（豆包 App 扫码码）保留为 `DOUBAO_LOGIN_FLOW=doubao` 灾备选项。
+**登录二维码是抖音扫码验证码**：默认链路由服务端**纯 HTTP**复刻豆包网页「抖音
+一键登录」——`accounts.doubao.com/passport/web/get_qrcode/` 直接返回二维码 PNG，
+上游文案明确为「为保障账号安全，请使用『抖音 APP』扫码验证」。**不需要服务器
+安装任何浏览器**，这是部署到服务器的必要条件。纯 HTTP 的豆包自助扫码链路
+（豆包 App 码）保留为 `DOUBAO_LOGIN_FLOW=doubao` 应急旁路。
 
 ## 涉及文件
 
@@ -31,8 +32,8 @@ Momoi 不再使用自配置的 OpenAI 兼容端点，而是把对话请求转发
 | `apps/server/src/ai/doubao/security-params.ts` | 上游 query 参数与请求头 |
 | `apps/server/src/ai/doubao/sse.ts` | 通用 SSE 解析器 |
 | `apps/server/src/ai/doubao/messages.ts` | OpenAI messages → 豆包单条文本 + 当前用户消息附件（无状态压平） |
-| `apps/server/src/ai/doubao/douyin-login.ts` | **默认登录链路**：无头浏览器走豆包登录弹窗 → 抖音授权页，拦截抖音授权二维码并提取会话 Cookie |
-| `apps/server/src/ai/doubao/web-login.ts` | 灾备登录链路（`DOUBAO_LOGIN_FLOW=doubao`）：纯 HTTP 豆包自助扫码 |
+| `apps/server/src/ai/doubao/douyin-login.ts` | **默认登录链路（纯 HTTP）**：账号 SDK 的 `get_qrcode` 取抖音扫码码 → `check_qrconnect` 轮询 → 回跳收集会话 Cookie |
+| `apps/server/src/ai/doubao/web-login.ts` | 应急旁路（`DOUBAO_LOGIN_FLOW=doubao`）：纯 HTTP 豆包自助扫码（豆包 App 码） |
 | `apps/server/src/ai/doubao/login-flow.ts` | 两条登录链路的公共契约（二维码 / 轮询状态 / 驱动接口） |
 | `apps/server/src/ai/doubao/account.ts` | 用 Cookie 查 uid / nickname（两条链路共用）；巡检探针（判定 ok / auth / error） |
 | `apps/server/src/ai/doubao/error-codes.ts` | 鉴权 / 风控业务码集合（对话、上传、巡检共用） |
@@ -50,46 +51,39 @@ Momoi 不再使用自配置的 OpenAI 兼容端点，而是把对话请求转发
 
 ## 登录流程
 
-### 默认：抖音官方授权二维码（`DOUBAO_LOGIN_FLOW=douyin`）
+### 默认：抖音扫码验证（`DOUBAO_LOGIN_FLOW=douyin`，纯 HTTP）
 
 ```
-POST /api/admin/doubao/login
-  → 服务端启动无头浏览器（系统 Edge / Chrome）
-  → 打开 www.doubao.com/chat/ → 点开登录弹窗
-  → 点击「抖音一键登录」→ 同意协议
-  → 浏览器进入 open.douyin.com 官方授权页
-  → 拦截授权页请求 /oauth/get_qrcode/ 的响应，拿到抖音授权二维码
-  → 返回 { status:'pending', flow:'douyin', qr_data_url }
-  → 后台轮询：
-      · 拦截 /oauth/check_qrcode/ 的 new / scanned / confirmed 状态
-      · confirmed 后豆包官方页面自行用 code 换票并写入 sessionid 等 Cookie
-      · 从浏览器上下文提取豆包 Cookie
-  → GET /passport/account/info/v2/ 尽力取 uid / nickname
-  → 凭证加密落库，关闭浏览器，进度变为 success
+GET  {baseUrl}/chat/                         → ttwid 等基础 Cookie
+GET  {baseUrl}/passport/safe/csrf_token/     → passport_csrf_token
+GET  accounts.doubao.com/passport/web/get_qrcode/
+       ?next=…&aid=497858&…                  → { token, qrcode: "data:image/png;base64,…" }
+GET  accounts.doubao.com/passport/web/check_qrconnect/
+       ?next=…&token=…&aid=497858            → status: new → scanned → confirmed
+GET  {redirect_url}                          → sessionid / uid_tt 等会话 Cookie
+GET  /passport/account/info/v2/              → uid / nickname（尽力，失败不阻断）
 ```
 
-- **二维码是抖音官方授权码**（由 `open.douyin.com` 托管，解码为
-  `aweme://authorizedy?...`），只能由抖音 App 扫描；抖音授权页同时支持短信验证码授权
-- 不在 Node 端重放 code：参考实现实测会被豆包判为「非法应用」，换票必须由
-  豆包官方页面在浏览器内完成
-- 授权页可能自行刷新二维码；服务端会把新图随下一次进度轮询下发
-- 依赖：`playwright-core` + 系统 Microsoft Edge / Google Chrome（或通过
-  `DOUBAO_BROWSER_EXECUTABLE_PATH` 指定 Chromium）；默认无头运行
-- 登录会话整体 5 分钟超时；成功后浏览器立即关闭
+- **二维码由抖音 App 扫描**：上游 `copywriting` 明确写「为保障账号安全，请使用
+  _『抖音 APP』_扫码验证」。与服务端同源的账号 SDK 直接返回二维码 PNG，无需浏览器。
+- **关键约束**：`check_qrconnect` 的请求头必须带 `x-tt-passport-csrf-token`，
+  且值等于 Cookie 里的 `passport_csrf_token`；缺失或失配一律返回
+  `2035 非法请求`。`a_bogus` / `sign` / `fp` / `account_sdk_source_info`
+  经逐项消融验证**均非必需**，因此不生成。
+- 不再依赖 `playwright-core` 与系统浏览器（该依赖已移除）。
+- 登录会话整体 5 分钟超时（`DOUBAO_LOGIN_TIMEOUT_MS`）。
 
-### 灾备：豆包自助扫码（`DOUBAO_LOGIN_FLOW=doubao`）
+### 应急旁路：豆包自助扫码（`DOUBAO_LOGIN_FLOW=doubao`）
 
 ```
-GET /                                  → ttwid 等基础 Cookie
-GET /passport/safe/csrf_token/         → passport_csrf_token
-GET /passport/web/get_qrcode/          → 豆包 App 扫码二维码
-GET /passport/web/check_qrconnect/     → new → scanned → confirmed
-GET {redirect_url}                     → sessionid / uid_tt 等会话 Cookie
+GET {baseUrl}/passport/safe/csrf_token/   → passport_csrf_token
+GET {baseUrl}/passport/web/get_qrcode/    → 豆包 App 扫码码
+GET {baseUrl}/passport/web/check_qrconnect/ → new → scanned → confirmed
+GET {redirect_url}                        → sessionid / uid_tt 等会话 Cookie
 ```
 
-- 无浏览器依赖，适合容器 / 无 Edge/Chrome 的部署
-- **二维码是豆包 App 的扫码登录码，不是抖音授权码**；仅在默认链路不可用时使用
-- 二维码有效期约 2 分钟，过期后前端提示「刷新二维码」
+- 同样是纯 HTTP，但**二维码是豆包 App 的扫码码，不是抖音扫码**；仅作应急旁路。
+- 二维码有效期约 2 分钟，过期后前端提示「刷新二维码」。
 
 状态：`idle` / `pending` / `scanned` / `success` / `failed` / `expired`；
 响应中的 `flow` 字段标明本次二维码来自哪条链路。
@@ -266,12 +260,10 @@ Agent 表单的模型下拉由 `listDoubaoModels()` 提供，只列上表的 5 �
 | `DOUBAO_PC_VERSION` | `3.42.5` | 网页端版本参数 |
 | `DOUBAO_BOT_ID` | `7338286299411103781` | 默认 bot id |
 | `DOUBAO_CHAT_MODE` | `auto` | `auto`（仅端点 / 网络错误回退）/ `chat` / `samantha` |
-| `DOUBAO_LOGIN_FLOW` | `douyin` | `douyin`（默认，抖音授权二维码）/ `doubao`（豆包自助扫码，无浏览器依赖） |
-| `DOUBAO_LOGIN_HEADLESS` | `1` | 登录浏览器是否无头；二维码仍会回传管理端 |
-| `DOUBAO_BROWSER_CHANNEL` | 空 | `msedge` / `chrome` / `chromium`；留空按平台自动尝试 |
-| `DOUBAO_BROWSER_EXECUTABLE_PATH` | 空 | 指定浏览器可执行文件（容器 / 自定义 Chromium） |
-| `DOUBAO_BROWSER_ARGS` | 空 | 追加浏览器启动参数（空格分隔；容器内常需 `--no-sandbox`） |
-| `DOUBAO_QR_WAIT_MS` | `45000` | 等待抖音授权页产出二维码的上限 |
+| `DOUBAO_LOGIN_FLOW` | `douyin` | `douyin`（默认，抖音扫码验证码）/ `doubao`（豆包 App 自助扫码码）——两者均为纯 HTTP |
+| `DOUBAO_PASSPORT_SDK_VERSION` | `4.4.6` | 账号 SDK 版本参数（`passport_jssdk_version`） |
+| `DOUBAO_PASSPORT_PCA` | `4.0.26` | 账号 SDK 风控参数（`p_ca`） |
+| `DOUBAO_LOGIN_REQUEST_TIMEOUT_MS` | `20000` | 登录链路单次请求超时 |
 | `DOUBAO_LOGIN_POLL_MS` | `1500` | 登录状态轮询间隔 |
 | `DOUBAO_LOGIN_TIMEOUT_MS` | `300000` | 登录会话超时 |
 | `DOUBAO_KEEPALIVE_MS` | `900000` | 后台凭证巡检间隔（15 分钟） |
