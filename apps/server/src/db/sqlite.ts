@@ -88,11 +88,21 @@ export async function initSqlite(dbPath?: string) {
     // Column already exists, safe to ignore
   }
 
+  // Migration: OAuth2 → OIDC（表 user_oauth_bindings 改名 user_oidc_bindings）
+  // 旧表不删——已部署实例升级后可回退；INSERT OR IGNORE 依赖 UNIQUE(provider_id, provider_user_id)
+  // 保证重复启动幂等。旧表不存在（全新部署）时 try 内语句会抛错，被 catch 吞掉。
+  try {
+    client.exec(`INSERT OR IGNORE INTO user_oidc_bindings SELECT * FROM user_oauth_bindings`)
+    console.log('[db] Migration: copied user_oauth_bindings → user_oidc_bindings')
+  } catch {
+    // 旧表不存在或无数据，safe to ignore
+  }
+
   // Persistent index creation — safe to run on every startup
   client.exec(`CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id)`)
   client.exec(`CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id)`)
   client.exec(`CREATE INDEX IF NOT EXISTS idx_wechat_bindings_conv ON wechat_bindings(conversation_id)`)
-  client.exec(`CREATE INDEX IF NOT EXISTS idx_oauth_user ON user_oauth_bindings(user_id)`)
+  client.exec(`CREATE INDEX IF NOT EXISTS idx_oidc_user ON user_oidc_bindings(user_id)`)
   client.exec(`CREATE INDEX IF NOT EXISTS idx_messages_agent ON messages(agent_id)`)
 
   console.log('[db] SQLite (node:sqlite) ready')

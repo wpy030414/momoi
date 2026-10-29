@@ -74,7 +74,7 @@ export const users = pgTable('users', {
   banned: boolean('banned').notNull().default(false),
 })
 
-export const userOauthBindings = pgTable('user_oauth_bindings', {
+export const userOidcBindings = pgTable('user_oidc_bindings', {
   id: text('id').primaryKey(),
   user_id: text('user_id').notNull(),
   provider_id: text('provider_id').notNull(),

@@ -74,7 +74,7 @@ export const users = sqliteTable('users', {
   banned: integer('banned', { mode: 'boolean' }).notNull().default(false),
 })
 
-export const userOauthBindings = sqliteTable('user_oauth_bindings', {
+export const userOidcBindings = sqliteTable('user_oidc_bindings', {
   id: text('id').primaryKey(),
   user_id: text('user_id').notNull(),
   provider_id: text('provider_id').notNull(),

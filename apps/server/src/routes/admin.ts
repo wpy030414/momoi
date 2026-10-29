@@ -7,13 +7,13 @@ import { adminAuthMiddleware, verifyPin } from '../lib/auth.js'
 import { ApiError } from '../lib/apiError.js'
 import { STAND_ALONE } from '../lib/standalone.js'
 import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../lib/rateLimiter.js'
-import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOauthRegistrationOpen, setOauthRegistrationOpen, isExternalImageHostingEnabled, getTtsConfig, updateTtsConfig, deleteUserMemories } from '../lib/config.js'
+import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOidcRegistrationOpen, setOidcRegistrationOpen, isExternalImageHostingEnabled, getTtsConfig, updateTtsConfig, deleteUserMemories } from '../lib/config.js'
 import { base64ToBuffer, uploadToCdn } from '../lib/cdn.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '@momoi/shared/constants'
 import fs from 'fs'
 import path from 'path'
 import { NEUTRAL_AGENT_ID, NEUTRAL_AGENT_NAME } from '@momoi/shared/constants'
-import { db, conversations, messages, users, userOauthBindings, agents, wechatBindings, qqBindings, qqGroupConversations, userAgentMemories } from '../db/index.js'
+import { db, conversations, messages, users, userOidcBindings, agents, wechatBindings, qqBindings, qqGroupConversations, userAgentMemories } from '../db/index.js'
 import { skillRegistry } from '../skills/loader.js'
 import { buildExportBundle, stringifyExportYAML, parseImportYAML, validateImportBundle, summarizeImport, applyImportBundle } from '../lib/config-transfer.js'
 import AdmZip from 'adm-zip'
@@ -49,7 +49,7 @@ adminRoute.use('/users/*', adminAuthMiddleware)
 adminRoute.use('/tts', adminAuthMiddleware)
 adminRoute.use('/tts/*', adminAuthMiddleware)
 adminRoute.use('/direct-registration', adminAuthMiddleware)
-adminRoute.use('/oauth-registration', adminAuthMiddleware)
+adminRoute.use('/oidc-registration', adminAuthMiddleware)
 adminRoute.use('/prompts', adminAuthMiddleware)
 adminRoute.use('/prompts/*', adminAuthMiddleware)
 adminRoute.use('/workbuddy', adminAuthMiddleware)
@@ -398,11 +398,11 @@ adminRoute.get('/users', async (c) => {
     .offset(offset)
     .all()
 
-  // Fetch OAuth2 bindings for all listed users
+  // Fetch OIDC bindings for all listed users
   const usernames = rows.map((r: typeof users.$inferSelect) => r.username)
   const allBindings = usernames.length > 0
-    ? await db.select().from(userOauthBindings)
-        .where(sql`${userOauthBindings.user_id} IN (${sql.join(usernames.map((u: string) => sql`${u}`), sql`, `)})`)
+    ? await db.select().from(userOidcBindings)
+        .where(sql`${userOidcBindings.user_id} IN (${sql.join(usernames.map((u: string) => sql`${u}`), sql`, `)})`)
         .all()
     : []
   const bindingsByUser = new Map<string, string[]>()
@@ -418,7 +418,7 @@ adminRoute.get('/users', async (c) => {
       last_login_at: r.last_login_at,
       last_active_at: r.last_active_at ?? null,
       banned: r.banned,
-      oauth_providers: bindingsByUser.get(r.username) ?? [],
+      oidc_providers: bindingsByUser.get(r.username) ?? [],
     })),
     total: total?.count ?? 0,
     page,
@@ -514,16 +514,16 @@ adminRoute.put('/direct-registration', async (c) => {
   return c.json({ direct_registration_open: open })
 })
 
-// OAuth registration toggle
-adminRoute.get('/oauth-registration', async (c) => {
-  const open = await isOauthRegistrationOpen()
-  return c.json({ oauth_registration_open: open })
+// OIDC registration toggle
+adminRoute.get('/oidc-registration', async (c) => {
+  const open = await isOidcRegistrationOpen()
+  return c.json({ oidc_registration_open: open })
 })
 
-adminRoute.put('/oauth-registration', async (c) => {
+adminRoute.put('/oidc-registration', async (c) => {
   const { open } = await c.req.json<{ open: boolean }>()
-  await setOauthRegistrationOpen(open)
-  return c.json({ oauth_registration_open: open })
+  await setOidcRegistrationOpen(open)
+  return c.json({ oidc_registration_open: open })
 })
 
 // List skills

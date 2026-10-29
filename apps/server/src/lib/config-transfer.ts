@@ -9,7 +9,7 @@
  * 导入：YAML 解析（maxAliasCount/merge 防护）→ 白名单严格校验（错误以 ErrCode
  * （CONFIG_IMPORT_*）+ params 结构化，前端按 errors.<code> 渲染）→ dry-run 摘要 /
  * 正式应用。合并语义：省略 = 不更新（绝非置空）；Agent 按 id upsert；本地
- * 多余 Agent 与 OAuth 供应商一律保留（保护会话/绑定外键）。
+ * 多余 Agent 与 OIDC 供应商一律保留（保护会话/绑定外键）。
  *
  * 依赖注入：编排函数（build/summarize/apply）的 deps 可注入以便单测——
  * 默认实现走动态 import，避免本模块顶层引入 db/index.js（顶层 await 建库），
@@ -20,7 +20,7 @@ import { randomUUID } from 'crypto'
 import YAML from 'yaml'
 import { ErrCode } from '@momoi/shared/errors'
 import { NEUTRAL_AGENT_ID, NEUTRAL_AGENT_NAME } from '@momoi/shared/constants'
-import type { Agent, AppConfig, ConfigExportBundle, ConfigExportGateway, ImportIssue, ImportSummary, OAuth2Provider } from '@momoi/shared/types'
+import type { Agent, AppConfig, ConfigExportBundle, ConfigExportGateway, ImportIssue, ImportSummary, OidcProvider } from '@momoi/shared/types'
 
 export const BUNDLE_VERSION = 1
 export const MAX_IMPORT_BYTES = 10 * 1024 * 1024
@@ -28,7 +28,8 @@ export const MAX_IMPORT_BYTES = 10 * 1024 * 1024
 const EXPERIENCE_KEYS = ['app_name', 'app_favicon', 'app_background', 'show_github', 'recommended_questions', 'followup_questions'] as const
 const GATEWAY_KEYS = ['gateway_source', 'api_endpoint', 'api_key', 'context_window', 'support_attachments', 'support_infinite_mode', 'use_external_image_hosting', 'allow_im_conversations'] as const
 const AGENT_KEYS = ['id', 'role', 'name', 'model', 'system_prompt', 'avatar'] as const
-const PROVIDER_KEYS = ['id', 'name', 'client_id', 'client_secret', 'authorize_url', 'token_url', 'userinfo_url', 'scopes'] as const
+// issuer 主字段；三个 URL 为可选覆盖（非标 Provider 才填）
+const PROVIDER_KEYS = ['id', 'name', 'issuer', 'client_id', 'client_secret', 'scopes', 'authorize_url', 'token_url', 'userinfo_url'] as const
 
 // ---- 可注入依赖 ----
 
@@ -40,8 +41,8 @@ export interface TransferDeps {
   createAgent(name: string, model: string, systemPrompt: string, avatar: string, role: Agent['role'], voiceEnabled: boolean, voiceSampleUrl: string, voiceSettings: string, idOverride?: string): Promise<Agent>
   isDirectRegistrationOpen(): Promise<boolean>
   setDirectRegistrationOpen(open: boolean): Promise<void>
-  isOauthRegistrationOpen(): Promise<boolean>
-  setOauthRegistrationOpen(open: boolean): Promise<void>
+  isOidcRegistrationOpen(): Promise<boolean>
+  setOidcRegistrationOpen(open: boolean): Promise<void>
   isExternalImageHostingEnabled(): Promise<boolean>
   uploadToCdn(buffer: Buffer, filename: string, mimeType: string): Promise<string>
 }
@@ -57,8 +58,8 @@ async function loadDefaultDeps(): Promise<TransferDeps> {
     createAgent: config.createAgent as TransferDeps['createAgent'],
     isDirectRegistrationOpen: config.isDirectRegistrationOpen,
     setDirectRegistrationOpen: config.setDirectRegistrationOpen,
-    isOauthRegistrationOpen: config.isOauthRegistrationOpen,
-    setOauthRegistrationOpen: config.setOauthRegistrationOpen,
+    isOidcRegistrationOpen: config.isOidcRegistrationOpen,
+    setOidcRegistrationOpen: config.setOidcRegistrationOpen,
     isExternalImageHostingEnabled: config.isExternalImageHostingEnabled,
     uploadToCdn: cdn.uploadToCdn,
   }
@@ -96,8 +97,8 @@ export async function buildExportBundle(deps?: TransferDeps): Promise<ConfigExpo
     agents: agents.map((a) => ({ id: a.id, role: a.role, name: a.name, model: a.model, system_prompt: a.system_prompt, avatar: a.avatar })),
     users: {
       direct_registration_open: await d.isDirectRegistrationOpen(),
-      oauth_registration_open: await d.isOauthRegistrationOpen(),
-      oauth_providers: config.oauth_providers,
+      oidc_registration_open: await d.isOidcRegistrationOpen(),
+      oidc_providers: config.oidc_providers,
     },
   }
 }
@@ -234,7 +235,7 @@ function validateGateway(v: unknown, errors: ImportIssue[]): ConfigExportGateway
       case 'api_endpoint': {
         // 不校验 URL 形态：PUT /api/admin/config 本身零校验，且 .env 里
         // `localhost:11434/v1` 这类无 scheme 写法很常见——强制 http(s) 会让
-        // 自家导出的文件被自家拒收（isHttpUrl 只服务于图片与 OAuth URL）。
+        // 自家导出的文件被自家拒收（isHttpUrl 只服务于图片与 OIDC URL）。
         if (typeof val !== 'string' || val.trim().length < 1 || val.trim().length > 500) {
           errors.push({ path: 'gateway.api_endpoint', code: ErrCode.CONFIG_IMPORT_BAD_API_ENDPOINT })
         } else {
@@ -473,7 +474,7 @@ function validateUsers(v: unknown, errors: ImportIssue[]): NonNullable<ConfigExp
   }
   const out: NonNullable<ConfigExportBundle['users']> = {}
   for (const key of Object.keys(v)) {
-    if (!['direct_registration_open', 'oauth_registration_open', 'oauth_providers'].includes(key)) {
+    if (!['direct_registration_open', 'oidc_registration_open', 'oidc_providers'].includes(key)) {
       errors.push({ path: `users.${key}`, code: ErrCode.CONFIG_IMPORT_UNKNOWN_USERS_KEY, params: { key } })
     }
   }
@@ -484,67 +485,79 @@ function validateUsers(v: unknown, errors: ImportIssue[]): NonNullable<ConfigExp
       out.direct_registration_open = v.direct_registration_open
     }
   }
-  if (v.oauth_registration_open !== undefined) {
-    if (typeof v.oauth_registration_open !== 'boolean') {
-      errors.push({ path: 'users.oauth_registration_open', code: ErrCode.CONFIG_IMPORT_BAD_BOOLEAN, params: { field: 'oauth_registration_open' } })
+  if (v.oidc_registration_open !== undefined) {
+    if (typeof v.oidc_registration_open !== 'boolean') {
+      errors.push({ path: 'users.oidc_registration_open', code: ErrCode.CONFIG_IMPORT_BAD_BOOLEAN, params: { field: 'oidc_registration_open' } })
     } else {
-      out.oauth_registration_open = v.oauth_registration_open
+      out.oidc_registration_open = v.oidc_registration_open
     }
   }
-  if (v.oauth_providers !== undefined) {
-    const arr = v.oauth_providers
+  if (v.oidc_providers !== undefined) {
+    const arr = v.oidc_providers
     if (!Array.isArray(arr)) {
-      errors.push({ path: 'users.oauth_providers', code: ErrCode.CONFIG_IMPORT_NOT_ARRAY, params: { field: 'oauth_providers' } })
+      errors.push({ path: 'users.oidc_providers', code: ErrCode.CONFIG_IMPORT_NOT_ARRAY, params: { field: 'oidc_providers' } })
     } else if (arr.length > 10) {
-      errors.push({ path: 'users.oauth_providers', code: ErrCode.CONFIG_IMPORT_TOO_MANY_PROVIDERS })
+      errors.push({ path: 'users.oidc_providers', code: ErrCode.CONFIG_IMPORT_TOO_MANY_PROVIDERS })
     } else {
-      const providers: Partial<OAuth2Provider>[] = []
+      const providers: Partial<OidcProvider>[] = []
       const seen = new Set<string>()
       let valid = true
       for (let i = 0; i < arr.length; i++) {
         const p = arr[i]
         if (!isPlainObject(p)) {
-          errors.push({ path: `users.oauth_providers[${i}]`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_ENTRY })
+          errors.push({ path: `users.oidc_providers[${i}]`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_ENTRY })
           valid = false
           continue
         }
         for (const key of Object.keys(p)) {
           if (!(PROVIDER_KEYS as readonly string[]).includes(key)) {
-            errors.push({ path: `users.oauth_providers[${i}].${key}`, code: ErrCode.CONFIG_IMPORT_UNKNOWN_PROVIDER_KEY, params: { key } })
+            errors.push({ path: `users.oidc_providers[${i}].${key}`, code: ErrCode.CONFIG_IMPORT_UNKNOWN_PROVIDER_KEY, params: { key } })
             valid = false
           }
         }
         // id：合并主键，必填
         if (typeof p.id !== 'string' || !PROVIDER_ID_RE.test(p.id)) {
-          errors.push({ path: `users.oauth_providers[${i}].id`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_ID })
+          errors.push({ path: `users.oidc_providers[${i}].id`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_ID })
           valid = false
         } else if (seen.has(p.id)) {
-          errors.push({ path: `users.oauth_providers[${i}].id`, code: ErrCode.CONFIG_IMPORT_DUPLICATE_PROVIDER_ID, params: { id: p.id } })
+          errors.push({ path: `users.oidc_providers[${i}].id`, code: ErrCode.CONFIG_IMPORT_DUPLICATE_PROVIDER_ID, params: { id: p.id } })
           valid = false
         } else {
           seen.add(p.id)
         }
         // name：展示名，必填
         if (typeof p.name !== 'string' || p.name.trim().length < 1 || p.name.trim().length > 64) {
-          errors.push({ path: `users.oauth_providers[${i}].name`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_NAME })
+          errors.push({ path: `users.oidc_providers[${i}].name`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_NAME })
           valid = false
         }
-        const entry: Partial<OAuth2Provider> = { id: p.id as string, name: (p.name as string).trim() }
+        const entry: Partial<OidcProvider> = { id: p.id as string, name: (p.name as string).trim() }
+        // issuer 必填，且必须是 https URL
+        const issVal = p.issuer as string | undefined
+        if (typeof issVal !== 'string' || issVal.trim().length === 0) {
+          errors.push({ path: `users.oidc_providers[${i}].issuer`, code: ErrCode.CONFIG_IMPORT_PROVIDER_TOO_LONG, params: { field: 'issuer' } })
+          valid = false
+        } else if (!isHttpUrl(issVal)) {
+          errors.push({ path: `users.oidc_providers[${i}].issuer`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_URL, params: { field: 'issuer' } })
+          valid = false
+        } else {
+          entry.issuer = issVal
+        }
         for (const field of ['client_id', 'client_secret', 'scopes'] as const) {
           const val = p[field]
           if (val === undefined) continue
           if (typeof val !== 'string' || val.length > 500) {
-            errors.push({ path: `users.oauth_providers[${i}].${field}`, code: ErrCode.CONFIG_IMPORT_PROVIDER_TOO_LONG, params: { field } })
+            errors.push({ path: `users.oidc_providers[${i}].${field}`, code: ErrCode.CONFIG_IMPORT_PROVIDER_TOO_LONG, params: { field } })
             valid = false
           } else {
             entry[field] = val
           }
         }
+        // authorize_url / token_url / userinfo_url 为可选覆盖项：填了必须合法 URL，不填就走 discovery
         for (const field of ['authorize_url', 'token_url', 'userinfo_url'] as const) {
           const val = p[field]
           if (val === undefined) continue
           if (typeof val !== 'string' || val === '' || !isHttpUrl(val)) {
-            errors.push({ path: `users.oauth_providers[${i}].${field}`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_URL, params: { field } })
+            errors.push({ path: `users.oidc_providers[${i}].${field}`, code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_URL, params: { field } })
             valid = false
           } else {
             entry[field] = val
@@ -552,7 +565,7 @@ function validateUsers(v: unknown, errors: ImportIssue[]): NonNullable<ConfigExp
         }
         providers.push(entry)
       }
-      if (valid) out.oauth_providers = providers
+      if (valid) out.oidc_providers = providers
     }
   }
   return Object.keys(out).length > 0 ? out : undefined
@@ -593,8 +606,8 @@ interface ImportPlan {
   agentOps: Array<{ op: 'update'; id: string; partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar'>> } | { op: 'create'; name: string; model: string; systemPrompt: string; avatar: string; id?: string }>
   users: ImportSummary['users']
   directOpen?: boolean
-  oauthOpen?: boolean
-  mergedProviders?: Partial<OAuth2Provider>[]
+  oidcOpen?: boolean
+  mergedProviders?: Partial<OidcProvider>[]
 }
 
 /** 计算「将做什么」的完整计划——summarize（dry-run）与 apply 共用，保证两者一致 */
@@ -684,54 +697,54 @@ async function computePlan(bundle: ConfigExportBundle, deps: TransferDeps): Prom
   // --- users ---
   const usersOut: NonNullable<ImportSummary['users']> = {
     direct_registration_open: null,
-    oauth_registration_open: null,
+    oidc_registration_open: null,
     providers_update: 0,
     providers_create: 0,
     providers_skip: 0,
   }
   let directOpen: boolean | undefined
-  let oauthOpen: boolean | undefined
+  let oidcOpen: boolean | undefined
   if (bundle.users) {
     if (bundle.users.direct_registration_open !== undefined) {
       const from = await deps.isDirectRegistrationOpen()
       directOpen = bundle.users.direct_registration_open
       if (from !== directOpen) usersOut.direct_registration_open = { from, to: directOpen }
     }
-    if (bundle.users.oauth_registration_open !== undefined) {
-      const from = await deps.isOauthRegistrationOpen()
-      oauthOpen = bundle.users.oauth_registration_open
-      if (from !== oauthOpen) usersOut.oauth_registration_open = { from, to: oauthOpen }
+    if (bundle.users.oidc_registration_open !== undefined) {
+      const from = await deps.isOidcRegistrationOpen()
+      oidcOpen = bundle.users.oidc_registration_open
+      if (from !== oidcOpen) usersOut.oidc_registration_open = { from, to: oidcOpen }
     }
   }
 
-  let mergedProviders: Partial<OAuth2Provider>[] | undefined
-  if (bundle.users?.oauth_providers !== undefined) {
-    const incoming = bundle.users.oauth_providers
-    const existingProviders = config.oauth_providers
+  let mergedProviders: Partial<OidcProvider>[] | undefined
+  if (bundle.users?.oidc_providers !== undefined) {
+    const incoming = bundle.users.oidc_providers
+    const existingProviders = config.oidc_providers
     const byId = new Map(incoming.map((p) => [p.id as string, p]))
     mergedProviders = existingProviders.map((p) => {
       const inc = byId.get(p.id)
       if (!inc) {
         usersOut.providers_skip++
-        return p as Partial<OAuth2Provider>
+        return p as Partial<OidcProvider>
       }
       usersOut.providers_update++
       // 字段级合并：省略字段保留原值（总原则：省略 = 不更新）
-      return { ...p, ...inc } as Partial<OAuth2Provider>
+      return { ...p, ...inc } as Partial<OidcProvider>
     })
     const existingIds = new Set(existingProviders.map((p) => p.id))
     for (const p of incoming) {
       if (!existingIds.has(p.id as string)) {
         usersOut.providers_create++
         // 新建：缺省字段补空串
-        mergedProviders.push({ client_id: '', client_secret: '', authorize_url: '', token_url: '', userinfo_url: '', scopes: '', ...p })
+        mergedProviders.push({ issuer: '', client_id: '', client_secret: '', scopes: '', ...p })
       }
     }
   }
   // 段缺省时摘要为 null（与 agents 同语义）
   const users: ImportSummary['users'] = bundle.users === undefined ? null : usersOut
 
-  return { gateway, gatewayUpdate, experience, experienceUpdate, agents, agentOps, users, directOpen, oauthOpen, mergedProviders }
+  return { gateway, gatewayUpdate, experience, experienceUpdate, agents, agentOps, users, directOpen, oidcOpen, mergedProviders }
 }
 
 function planToSummary(plan: ImportPlan): ImportSummary {
@@ -774,11 +787,11 @@ export async function applyImportBundle(bundle: ConfigExportBundle, deps?: Trans
     await d.updateConfig(plan.experienceUpdate)
   }
 
-  // users：注册开关 + OAuth 供应商（合并后整表写回，updateConfig 自动失效配置缓存）
+  // users：注册开关 + OIDC 供应商（合并后整表写回，updateConfig 自动失效配置缓存）
   if (plan.directOpen !== undefined) await d.setDirectRegistrationOpen(plan.directOpen)
-  if (plan.oauthOpen !== undefined) await d.setOauthRegistrationOpen(plan.oauthOpen)
+  if (plan.oidcOpen !== undefined) await d.setOidcRegistrationOpen(plan.oidcOpen)
   if (plan.mergedProviders !== undefined) {
-    await d.updateConfig({ oauth_providers: plan.mergedProviders as OAuth2Provider[] })
+    await d.updateConfig({ oidc_providers: plan.mergedProviders as OidcProvider[] })
   }
 
   // agents：upsert（只传文件中出现的字段；avatar 过图床转换）

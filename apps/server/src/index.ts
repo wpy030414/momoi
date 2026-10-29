@@ -33,7 +33,7 @@ import { filesRoute } from './routes/files.js'
 import { workspacesRoute } from './routes/workspaces.js'
 import { groupRoute } from './routes/group.js'
 import { worldsRoute } from './routes/worlds.js'
-import { oauthRoute } from './routes/oauth.js'
+import { oidcRoute } from './routes/oidc.js'
 import { assetsRoute } from './routes/assets.js'
 import { voiceRoute } from './routes/voice.js'
 import { wechatRoute } from './routes/wechat.js'
@@ -79,8 +79,8 @@ app.route('/api/group', groupRoute)
 app.route('/api/worlds', worldsRoute)
 app.route('/api/workspaces', workspacesRoute)
 if (!STAND_ALONE) {
-  // OAuth login is part of the Momoi auth stack — not offered in stand-alone.
-  app.route('/api/oauth', oauthRoute)
+  // OIDC login is part of the Momoi auth stack — not offered in stand-alone.
+  app.route('/api/oidc', oidcRoute)
 }
 app.route('/api/assets', assetsRoute)
 app.route('/api/voice', voiceRoute)

@@ -211,15 +211,26 @@ export type TraceEntry =
 
 // ---- Config ----
 
-export interface OAuth2Provider {
+/**
+ * OIDC 身份提供商（Relying Party 侧的客户端配置）。
+ *
+ * 端点（authorize / token / userinfo / jwks）默认从 issuer 的 discovery 文档自动获取：
+ * `${issuer}/.well-known/openid-configuration`。
+ * 三个 URL 字段是**可选覆盖**——仅用于不暴露 discovery 的非标 Provider；
+ * 留空即走 discovery。issuer 必填，并会与 discovery 返回的 issuer 做一致性校验。
+ */
+export interface OidcProvider {
   id: string
   name: string
+  /** discovery 基座，如 https://dingtalk.auth.xrl.im/my_org */
+  issuer: string
   client_id: string
   client_secret: string
-  authorize_url: string
-  token_url: string
-  userinfo_url: string
+  /** 默认 openid；服务端会确保含有 openid */
   scopes: string
+  authorize_url?: string
+  token_url?: string
+  userinfo_url?: string
 }
 
 /** 网关上游类型：custom = 管理员自配置的 OpenAI 兼容端点；workbuddy = 内置 WorkBuddy
@@ -246,7 +257,7 @@ export interface AppConfig {
   recommended_questions: string[]
   /** 聊天常用追问（最多 5 条，非空对话输入框上方气泡） */
   followup_questions: string[]
-  oauth_providers: OAuth2Provider[]
+  oidc_providers: OidcProvider[]
 }
 
 // ---- WorkBuddy 上游 ----
@@ -434,9 +445,9 @@ export interface ConfigExportBundle {
   agents?: ConfigTransferAgent[]
   users?: {
     direct_registration_open?: boolean
-    oauth_registration_open?: boolean
+    oidc_registration_open?: boolean
     /** 条目字段可省略：同 id 覆盖时省略字段保留原值，新建时缺省为空串 */
-    oauth_providers?: Partial<OAuth2Provider>[]
+    oidc_providers?: Partial<OidcProvider>[]
   }
 }
 
@@ -461,7 +472,7 @@ export interface ImportSummary {
   } | null
   users: {
     direct_registration_open: { from: boolean; to: boolean } | null
-    oauth_registration_open: { from: boolean; to: boolean } | null
+    oidc_registration_open: { from: boolean; to: boolean } | null
     providers_update: number
     providers_create: number
     providers_skip: number
@@ -642,7 +653,7 @@ export interface AdminUserRow {
   last_login_at: number | null
   last_active_at: number | null
   banned: boolean
-  oauth_providers: string[]  // OAuth2 provider ids linked to this user
+  oidc_providers: string[]  // OAuth2 provider ids linked to this user
 }
 
 // ---- API Responses ----

@@ -55,20 +55,22 @@ export enum ErrCode {
   USER_BINDING_NOT_OWNED = 'USER_BINDING_NOT_OWNED',
   USER_CANNOT_REMOVE_ONLY_LOGIN = 'USER_CANNOT_REMOVE_ONLY_LOGIN',
 
-  // ---- OAUTH（* = 主要经 302 ?oauth_error_code= 传递） ----
-  OAUTH_UNKNOWN_PROVIDER = 'OAUTH_UNKNOWN_PROVIDER',
+  // ---- OIDC（* = 主要经 302 ?oidc_error_code= 传递） ----
+  OIDC_UNKNOWN_PROVIDER = 'OIDC_UNKNOWN_PROVIDER',
   /** IdP 回调自带 error 参数；params.detail = IdP 原始 error 值 * */
-  OAUTH_PROVIDER_ERROR = 'OAUTH_PROVIDER_ERROR',
-  OAUTH_INVALID_STATE = 'OAUTH_INVALID_STATE',
-  OAUTH_NO_AUTH_CODE = 'OAUTH_NO_AUTH_CODE',
+  OIDC_PROVIDER_ERROR = 'OIDC_PROVIDER_ERROR',
+  OIDC_INVALID_STATE = 'OIDC_INVALID_STATE',
+  OIDC_NO_AUTH_CODE = 'OIDC_NO_AUTH_CODE',
   /** 换 token 失败；params.detail = 上游响应体 * */
-  OAUTH_TOKEN_EXCHANGE_FAILED = 'OAUTH_TOKEN_EXCHANGE_FAILED',
-  OAUTH_LINKED_USER_NOT_FOUND = 'OAUTH_LINKED_USER_NOT_FOUND',
-  OAUTH_REGISTRATION_CLOSED = 'OAUTH_REGISTRATION_CLOSED',
-  OAUTH_MISSING_FIELDS = 'OAUTH_MISSING_FIELDS',
-  OAUTH_ALREADY_LINKED = 'OAUTH_ALREADY_LINKED',
-  OAUTH_ACCOUNT_NOT_FOUND = 'OAUTH_ACCOUNT_NOT_FOUND',
-  OAUTH_ACCOUNT_NO_PIN = 'OAUTH_ACCOUNT_NO_PIN',
+  OIDC_TOKEN_EXCHANGE_FAILED = 'OIDC_TOKEN_EXCHANGE_FAILED',
+  /** id_token 签名/issuer/audience 校验失败 */
+  OIDC_ID_TOKEN_INVALID = 'OIDC_ID_TOKEN_INVALID',
+  OIDC_LINKED_USER_NOT_FOUND = 'OIDC_LINKED_USER_NOT_FOUND',
+  OIDC_REGISTRATION_CLOSED = 'OIDC_REGISTRATION_CLOSED',
+  OIDC_MISSING_FIELDS = 'OIDC_MISSING_FIELDS',
+  OIDC_ALREADY_LINKED = 'OIDC_ALREADY_LINKED',
+  OIDC_ACCOUNT_NOT_FOUND = 'OIDC_ACCOUNT_NOT_FOUND',
+  OIDC_ACCOUNT_NO_PIN = 'OIDC_ACCOUNT_NO_PIN',
 
   // ---- CONV（会话） ----
   /** 会话不存在或无权访问（13 处收敛；upload 路由同语义） */
@@ -315,18 +317,19 @@ export const ERR_REGISTRY: Readonly<Record<ErrCode, ErrMeta>> = {
   [ErrCode.USER_BINDING_NOT_OWNED]: { status: 403 },
   [ErrCode.USER_CANNOT_REMOVE_ONLY_LOGIN]: { status: 400 },
 
-  // OAUTH
-  [ErrCode.OAUTH_UNKNOWN_PROVIDER]: { status: 404 },
-  [ErrCode.OAUTH_PROVIDER_ERROR]: { status: 400, params: ['detail'] },
-  [ErrCode.OAUTH_INVALID_STATE]: { status: 400 },
-  [ErrCode.OAUTH_NO_AUTH_CODE]: { status: 400 },
-  [ErrCode.OAUTH_TOKEN_EXCHANGE_FAILED]: { status: 502, params: ['detail'] },
-  [ErrCode.OAUTH_LINKED_USER_NOT_FOUND]: { status: 404 },
-  [ErrCode.OAUTH_REGISTRATION_CLOSED]: { status: 403 },
-  [ErrCode.OAUTH_MISSING_FIELDS]: { status: 400 },
-  [ErrCode.OAUTH_ALREADY_LINKED]: { status: 409 },
-  [ErrCode.OAUTH_ACCOUNT_NOT_FOUND]: { status: 404 },
-  [ErrCode.OAUTH_ACCOUNT_NO_PIN]: { status: 400 },
+  // OIDC
+  [ErrCode.OIDC_UNKNOWN_PROVIDER]: { status: 404 },
+  [ErrCode.OIDC_PROVIDER_ERROR]: { status: 400, params: ['detail'] },
+  [ErrCode.OIDC_INVALID_STATE]: { status: 400 },
+  [ErrCode.OIDC_NO_AUTH_CODE]: { status: 400 },
+  [ErrCode.OIDC_TOKEN_EXCHANGE_FAILED]: { status: 502, params: ['detail'] },
+  [ErrCode.OIDC_ID_TOKEN_INVALID]: { status: 502, params: ['detail'] },
+  [ErrCode.OIDC_LINKED_USER_NOT_FOUND]: { status: 404 },
+  [ErrCode.OIDC_REGISTRATION_CLOSED]: { status: 403 },
+  [ErrCode.OIDC_MISSING_FIELDS]: { status: 400 },
+  [ErrCode.OIDC_ALREADY_LINKED]: { status: 409 },
+  [ErrCode.OIDC_ACCOUNT_NOT_FOUND]: { status: 404 },
+  [ErrCode.OIDC_ACCOUNT_NO_PIN]: { status: 400 },
 
   // CONV
   [ErrCode.CONV_NOT_FOUND]: { status: 404 },
