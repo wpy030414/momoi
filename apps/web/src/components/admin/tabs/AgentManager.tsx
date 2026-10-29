@@ -10,7 +10,7 @@ import { Button } from '../../ui/button'
 import { Switch } from '../../ui/switch'
 import { Slider } from '../../ui/slider'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
-import { Pencil, Trash2, Plus, Upload, Copy, Shield, Mic, Volume2 } from 'lucide-react'
+import { Pencil, Trash2, Plus, Upload, Copy, Shield, Mic, Volume2, Layers } from 'lucide-react'
 import { useToast } from '../../ui/toast'
 import { ModelPicker } from './ModelPicker'
 
@@ -52,6 +52,9 @@ function voiceFormFromAgent(agent: Agent): VoiceFormState {
     return DEFAULT_VOICE_FORM
   }
 }
+
+/** 「统一模型」下拉的混搭态哨兵值——选中它不触发批量保存 */
+const MIXED_MODEL_VALUE = '__mixed__'
 
 /** A single agent row — card in view mode, expands into edit form in edit mode */
 function AgentRow({
@@ -342,6 +345,8 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const voiceAudioRef = useRef<HTMLInputElement>(null)
   const [voiceCloning, setVoiceCloning] = useState(false)
+  /** 统一模型批量保存中（行内下拉禁用，防止并发提交） */
+  const [bulkSaving, setBulkSaving] = useState(false)
 
   // Form state
   const [formName, setFormName] = useState('')
@@ -533,6 +538,51 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     setVoice(DEFAULT_VOICE_FORM)
   }
 
+  // ── 统一模型：一次性改写全部智能体（含中立 Agent）的模型字段 ──
+
+  /** 全部智能体（中立 Agent 在前）当前模型去重后的集合 */
+  const allModels = [...new Set(
+    [neutralAgent, ...agents].filter((a): a is Agent => !!a).map((a) => a.model.trim()),
+  )]
+  /** 混搭态：存在多个不同模型时下拉显示「多个模型」 */
+  const isMixedModel = allModels.length > 1
+  const bulkSelectValue = isMixedModel
+    ? MIXED_MODEL_VALUE
+    : allModels.length === 1 && allModels[0] !== ''
+      ? allModels[0]
+      : undefined
+
+  /**
+   * 批量保存：只有模型真正变化的智能体才发 PUT（中立 Agent 同样可改模型），
+   * 逐个串行提交，任一失败记入 failed 并在结束后统一提示。
+   */
+  const handleBulkModelChange = async (next: string) => {
+    if (next === MIXED_MODEL_VALUE) return
+    const model = next.trim()
+    const targets = [neutralAgent, ...agents]
+      .filter((a): a is Agent => !!a && a.model !== model)
+    if (targets.length === 0) return
+
+    setBulkSaving(true)
+    let failed = 0
+    for (const target of targets) {
+      try {
+        await api.updateAgent(target.id, { model })
+      } catch (err) {
+        failed++
+        console.error('Failed to bulk-update agent model:', target.id, err)
+      }
+    }
+    await fetchAgents()
+    setBulkSaving(false)
+
+    if (failed > 0) {
+      toast({ title: t('settings.bulkModelPartialFail', { failed, total: targets.length }), variant: 'error' })
+    } else {
+      toast({ title: t('settings.bulkModelSaved'), variant: 'success' })
+    }
+  }
+
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -579,6 +629,27 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
             <p className="text-muted-foreground text-center py-4">{t('settings.agentNoAgents')}</p>
           ) : (
             <>
+              {/* 统一模型 — 置于中立 Agent 之上，一次性改写全部智能体（含中立 Agent）的模型 */}
+              {neutralAgent && (
+                <div className="flex items-center gap-3 p-3 border rounded-md">
+                  <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <Layers className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-sm">{t('settings.bulkModelTitle')}</p>
+                    <p className="text-xs text-muted-foreground truncate">{t('settings.bulkModelHint')}</p>
+                  </div>
+                  <div className="w-56 max-w-[50%] flex-shrink-0">
+                    <ModelPicker
+                      value={bulkSelectValue ?? ''}
+                      onChange={(v) => void handleBulkModelChange(v)}
+                      disabled={bulkSaving}
+                      mixed={isMixedModel}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Neutral Agent — always at top */}
               {neutralAgent && (
                 <AgentRow

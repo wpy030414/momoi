@@ -12,6 +12,13 @@ const CUSTOM_VALUE = '__custom__'
 interface ModelPickerProps {
   value: string
   onChange: (value: string) => void
+  /** 禁用下拉与输入（批量保存进行中） */
+  disabled?: boolean
+  /**
+   * 混搭态：仅用于「统一模型」这类批量入口——当前各智能体模型不一致时，
+   * 触发器显示「多个模型」占位，不进入自定义输入，也不额外渲染「模型」标签。
+   */
+  mixed?: boolean
 }
 
 /**
@@ -20,7 +27,7 @@ interface ModelPickerProps {
  * - 目录里没有想要的模型时选「自定义」，回退为手动输入模型 ID；
  * - 目录拉取失败不阻塞编辑，直接以自定义输入形态呈现。
  */
-export function ModelPicker({ value, onChange }: ModelPickerProps) {
+export function ModelPicker({ value, onChange, disabled = false, mixed = false }: ModelPickerProps) {
   const { t } = useTranslation()
   const [catalog, setCatalog] = useState<GatewayModelList | null>(null)
   const [loading, setLoading] = useState(true)
@@ -42,9 +49,12 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
 
   const models = catalog?.models ?? []
   const matched = models.some((m) => m.id === value)
-  // 目录为空（无可用上游 / 拉取失败）或当前值不在目录里 → 自定义输入
-  const isCustom = manual || (!loading && (models.length === 0 || (value.trim() !== '' && !matched)))
+  // 混搭态下 value 为空是正常的（不指向任何单一模型），不得退化成自定义输入
+  const isCustom = !mixed && (manual || (!loading && (models.length === 0 || (value.trim() !== '' && !matched))))
   const selectValue = isCustom ? CUSTOM_VALUE : matched ? value : undefined
+  const placeholder = mixed
+    ? t('settings.agentModelMixed')
+    : loading ? t('settings.agentModelLoading') : t('settings.agentModelSelect')
 
   const handleSelect = (next: string) => {
     if (next === CUSTOM_VALUE) {
@@ -61,23 +71,23 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
   return (
     <div>
       <div className="flex items-center justify-between">
-        <label className="text-sm font-medium">{t('settings.agentModel')}</label>
+        {!mixed && <label className="text-sm font-medium">{t('settings.agentModel')}</label>}
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 px-2"
+          className={mixed ? 'ml-auto h-6 px-2 -mr-1' : 'h-6 px-2'}
           onClick={() => void load()}
-          disabled={loading}
+          disabled={loading || disabled}
           title={t('settings.agentModelRefresh')}
         >
           <RefreshCw className={loading ? 'h-3 w-3 animate-spin' : 'h-3 w-3'} />
         </Button>
       </div>
 
-      <Select value={selectValue} onValueChange={handleSelect}>
+      <Select value={selectValue} onValueChange={handleSelect} disabled={disabled}>
         <SelectTrigger className="mt-1">
-          <SelectValue placeholder={loading ? t('settings.agentModelLoading') : t('settings.agentModelSelect')} />
+          <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
           {models.map((model) => (
