@@ -284,9 +284,9 @@ export function ConfigTransfer() {
                       {String(s.users.direct_registration_open.from)} → {String(s.users.direct_registration_open.to)}
                     </SummaryRow>
                   )}
-                  {s.users.oauth_registration_open && (
-                    <SummaryRow title="oauth_registration_open">
-                      {String(s.users.oauth_registration_open.from)} → {String(s.users.oauth_registration_open.to)}
+                  {s.users.oidc_registration_open && (
+                    <SummaryRow title="oidc_registration_open">
+                      {String(s.users.oidc_registration_open.from)} → {String(s.users.oidc_registration_open.to)}
                     </SummaryRow>
                   )}
                   {(s.users.providers_update > 0 || s.users.providers_create > 0) && (

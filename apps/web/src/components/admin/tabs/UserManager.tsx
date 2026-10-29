@@ -9,12 +9,12 @@ import { Plus, Trash2, Pencil, Eye, EyeOff, Brain } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { errT } from '../../../i18n'
 import { useToast } from '../../ui/toast'
-import type { AdminUserRow, OAuth2Provider } from '@momoi/shared/types'
+import type { AdminUserRow, OidcProvider } from '@momoi/shared/types'
 
 export interface UserManagerHandle {}
 
-function newProvider(): OAuth2Provider {
-  return { id: crypto.randomUUID(), name: '', client_id: '', client_secret: '', authorize_url: '', token_url: '', userinfo_url: '', scopes: '' }
+function newProvider(): OidcProvider {
+  return { id: crypto.randomUUID(), name: '', issuer: '', client_id: '', client_secret: '', scopes: 'openid' }
 }
 
 const PAGE_SIZE = 10
@@ -28,23 +28,23 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   const [loading, setLoading] = useState(true)
   const [deleteUsername, setDeleteUsername] = useState<string | null>(null)
   const [directRegistrationOpen, setDirectRegistrationOpen] = useState(true)
-  const [oauthRegistrationOpen, setOauthRegistrationOpen] = useState(true)
-  const [oauthProviders, setOauthProviders] = useState<OAuth2Provider[]>([])
-  const [oauthDialogOpen, setOauthDialogOpen] = useState(false)
-  const [oauthEditingId, setOauthEditingId] = useState<string | null>(null)
-  const [oauthForm, setOauthForm] = useState(newProvider())
-  const [oauthDeleteId, setOauthDeleteId] = useState<string | null>(null)
-  const [oauthSaving, setOauthSaving] = useState(false)
+  const [oidcRegistrationOpen, setOidcRegistrationOpen] = useState(true)
+  const [oidcProviders, setOauthProviders] = useState<OidcProvider[]>([])
+  const [oidcDialogOpen, setOauthDialogOpen] = useState(false)
+  const [oidcEditingId, setOauthEditingId] = useState<string | null>(null)
+  const [oidcForm, setOidcForm] = useState(newProvider())
+  const [oidcDeleteId, setOauthDeleteId] = useState<string | null>(null)
+  const [oidcSaving, setOauthSaving] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
 
   useEffect(() => {
     api.getDirectRegistration().then((r) => setDirectRegistrationOpen(r.direct_registration_open)).catch(() => {})
-    api.getOauthRegistration().then((r) => setOauthRegistrationOpen(r.oauth_registration_open)).catch(() => {})
-    fetchOauthProviders()
+    api.getOidcRegistration().then((r) => setOidcRegistrationOpen(r.oidc_registration_open)).catch(() => {})
+    fetchOidcProviders()
   }, [])
 
-  const fetchOauthProviders = () => {
-    api.getConfig().then((c) => { setOauthProviders(c.oauth_providers || []) }).catch(console.error)
+  const fetchOidcProviders = () => {
+    api.getConfig().then((c) => { setOauthProviders(c.oidc_providers || []) }).catch(console.error)
   }
 
   // useCallback 包裹后既是 effect 的合法依赖（规则要求），也被增删改操作
@@ -59,10 +59,10 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
 
   useEffect(() => { fetchUsers() }, [fetchUsers])
 
-  const saveOauthProviders = async (updated: OAuth2Provider[]) => {
+  const saveOidcProviders = async (updated: OidcProvider[]) => {
     setOauthProviders(updated)
-    try { await api.updateConfig({ oauth_providers: updated }) }
-    catch { fetchOauthProviders() }
+    try { await api.updateConfig({ oidc_providers: updated }) }
+    catch { fetchOidcProviders() }
   }
 
   const handleToggleDirectRegistration = async (open: boolean) => {
@@ -71,45 +71,45 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
     catch { setDirectRegistrationOpen(!open) }
   }
 
-  const handleToggleOauthRegistration = async (open: boolean) => {
-    setOauthRegistrationOpen(open)
-    try { await api.setOauthRegistration(open) }
-    catch { setOauthRegistrationOpen(!open) }
+  const handleToggleOidcRegistration = async (open: boolean) => {
+    setOidcRegistrationOpen(open)
+    try { await api.setOidcRegistration(open) }
+    catch { setOidcRegistrationOpen(!open) }
   }
 
-  // ---- OAuth2 CRUD ----
+  // ---- OIDC CRUD ----
 
-  const openOauthAdd = () => {
+  const openOidcAdd = () => {
     setOauthEditingId(null)
-    setOauthForm(newProvider())
+    setOidcForm(newProvider())
     setShowSecret(false)
     setOauthDialogOpen(true)
   }
 
-  const openOauthEdit = (provider: OAuth2Provider) => {
+  const openOidcEdit = (provider: OidcProvider) => {
     setOauthEditingId(provider.id)
-    setOauthForm({ ...provider })
+    setOidcForm({ ...provider })
     setShowSecret(false)
     setOauthDialogOpen(true)
   }
 
-  const handleOauthSave = async () => {
-    if (!oauthForm.name.trim() || !oauthForm.id.trim()) return
+  const handleOidcSave = async () => {
+    if (!oidcForm.name.trim() || !oidcForm.id.trim()) return
     setOauthSaving(true)
-    const updated = oauthEditingId
-      ? oauthProviders.map((p) => p.id === oauthEditingId ? oauthForm : p)
-      : [...oauthProviders, oauthForm]
-    await saveOauthProviders(updated)
+    const updated = oidcEditingId
+      ? oidcProviders.map((p) => p.id === oidcEditingId ? oidcForm : p)
+      : [...oidcProviders, oidcForm]
+    await saveOidcProviders(updated)
     setOauthDialogOpen(false)
-    toast({ title: t('settings.toastOauthSaved'), variant: 'success' })
+    toast({ title: t('settings.toastOidcSaved'), variant: 'success' })
     setOauthSaving(false)
   }
 
-  const confirmOauthDelete = async () => {
-    if (!oauthDeleteId) return
-    const updated = oauthProviders.filter((p) => p.id !== oauthDeleteId)
-    await saveOauthProviders(updated)
-    toast({ title: t('settings.toastOauthDeleted'), variant: 'success' })
+  const confirmOidcDelete = async () => {
+    if (!oidcDeleteId) return
+    const updated = oidcProviders.filter((p) => p.id !== oidcDeleteId)
+    await saveOidcProviders(updated)
+    toast({ title: t('settings.toastOidcDeleted'), variant: 'success' })
     setOauthDeleteId(null)
   }
 
@@ -159,33 +159,33 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
         <Switch checked={directRegistrationOpen} onCheckedChange={handleToggleDirectRegistration} />
       </div>
 
-      {/* OAuth registration toggle */}
+      {/* OIDC registration toggle */}
       <div className="flex items-center gap-3">
-        <label className="text-sm font-medium">{t('settings.oauthRegistrationLabel')}</label>
-        <Switch checked={oauthRegistrationOpen} onCheckedChange={handleToggleOauthRegistration} />
+        <label className="text-sm font-medium">{t('settings.oidcRegistrationLabel')}</label>
+        <Switch checked={oidcRegistrationOpen} onCheckedChange={handleToggleOidcRegistration} />
       </div>
 
-      {/* OAuth2 providers */}
+      {/* OIDC providers */}
       <div>
         <div className="flex items-center mb-1">
-          <label className="text-sm font-medium">{t('settings.oauthProviders')}</label>
-          <Button variant="outline" size="sm" className="ml-auto" onClick={openOauthAdd}>
+          <label className="text-sm font-medium">{t('settings.oidcProviders')}</label>
+          <Button variant="outline" size="sm" className="ml-auto" onClick={openOidcAdd}>
             <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('settings.oauthAddProvider')}
+            {t('settings.oidcAddProvider')}
           </Button>
         </div>
-        {oauthProviders.length === 0 ? (
-          <p className="text-muted-foreground">{t('settings.oauthNoProviders')}</p>
+        {oidcProviders.length === 0 ? (
+          <p className="text-muted-foreground">{t('settings.oidcNoProviders')}</p>
         ) : (
           <div className="space-y-2 mt-1">
-            {oauthProviders.map((p) => (
+            {oidcProviders.map((p) => (
               <div key={p.id} className="flex items-center justify-between p-3 border rounded-md">
                 <div className="flex-1 min-w-0 mr-4">
                   <p className="font-medium text-sm truncate">{p.name}</p>
-                  <p className="text-xs text-muted-foreground truncate">{p.authorize_url || p.token_url}</p>
+                  <p className="text-xs text-muted-foreground truncate">{p.issuer}</p>
                 </div>
                 <div className="flex gap-1 ml-2 shrink-0">
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openOauthEdit(p)} title={t('settings.oauthEditProvider')}>
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openOidcEdit(p)} title={t('settings.oidcEditProvider')}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                   <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => setOauthDeleteId(p.id)} title={t('common.remove')}>
@@ -224,8 +224,8 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
                   <tr key={u.username} className="border-t">
                     <td className="px-3 py-2 font-medium">{u.username}</td>
                     <td className="px-3 py-2 text-muted-foreground">
-                      {u.oauth_providers.length > 0
-                        ? u.oauth_providers.map((pid) => oauthProviders.find((p) => p.id === pid)?.name || pid).join(', ')
+                      {u.oidc_providers.length > 0
+                        ? u.oidc_providers.map((pid) => oidcProviders.find((p) => p.id === pid)?.name || pid).join(', ')
                         : '-'}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">{formatTime(u.last_active_at ?? u.last_login_at)}</td>
@@ -270,48 +270,48 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
         </div>
       </div>
 
-      {/* OAuth2 add/edit dialog */}
-      <Dialog open={oauthDialogOpen} onOpenChange={(open) => { if (!open) setOauthDialogOpen(false) }}>
+      {/* OIDC add/edit dialog */}
+      <Dialog open={oidcDialogOpen} onOpenChange={(open) => { if (!open) setOauthDialogOpen(false) }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {oauthEditingId ? t('settings.oauthEditProvider') : t('settings.oauthAddProvider')}
+              {oidcEditingId ? t('settings.oidcEditProvider') : t('settings.oidcAddProvider')}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium">{t('settings.oauthProviderName')}</label>
+              <label className="text-sm font-medium">{t('settings.oidcProviderName')}</label>
               <Input
-                value={oauthForm.name}
-                onChange={(e) => setOauthForm({ ...oauthForm, name: e.target.value })}
-                placeholder={t('settings.oauthProviderNamePlaceholder')}
+                value={oidcForm.name}
+                onChange={(e) => setOidcForm({ ...oidcForm, name: e.target.value })}
+                placeholder={t('settings.oidcProviderNamePlaceholder')}
                 className="mt-1.5"
               />
             </div>
             <div>
-              <label className="text-sm font-medium">{t('settings.oauthProviderId')}</label>
+              <label className="text-sm font-medium">{t('settings.oidcProviderId')}</label>
               <Input
-                value={oauthForm.id}
-                onChange={(e) => setOauthForm({ ...oauthForm, id: e.target.value })}
-                placeholder={t('settings.oauthProviderIdPlaceholder')}
+                value={oidcForm.id}
+                onChange={(e) => setOidcForm({ ...oidcForm, id: e.target.value })}
+                placeholder={t('settings.oidcProviderIdPlaceholder')}
                 className="mt-1.5"
               />
             </div>
             <div>
-              <label className="text-sm font-medium">{t('settings.oauthProviderClientId')}</label>
+              <label className="text-sm font-medium">{t('settings.oidcProviderClientId')}</label>
               <Input
-                value={oauthForm.client_id}
-                onChange={(e) => setOauthForm({ ...oauthForm, client_id: e.target.value })}
+                value={oidcForm.client_id}
+                onChange={(e) => setOidcForm({ ...oidcForm, client_id: e.target.value })}
                 className="mt-1.5"
               />
             </div>
             <div>
-              <label className="text-sm font-medium">{t('settings.oauthProviderClientSecret')}</label>
+              <label className="text-sm font-medium">{t('settings.oidcProviderClientSecret')}</label>
               <div className="relative mt-1.5">
                 <Input
                   type={showSecret ? 'text' : 'password'}
-                  value={oauthForm.client_secret}
-                  onChange={(e) => setOauthForm({ ...oauthForm, client_secret: e.target.value })}
+                  value={oidcForm.client_secret}
+                  onChange={(e) => setOidcForm({ ...oidcForm, client_secret: e.target.value })}
                   className="pr-10"
                 />
                 <button type="button" onClick={() => setShowSecret(!showSecret)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -320,38 +320,21 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium">{t('settings.oauthProviderAuthorizeUrl')}</label>
+              <label className="text-sm font-medium">{t('settings.oidcProviderIssuer')}</label>
               <Input
-                value={oauthForm.authorize_url}
-                onChange={(e) => setOauthForm({ ...oauthForm, authorize_url: e.target.value })}
-                placeholder={t('settings.oauthProviderAuthorizeUrlPlaceholder')}
-                className="mt-1.5"
+                value={oidcForm.issuer}
+                onChange={(e) => setOidcForm({ ...oidcForm, issuer: e.target.value })}
+                placeholder={t('settings.oidcProviderIssuerPlaceholder')}
+                className="mt-1.5 font-mono text-xs"
               />
+              <p className="mt-1 text-xs text-muted-foreground">{t('settings.oidcProviderIssuerHint')}</p>
             </div>
             <div>
-              <label className="text-sm font-medium">{t('settings.oauthProviderTokenUrl')}</label>
+              <label className="text-sm font-medium">{t('settings.oidcProviderScopes')}</label>
               <Input
-                value={oauthForm.token_url}
-                onChange={(e) => setOauthForm({ ...oauthForm, token_url: e.target.value })}
-                placeholder={t('settings.oauthProviderTokenUrlPlaceholder')}
-                className="mt-1.5"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium">{t('settings.oauthProviderUserinfoUrl')}</label>
-              <Input
-                value={oauthForm.userinfo_url}
-                onChange={(e) => setOauthForm({ ...oauthForm, userinfo_url: e.target.value })}
-                placeholder={t('settings.oauthProviderUserinfoUrlPlaceholder')}
-                className="mt-1.5"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium">{t('settings.oauthProviderScopes')}</label>
-              <Input
-                value={oauthForm.scopes}
-                onChange={(e) => setOauthForm({ ...oauthForm, scopes: e.target.value })}
-                placeholder={t('settings.oauthProviderScopesPlaceholder')}
+                value={oidcForm.scopes}
+                onChange={(e) => setOidcForm({ ...oidcForm, scopes: e.target.value })}
+                placeholder={t('settings.oidcProviderScopesPlaceholder')}
                 className="mt-1.5"
               />
             </div>
@@ -360,25 +343,25 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
             <Button variant="outline" onClick={() => setOauthDialogOpen(false)}>
               {t('common.cancel')}
             </Button>
-            <Button onClick={handleOauthSave} disabled={oauthSaving || !oauthForm.name.trim() || !oauthForm.id.trim()}>
-              {oauthSaving ? t('common.saving') : t('common.save')}
+            <Button onClick={handleOidcSave} disabled={oidcSaving || !oidcForm.name.trim() || !oidcForm.id.trim()}>
+              {oidcSaving ? t('common.saving') : t('common.save')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* OAuth2 delete confirmation dialog */}
-      <Dialog open={!!oauthDeleteId} onOpenChange={(open) => { if (!open) setOauthDeleteId(null) }}>
+      {/* OIDC delete confirmation dialog */}
+      <Dialog open={!!oidcDeleteId} onOpenChange={(open) => { if (!open) setOauthDeleteId(null) }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('common.remove')}</DialogTitle>
-            <DialogDescription>{t('settings.oauthDeleteConfirm')}</DialogDescription>
+            <DialogDescription>{t('settings.oidcDeleteConfirm')}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOauthDeleteId(null)}>
               {t('common.cancel')}
             </Button>
-            <Button variant="destructive" onClick={confirmOauthDelete}>
+            <Button variant="destructive" onClick={confirmOidcDelete}>
               {t('common.remove')}
             </Button>
           </DialogFooter>

@@ -22,13 +22,13 @@ export function LinkedAccountsDialog({ open, onOpenChange }: LinkedAccountsDialo
     if (open) {
       setError('')
       fetchBindings()
-      api.getOauthProviders().then((r) => setProviders(r.providers)).catch(() => {})
+      api.getOidcProviders().then((r) => setProviders(r.providers)).catch(() => {})
     }
   }, [open])
 
   const fetchBindings = async () => {
     try {
-      const result = await api.getOauthBindings()
+      const result = await api.getOidcBindings()
       setBindings(result.bindings)
     } catch (err) {
       console.error('Failed to fetch bindings', err)
@@ -40,7 +40,7 @@ export function LinkedAccountsDialog({ open, onOpenChange }: LinkedAccountsDialo
     setLoading(true)
     setError('')
     try {
-      await api.unbindOauth(unbindId)
+      await api.unbindOidc(unbindId)
       setBindings((prev) => prev.filter((b) => b.id !== unbindId))
       setUnbindId(null)
     } catch (err) {
@@ -55,9 +55,9 @@ export function LinkedAccountsDialog({ open, onOpenChange }: LinkedAccountsDialo
   }
 
   const handleLink = (providerId: string) => {
-    // Full-page redirect to OAuth flow. Browser carries momoi_token cookie,
+    // Full-page redirect to OIDC flow. Browser carries momoi_token cookie,
     // callback will auto-bind to current user.
-    window.location.href = `/api/oauth/${providerId}/login`
+    window.location.href = `/api/oidc/${providerId}/login`
   }
 
   return (

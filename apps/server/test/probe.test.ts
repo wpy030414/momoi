@@ -30,7 +30,7 @@ function makeConfig(endpoint: string): AppConfig {
     use_external_image_hosting: false,
     recommended_questions: [],
     followup_questions: [],
-    oauth_providers: [],
+    oidc_providers: [],
   }
 }
 

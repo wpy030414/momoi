@@ -14,7 +14,7 @@ import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog
 import { LinkedAccountsDialog } from './components/settings/LinkedAccountsDialog'
 import { ImBindDialog } from './components/chat/ImBindDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
-import { OAuthRegisterScreen } from './components/auth/OAuthRegisterScreen'
+import { OidcRegisterScreen } from './components/auth/OidcRegisterScreen'
 import { Button } from './components/ui/button'
 import { Input } from './components/ui/input'
 import { useToast } from './components/ui/toast'
@@ -54,7 +54,7 @@ export function App() {
     }
     return false
   })
-  const [oauthRegisterInfo, setOauthRegisterInfo] = useState<{ providerId: string; providerUserId: string } | null>(null)
+  const [oidcRegisterInfo, setOauthRegisterInfo] = useState<{ providerId: string; providerUserId: string } | null>(null)
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
   const [supportAttachments, setSupportAttachments] = useState(false)
@@ -71,41 +71,41 @@ export function App() {
   // single-user no-auth deployment (auto-login as the fixed 'admin')
   const [standAlone, setStandAlone] = useState<boolean | null>(null)
 
-  // OAuth2 callback → sync localStorage from query params, then clean URL
+  // OIDC callback → sync localStorage from query params, then clean URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const oauthUser = params.get('oauth_user')
-    const oauthExpires = params.get('oauth_expires')
-    const oauthRegister = params.get('oauth_register')
+    const oidcUser = params.get('oidc_user')
+    const oidcExpires = params.get('oidc_expires')
+    const oidcRegister = params.get('oidc_register')
     const providerId = params.get('provider_id')
     const providerUserId = params.get('provider_user_id')
 
-    if (oauthRegister === '1' && providerId && providerUserId) {
+    if (oidcRegister === '1' && providerId && providerUserId) {
       setOauthRegisterInfo({ providerId, providerUserId })
       // Clean query params from URL without reload
       const url = new URL(window.location.href)
-      url.searchParams.delete('oauth_register')
+      url.searchParams.delete('oidc_register')
       url.searchParams.delete('provider_id')
       url.searchParams.delete('provider_user_id')
       history.replaceState(null, '', url.toString())
       return
     }
 
-    if (oauthUser) {
-      localStorage.setItem('user', oauthUser)
-      if (oauthExpires) {
-        const exp = Number(oauthExpires)
+    if (oidcUser) {
+      localStorage.setItem('user', oidcUser)
+      if (oidcExpires) {
+        const exp = Number(oidcExpires)
         if (Number.isFinite(exp)) setSessionExpiry(exp)
       }
-      setCurrentUser(oauthUser)
-      // New session just established (Set-Cookie on the OAuth redirect response)
+      setCurrentUser(oidcUser)
+      // New session just established (Set-Cookie on the OIDC redirect response)
       lastLoginAtRef.current = Date.now()
       // Clean query params from URL without reload
       const url = new URL(window.location.href)
-      url.searchParams.delete('oauth_user')
-      url.searchParams.delete('oauth_expires')
-      url.searchParams.delete('oauth_error_code')
-      url.searchParams.delete('oauth_error_detail')
+      url.searchParams.delete('oidc_user')
+      url.searchParams.delete('oidc_expires')
+      url.searchParams.delete('oidc_error_code')
+      url.searchParams.delete('oidc_error_detail')
       history.replaceState(null, '', url.toString())
     }
   }, [])
@@ -360,7 +360,7 @@ export function App() {
     }
   }, [currentUser, standAlone])
 
-  // Most recent successful login (PIN / OAuth / rename re-issue). Used to drop
+  // Most recent successful login (PIN / OIDC / rename re-issue). Used to drop
   // "stale" 401s whose request started BEFORE that moment: their verdict
   // describes the dead old session, and honoring them right after login would
   // /logout and destroy the brand-new cookie — the "instantly kicked out" bug.
@@ -561,7 +561,7 @@ export function App() {
     }).catch(() => {})
   }, [pushSupported])
   // Auto-show the first-use introduction once per browser (all login entries
-  // — PIN verify / PIN setup / OAuth / stand-alone — funnel through
+  // — PIN verify / PIN setup / OIDC / stand-alone — funnel through
   // setCurrentUser; a page refresh restores currentUser in the useState
   // initializer, so this single effect covers every path).
   useEffect(() => {
@@ -574,7 +574,7 @@ export function App() {
   }, [currentUser, pushEnabled])
 
   // ⚠ Rules of Hooks：以下回调/记忆化 Hook 必须位于本组件所有「条件早退」
-  // （oauthRegisterInfo / !currentUser）之前。它们曾被放在早退之后，导致登录/
+  // （oidcRegisterInfo / !currentUser）之前。它们曾被放在早退之后，导致登录/
   // 退出时同一挂载内两次渲染的 Hook 数量不一致，React 抛
   // "Rendered more/fewer hooks than during the previous render"，
   // 整树卸载 → 白屏，需手动刷新恢复。
@@ -691,11 +691,11 @@ export function App() {
     return chat.statsByConv[key] ?? null
   }, [chat.activeId, chat.statsByConv])
 
-  if (oauthRegisterInfo) {
+  if (oidcRegisterInfo) {
     return (
-      <OAuthRegisterScreen
-        providerId={oauthRegisterInfo.providerId}
-        providerUserId={oauthRegisterInfo.providerUserId}
+      <OidcRegisterScreen
+        providerId={oidcRegisterInfo.providerId}
+        providerUserId={oidcRegisterInfo.providerUserId}
         onLogin={(username, expiresAt) => {
           setOauthRegisterInfo(null)
           handleLogin(username, expiresAt)
@@ -758,7 +758,7 @@ export function App() {
             currentUser={currentUser}
             showGithub={showGithub}
             // Stand-alone mode: the fixed 'admin' identity cannot be renamed,
-            // re-PIN'd, OAuth-linked, or logged out — hide those entries.
+            // re-PIN'd, OIDC-linked, or logged out — hide those entries.
             onChangePin={standAlone ? undefined : handleChangePin}
             onChangeUsername={standAlone ? undefined : handleChangeUsername}
             onLinkAccount={standAlone ? undefined : handleLinkAccount}

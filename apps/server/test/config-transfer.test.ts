@@ -24,7 +24,7 @@ import {
   type TransferDeps,
   type ValidateContext,
 } from '../src/lib/config-transfer.js'
-import type { Agent, AppConfig, ConfigExportBundle, OAuth2Provider, ImportIssue } from '@momoi/shared/types'
+import type { Agent, AppConfig, ConfigExportBundle, OidcProvider, ImportIssue } from '@momoi/shared/types'
 import { NEUTRAL_AGENT_ID, NEUTRAL_AGENT_NAME } from '@momoi/shared/constants'
 
 // ---- 测试脚手架 ----
@@ -48,7 +48,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     use_external_image_hosting: false,
     recommended_questions: ['你好'],
     followup_questions: [],
-    oauth_providers: [],
+    oidc_providers: [],
     ...overrides,
   }
 }
@@ -80,7 +80,7 @@ interface Overrides {
   __config?: AppConfig
   __agents?: Agent[]
   __directOpen?: boolean
-  __oauthOpen?: boolean
+  __oidcOpen?: boolean
   __externalHosting?: boolean
   __cdnShouldFail?: boolean
 }
@@ -89,7 +89,7 @@ function makeDeps(overrides: Overrides = {}): Fixture {
   let config = overrides.__config ?? makeConfig()
   let agents = overrides.__agents ?? defaultAgents()
   let directOpen = overrides.__directOpen ?? true
-  let oauthOpen = overrides.__oauthOpen ?? true
+  let oidcOpen = overrides.__oidcOpen ?? true
   let externalHosting = overrides.__externalHosting ?? false
   let cdnShouldFail = overrides.__cdnShouldFail ?? false
 
@@ -98,7 +98,7 @@ function makeDeps(overrides: Overrides = {}): Fixture {
     updateAgent: [] as Array<[string, Record<string, unknown>]>,
     createAgent: [] as Array<{ name: string; idOverride?: string }>,
     setDirectRegistrationOpen: [] as boolean[],
-    setOauthRegistrationOpen: [] as boolean[],
+    setOidcRegistrationOpen: [] as boolean[],
     cdnUploads: [] as string[],
   }
 
@@ -131,8 +131,8 @@ function makeDeps(overrides: Overrides = {}): Fixture {
     },
     isDirectRegistrationOpen: async () => directOpen,
     setDirectRegistrationOpen: async (open) => { calls.setDirectRegistrationOpen.push(open); directOpen = open },
-    isOauthRegistrationOpen: async () => oauthOpen,
-    setOauthRegistrationOpen: async (open) => { calls.setOauthRegistrationOpen.push(open); oauthOpen = open },
+    isOidcRegistrationOpen: async () => oidcOpen,
+    setOidcRegistrationOpen: async (open) => { calls.setOidcRegistrationOpen.push(open); oidcOpen = open },
     isExternalImageHostingEnabled: async () => externalHosting,
     uploadToCdn: async (_buffer, filename) => {
       if (cdnShouldFail) throw new Error('CDN down')
@@ -147,7 +147,7 @@ function makeDeps(overrides: Overrides = {}): Fixture {
     get config() { return config },
     get agents() { return agents },
     get directOpen() { return directOpen },
-    get oauthOpen() { return oauthOpen },
+    get oidcOpen() { return oidcOpen },
   }
 }
 
@@ -158,13 +158,13 @@ interface Fixture {
     updateAgent: Array<[string, Record<string, unknown>]>
     createAgent: Array<{ name: string; idOverride?: string }>
     setDirectRegistrationOpen: boolean[]
-    setOauthRegistrationOpen: boolean[]
+    setOidcRegistrationOpen: boolean[]
     cdnUploads: string[]
   }
   readonly config: AppConfig
   readonly agents: Agent[]
   readonly directOpen: boolean
-  readonly oauthOpen: boolean
+  readonly oidcOpen: boolean
 }
 
 function makeCtx(existingIds: string[] = [NEUTRAL_AGENT_ID, UUID_A]): ValidateContext {
@@ -416,7 +416,7 @@ describe('validateImportBundle — agents', () => {
 })
 
 describe('validateImportBundle — users', () => {
-  const baseProvider = 'oauth_providers:\n    - id: github\n      name: GitHub\n      authorize_url: https://github.com/a\n      token_url: https://github.com/t\n      userinfo_url: https://api.github.com/user\n      scopes: read:user'
+  const baseProvider = 'oidc_providers:\n    - id: github\n      name: GitHub\n      issuer: https://github.com\n      client_id: abc\n      scopes: read:user'
 
   it('未知键拒绝；开关非 boolean 拒绝', () => {
     const r = validateYAML('users:\n  mcp: true\n  direct_registration_open: "yes"')
@@ -436,32 +436,32 @@ describe('validateImportBundle — users', () => {
   })
 
   it('provider id 含 / 或 65 字符拒绝；URL 非 http(s) 拒绝；第九字段拒绝；重复 id 拒绝；11 个拒绝', () => {
-    const badId = validateYAML('users:\n  oauth_providers:\n    - id: "a/b"\n      name: X')
+    const badId = validateYAML('users:\n  oidc_providers:\n    - id: "a/b"\n      name: X')
     expect(badId.parseFailed || badId.ok).toBe(false)
-    const longId = validateYAML(`users:\n  oauth_providers:\n    - id: "${'a'.repeat(65)}"\n      name: X`)
+    const longId = validateYAML(`users:\n  oidc_providers:\n    - id: "${'a'.repeat(65)}"\n      name: X`)
     expect(longId.parseFailed || longId.ok).toBe(false)
-    const badUrl = validateYAML('users:\n  oauth_providers:\n    - id: gh\n      name: X\n      authorize_url: ftp://x')
+    const badUrl = validateYAML('users:\n  oidc_providers:\n    - id: gh\n      name: X\n      authorize_url: ftp://x')
     expect(badUrl.parseFailed).toBe(false)
     if (!badUrl.parseFailed) expect(badUrl.errors).toContainEqual({
-      path: 'users.oauth_providers[0].authorize_url',
+      path: 'users.oidc_providers[0].authorize_url',
       code: ErrCode.CONFIG_IMPORT_BAD_PROVIDER_URL,
       params: { field: 'authorize_url' },
     })
-    const unknownField = validateYAML('users:\n  oauth_providers:\n    - id: gh\n      name: X\n      extra: 1')
+    const unknownField = validateYAML('users:\n  oidc_providers:\n    - id: gh\n      name: X\n      extra: 1')
     expect(unknownField.parseFailed).toBe(false)
     if (!unknownField.parseFailed) expect(unknownField.errors).toContainEqual({
-      path: 'users.oauth_providers[0].extra',
+      path: 'users.oidc_providers[0].extra',
       code: ErrCode.CONFIG_IMPORT_UNKNOWN_PROVIDER_KEY,
       params: { key: 'extra' },
     })
-    const dup = validateYAML('users:\n  oauth_providers:\n    - id: gh\n      name: X\n    - id: gh\n      name: Y')
+    const dup = validateYAML('users:\n  oidc_providers:\n    - id: gh\n      name: X\n    - id: gh\n      name: Y')
     expect(dup.parseFailed).toBe(false)
     if (!dup.parseFailed) expect(dup.errors).toContainEqual({
-      path: 'users.oauth_providers[1].id',
+      path: 'users.oidc_providers[1].id',
       code: ErrCode.CONFIG_IMPORT_DUPLICATE_PROVIDER_ID,
       params: { id: 'gh' },
     })
-    const many = 'users:\n  oauth_providers:\n' + Array.from({ length: 11 }, (_, i) => `    - id: p${i}\n      name: P${i}`).join('\n')
+    const many = 'users:\n  oidc_providers:\n' + Array.from({ length: 11 }, (_, i) => `    - id: p${i}\n      name: P${i}`).join('\n')
     const tooMany = validateYAML(many)
     expect(tooMany.parseFailed).toBe(false)
     if (!tooMany.parseFailed) expect(codes(tooMany.errors)).toContain(ErrCode.CONFIG_IMPORT_TOO_MANY_PROVIDERS)
@@ -472,9 +472,10 @@ describe('validateImportBundle — users', () => {
     expect(r.parseFailed).toBe(false)
     if (!r.parseFailed) {
       expect(r.ok).toBe(true)
-      const p = r.bundle?.users?.oauth_providers?.[0]
+      const p = r.bundle?.users?.oidc_providers?.[0]
       expect(p?.id).toBe('github')
-      expect(p?.client_id).toBeUndefined()
+      expect(p?.issuer).toBe('https://github.com')
+      expect(p?.authorize_url).toBeUndefined()
     }
   })
 })
@@ -506,10 +507,9 @@ describe('buildExportBundle + stringify + parse 往返', () => {
   })
 
   it('多行 system_prompt、空数组、空串、OAuth provider 完整往返', async () => {
-    const provider: OAuth2Provider = {
-      id: 'github', name: 'GitHub', client_id: 'Iv1.abc', client_secret: 'ghp_x',
-      authorize_url: 'https://github.com/a', token_url: 'https://github.com/t',
-      userinfo_url: 'https://api.github.com/user', scopes: 'read:user',
+    const provider: OidcProvider = {
+      id: 'github', name: 'GitHub', issuer: 'https://github.com', client_id: 'Iv1.abc', client_secret: 'ghp_x',
+      scopes: 'openid profile',
     }
     const fx = makeDeps({
       __config: makeConfig({
@@ -517,7 +517,7 @@ describe('buildExportBundle + stringify + parse 往返', () => {
         app_background: '',
         recommended_questions: ['你好', '介绍你自己'],
         followup_questions: [],
-        oauth_providers: [provider],
+        oidc_providers: [provider],
       }),
     })
     const bundle = await buildExportBundle(fx.deps)
@@ -542,7 +542,7 @@ describe('buildExportBundle + stringify + parse 往返', () => {
     expect(v.bundle?.gateway?.use_external_image_hosting).toBe(false)
     // 多行 system_prompt 块标量往返无损
     expect(v.bundle?.agents?.find((a) => a.id === UUID_A)?.system_prompt).toBe('hello\nworld')
-    expect(v.bundle?.users?.oauth_providers).toEqual([provider])
+    expect(v.bundle?.users?.oidc_providers).toEqual([provider])
   })
 })
 
@@ -717,7 +717,7 @@ describe('summarizeImport（dry-run）', () => {
   it('users 摘要：开关 from→to、供应商合并计数', async () => {
     const fx = makeDeps({
       __config: makeConfig({
-        oauth_providers: [makeProvider('old', 'Old'), makeProvider('keep', 'Keep')],
+        oidc_providers: [makeProvider('old', 'Old'), makeProvider('keep', 'Keep')],
       }),
       __directOpen: true,
     })
@@ -725,24 +725,24 @@ describe('summarizeImport（dry-run）', () => {
       version: 1,
       users: {
         direct_registration_open: false,
-        oauth_providers: [makeProvider('keep', 'Keep2'), makeProvider('new', 'New')],
+        oidc_providers: [makeProvider('keep', 'Keep2'), makeProvider('new', 'New')],
       },
     }
     const summary = await summarizeImport(bundle, fx.deps)
     expect(summary.users?.direct_registration_open).toEqual({ from: true, to: false })
-    expect(summary.users?.oauth_registration_open).toBeNull() // 未提供 → null
+    expect(summary.users?.oidc_registration_open).toBeNull() // 未提供 → null
     expect(summary.users?.providers_update).toBe(1)
     expect(summary.users?.providers_create).toBe(1)
     expect(summary.users?.providers_skip).toBe(1)
   })
 })
 
-function makeProvider(id: string, name: string): OAuth2Provider {
-  return { id, name, client_id: 'cid', client_secret: 'sec', authorize_url: 'https://a', token_url: 'https://t', userinfo_url: 'https://u', scopes: 's' }
+function makeProvider(id: string, name: string): OidcProvider {
+  return { id, name, issuer: `https://${id}.example`, client_id: 'cid', client_secret: 'sec', scopes: 'openid' }
 }
 
-function emptyProvider(): OAuth2Provider {
-  return { id: '', name: '', client_id: '', client_secret: '', authorize_url: '', token_url: '', userinfo_url: '', scopes: '' }
+function emptyProvider(): OidcProvider {
+  return { id: '', name: '', issuer: '', client_id: '', client_secret: '', scopes: '' }
 }
 
 describe('applyImportBundle', () => {
@@ -795,13 +795,13 @@ describe('applyImportBundle', () => {
 
   it('OAuth 供应商合并：同 id 字段级覆盖、新 id 追加、库中多余保留', async () => {
     const fx = makeDeps({
-      __config: makeConfig({ oauth_providers: [makeProvider('old', 'Old'), makeProvider('keep', 'Keep')] }),
+      __config: makeConfig({ oidc_providers: [makeProvider('old', 'Old'), makeProvider('keep', 'Keep')] }),
     })
     await applyImportBundle({
       version: 1,
-      users: { oauth_providers: [{ id: 'keep', name: 'Keep2', scopes: 'new-scope' }, { id: 'new', name: 'New' }] },
+      users: { oidc_providers: [{ id: 'keep', name: 'Keep2', scopes: 'new-scope' }, { id: 'new', name: 'New' }] },
     }, fx.deps)
-    const written = fx.calls.updateConfig.find((c) => 'oauth_providers' in c)?.oauth_providers
+    const written = fx.calls.updateConfig.find((c) => 'oidc_providers' in c)?.oidc_providers
     expect(written).toEqual([
       makeProvider('old', 'Old'),                            // 多余保留
       { ...makeProvider('keep', 'Keep'), name: 'Keep2', scopes: 'new-scope' }, // 字段级合并：省略字段保留原值
@@ -811,9 +811,9 @@ describe('applyImportBundle', () => {
 
   it('开关出现才写入', async () => {
     const fx = makeDeps()
-    await applyImportBundle({ version: 1, users: { oauth_registration_open: false } }, fx.deps)
+    await applyImportBundle({ version: 1, users: { oidc_registration_open: false } }, fx.deps)
     expect(fx.calls.setDirectRegistrationOpen).toHaveLength(0)
-    expect(fx.calls.setOauthRegistrationOpen).toEqual([false])
+    expect(fx.calls.setOidcRegistrationOpen).toEqual([false])
   })
 
   it('外部图床开启：data: 图片转 CDN；CDN 失败保留原值', async () => {
