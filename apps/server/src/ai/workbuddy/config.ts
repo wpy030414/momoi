@@ -51,7 +51,18 @@ export const workbuddyConfig = {
   browserExecutablePath: env('WORKBUDDY_BROWSER_EXECUTABLE_PATH', ''),
   browserArgs: env('WORKBUDDY_BROWSER_ARGS', ''),
   loginHeadless: envBool('WORKBUDDY_LOGIN_HEADLESS', true),
-  /** 等待微信二维码的上限；超时则回退为「打开登录页」 */
+
+  // —— 登录网关（纯 HTTP 换取微信二维码与平台 token）——
+  /** Keycloak realm（/auth/realms/<realm>/...） */
+  realm: env('WORKBUDDY_REALM', 'copilot'),
+  /** 建立会话所用的 OIDC 客户端 */
+  consoleClientId: env('WORKBUDDY_CONSOLE_CLIENT_ID', 'console'),
+  /** 申请微信授权地址所用的客户端 */
+  wechatClientId: env('WORKBUDDY_WECHAT_CLIENT_ID', 'login'),
+  /** 强制走微信扫码身份提供商 */
+  wechatIdpHint: env('WORKBUDDY_WECHAT_IDP_HINT', 'weixinwebchat'),
+
+  /** 单次二维码相关请求的超时 */
   qrWaitMs: envInt('WORKBUDDY_QR_WAIT_MS', 30_000),
   /** access token 提前续期窗口 */
   refreshAheadMs: envInt('WORKBUDDY_REFRESH_AHEAD_MS', 5 * 60_000),

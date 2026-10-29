@@ -9,12 +9,13 @@ import { Plus, Trash2, Pencil, Eye, EyeOff, Brain } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { errT } from '../../../i18n'
 import { useToast } from '../../ui/toast'
+import { uuid } from '../../../lib/utils'
 import type { AdminUserRow, OidcProvider } from '@momoi/shared/types'
 
 export interface UserManagerHandle {}
 
 function newProvider(): OidcProvider {
-  return { id: crypto.randomUUID(), name: '', issuer: '', client_id: '', client_secret: '', scopes: 'openid' }
+  return { id: uuid(), name: '', issuer: '', client_id: '', client_secret: '', scopes: 'openid' }
 }
 
 const PAGE_SIZE = 10

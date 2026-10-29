@@ -48,6 +48,26 @@ export const doubaoConfig = {
   qrCheckPath: env('DOUBAO_QR_CHECK_PATH', '/passport/web/check_qrconnect/'),
   csrfPath: env('DOUBAO_CSRF_PATH', '/passport/safe/csrf_token/'),
 
+  /** 账号 SDK 版本参数（抖音扫码链路的 get_qrcode / check_qrconnect 需要） */
+  passportSdkVersion: env('DOUBAO_PASSPORT_SDK_VERSION', '4.4.6'),
+  passportPca: env('DOUBAO_PASSPORT_PCA', '4.0.26'),
+  /** 登录链路单次请求超时 */
+  loginRequestTimeoutMs: envInt('DOUBAO_LOGIN_REQUEST_TIMEOUT_MS', 20_000),
+
+  // —— 抖音开放平台 OAuth（默认登录链路的真实通路）——
+  /** 抖音开放平台应用 client_key（豆包网页端「抖音一键登录」所用） */
+  douyinClientKey: env('DOUBAO_DOUYIN_CLIENT_KEY', 'aw4293rjg7ggbx9m'),
+  /** 抖音授权确认后的回跳地址（豆包侧接收 code 并换票） */
+  douyinCallbackUrl: env('DOUBAO_DOUYIN_CALLBACK_URL', 'https://www.doubao.com/auth/callback'),
+  /** 抖音授权页 aid（sdk_type=pro） */
+  douyinAid: env('DOUBAO_DOUYIN_AID', '1128'),
+  /** 抖音授权页 passport SDK 版本 */
+  douyinSdkVersion: env('DOUBAO_DOUYIN_SDK_VERSION', '1.0.13'),
+  /** 豆包侧登录平台标识（bind_with_mobile_login 的 platform 参数） */
+  douyinPlatform: env('DOUBAO_DOUYIN_PLATFORM', 'aweme_v2'),
+  /** 豆包侧登录平台应用 ID（platformAppId / platform_app_id） */
+  douyinPlatformAppId: env('DOUBAO_DOUYIN_PLATFORM_APP_ID', '8949'),
+
   /** 扫码登录轮询间隔 / 超时 */
   loginPollMs: envInt('DOUBAO_LOGIN_POLL_MS', 1500),
   loginTimeoutMs: envInt('DOUBAO_LOGIN_TIMEOUT_MS', 5 * 60_000),
@@ -59,9 +79,12 @@ export const doubaoConfig = {
   keepaliveTimeoutMs: envInt('DOUBAO_KEEPALIVE_TIMEOUT_MS', 15_000),
 
   /**
-   * 登录链路：
-   *   douyin（默认）= 无头浏览器打开豆包登录弹窗 → 抖音官方授权页，展示抖音授权二维码；
-   *   doubao        = 纯 HTTP 豆包自助扫码（无浏览器依赖，作为灾备链路）。
+   * 登录链路（抖音授权是唯一的产品语义，见 D73）：
+   *   douyin（默认）= 抖音官方授权页，二维码是抖音授权码；
+   *   doubao        = 纯 HTTP 豆包自助扫码（豆包 App 码），仅作应急旁路。
+   *
+   * 两者都不再要求部署机器必须装有浏览器：douyin 链路正在改造为纯 HTTP
+   * 复刻（见 douyin-login.ts 的内部实现）。
    */
   loginFlow: (env('DOUBAO_LOGIN_FLOW', 'douyin') === 'doubao' ? 'doubao' : 'douyin') as 'douyin' | 'doubao',
   /** 登录浏览器是否无头（默认 true：二维码回传到管理端展示） */

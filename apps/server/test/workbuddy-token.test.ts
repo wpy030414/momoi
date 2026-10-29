@@ -70,64 +70,101 @@ afterEach(() => {
 })
 
 
-describe('wechat-qr — 登录页微信二维码捕获', () => {
+describe('wechat-qr — 微信二维码（纯 HTTP）', () => {
   const TINY_BYTES = Buffer.from('mock-jpeg-bytes')
+  const AUTH_URL = 'https://www.workbuddy.cn/login?platform=workbuddy&state=x'
+  const QRCONNECT =
+    'https://open.weixin.qq.com/connect/qrconnect?scope=snsapi_login' +
+    '&appid=wx31d4d71eb5f8c69e&state=wx-state' +
+    '&redirect_uri=https%3A%2F%2Fwww.workbuddy.cn%2Fauth%2Frealms%2Fcopilot%2Fbroker%2Fweixinwebchat%2Fendpoint'
 
-  function fakeBrowser(emitQr: boolean) {
-    const state = { closed: false }
-    let handler: ((res: any) => unknown) | null = null
-    const context = {
-      on: (event: string, h: (res: any) => unknown) => {
-        if (event === 'response') handler = h
-      },
-      newPage: async () => ({
-        goto: async () => {
-          if (!emitQr) return
-          handler?.({
-            url: () => 'https://open.weixin.qq.com/connect/qrcode/mock',
-            headers: () => ({ 'content-type': 'image/jpeg' }),
-            body: async () => TINY_BYTES,
+  /** 按 URL 分派的假 fetch；overrides 可替换某一跳的行为 */
+  function stubFetch(overrides: Record<string, (url: string) => Response | Promise<Response>> = {}) {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input)
+        calls.push(url)
+        for (const [marker, handler] of Object.entries(overrides)) {
+          if (url.includes(marker)) return handler(url)
+        }
+        if (url.includes('/protocol/openid-connect/auth')) {
+          return new Response('', {
+            status: 200,
+            headers: [['set-cookie', 'AUTH_SESSION_ID=sess-1; Path=/'], ['set-cookie', 'KC_RESTART=restart-1; Path=/']],
           })
-          // 微信扫码长轮询：404 = 已扫码待确认
-          handler?.({
-            url: () => 'https://lp.open.weixin.qq.com/connect/l/qrconnect?uuid=mock',
-            headers: () => ({ 'content-type': 'text/plain' }),
-            text: async () => 'window.wx_errcode=404;',
-          })
-          await new Promise((r) => setTimeout(r, 10))
-        },
+        }
+        if (url.includes('/console/auth/wechat-url')) return Response.json({ url: QRCONNECT })
+        if (url.includes('open.weixin.qq.com/connect/qrconnect')) {
+          return new Response('<img src="https://open.weixin.qq.com/connect/qrcode/abc123XYZ">', { status: 200 })
+        }
+        if (url.includes('/connect/qrcode/')) {
+          return new Response(TINY_BYTES, { status: 200, headers: { 'content-type': 'image/jpeg' } })
+        }
+        if (url.includes('/connect/l/qrconnect')) {
+          return new Response("window.wx_errcode=408;window.wx_code='';", { status: 200 })
+        }
+        throw new Error(`unexpected fetch: ${url}`)
       }),
-    }
-    const browser = {
-      newContext: async () => context,
-      close: async () => {
-        state.closed = true
-      },
-    }
-    return { browser, state }
+    )
+    return calls
   }
 
-  it('截获微信二维码图片并转成 data URL，close 关闭浏览器', async () => {
-    const fake = fakeBrowser(true)
-    const session = await wechatQr.openWechatQrLogin('https://www.workbuddy.cn/login?state=x', {
-      launchBrowser: async () => fake.browser as never,
-      timeoutMs: 500,
-    })
-    expect(session).not.toBeNull()
-    expect(session!.getQr()).toBe(`data:image/jpeg;base64,${TINY_BYTES.toString('base64')}`)
-    expect(session!.getStatus()).toBe('scanned')
-    await session!.close()
-    expect(fake.state.closed).toBe(true)
+  it('全链路纯 HTTP：建会话 → 取授权地址 → 提取 uuid → 下载二维码', async () => {
+    stubFetch()
+    const session = await wechatQr.openWechatQrLogin(AUTH_URL, { timeoutMs: 1000 })
+    expect(session.getQr()).toBe(`data:image/jpeg;base64,${TINY_BYTES.toString('base64')}`)
+    expect(session.getStatus()).toBe('new')
+    await session.close()
   })
 
-  it('浏览器未产出二维码时超时返回 null，并关闭浏览器', async () => {
-    const fake = fakeBrowser(false)
-    const session = await wechatQr.openWechatQrLogin('https://www.workbuddy.cn/login?state=x', {
-      launchBrowser: async () => fake.browser as never,
-      timeoutMs: 30,
+  it('扫码状态轮询映射：408 → new、404 → scanned、405 → confirmed', async () => {
+    stubFetch({ '/connect/l/qrconnect': () => new Response("window.wx_errcode=404;window.wx_code='';") })
+    const session = await wechatQr.openWechatQrLogin(AUTH_URL, { timeoutMs: 1000 })
+    expect(await session.pollScan()).toBe('scanned')
+
+    stubFetch({ '/connect/l/qrconnect': () => new Response("window.wx_errcode=405;window.wx_code='abc';") })
+    const confirmed = await wechatQr.openWechatQrLogin(AUTH_URL, { timeoutMs: 1000 })
+    expect(await confirmed.pollScan()).toBe('confirmed')
+  })
+
+  it('二维码失效（402）标记 isExpired，供面板提示刷新', async () => {
+    stubFetch({ '/connect/l/qrconnect': () => new Response("window.wx_errcode=402;window.wx_code='';") })
+    const session = await wechatQr.openWechatQrLogin(AUTH_URL, { timeoutMs: 1000 })
+    await session.pollScan()
+    expect(session.isExpired()).toBe(true)
+  })
+
+  it('网络抖动时保持上一次状态，不抛错', async () => {
+    stubFetch({
+      '/connect/l/qrconnect': () => {
+        throw new Error('ECONNRESET')
+      },
     })
-    expect(session).toBeNull()
-    expect(fake.state.closed).toBe(true)
+    const session = await wechatQr.openWechatQrLogin(AUTH_URL, { timeoutMs: 1000 })
+    expect(await session.pollScan()).toBe('new')
+    expect(session.isExpired()).toBe(false)
+  })
+
+  it('wechat-url 未返回地址时抛错，交由上层回退为复制登录页链接', async () => {
+    stubFetch({
+      '/console/auth/wechat-url': () =>
+        new Response(JSON.stringify({ message: 'failed to create wechat authorization url' }), { status: 502 }),
+    })
+    await expect(wechatQr.openWechatQrLogin(AUTH_URL, { timeoutMs: 1000 })).rejects.toThrow(
+      /failed to create wechat authorization url/,
+    )
+  })
+
+  it('qrconnect 页面不含 uuid 时抛错', async () => {
+    stubFetch({ 'open.weixin.qq.com/connect/qrconnect': () => new Response('<html>no qr here</html>', { status: 200 }) })
+    await expect(wechatQr.openWechatQrLogin(AUTH_URL, { timeoutMs: 1000 })).rejects.toThrow(/未包含二维码标识/)
+  })
+
+  it('qrconnect 地址指向非微信域名时直接拒绝', async () => {
+    stubFetch({ '/console/auth/wechat-url': () => Response.json({ url: 'https://evil.example.com/connect/qrconnect' }) })
+    await expect(wechatQr.openWechatQrLogin(AUTH_URL, { timeoutMs: 1000 })).rejects.toThrow(/不在允许的来源内/)
   })
 })
 

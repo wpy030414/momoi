@@ -7,7 +7,7 @@
 //   ready       → 展示二维码，按钮变为「刷新二维码」
 //   unavailable → 才下发 auth_url，面板提供「在浏览器中打开登录页」最终回退
 //
-// 这里 mock 掉浏览器截获与凭证存储，只验证状态机的对外契约。
+// 二维码由服务端纯 HTTP 直接申请；这里 mock 掉申请与凭证存储，只验证状态机的对外契约。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
@@ -80,7 +80,14 @@ describe('token-manager — 登录二维码阶段', () => {
     // 正常流程不提供任何外链：只有确认拿不到二维码才回退
     expect(loading.auth_url).toBeUndefined()
 
-    release({ getQr: () => 'data:image/jpeg;base64,qq==', getStatus: () => 'new', close: async () => {} })
+    release({
+      getQr: () => 'data:image/jpeg;base64,qq==',
+      getStatus: () => 'new',
+      pollScan: async () => 'new',
+      isExpired: () => false,
+      completeLogin: async () => ({ ok: false, detail: 'not used' }),
+      close: async () => {},
+    })
     await waitFor(async () => (await manager.getLoginStatus()).qr_state === 'ready')
 
     const ready = await manager.getLoginStatus()
@@ -89,7 +96,7 @@ describe('token-manager — 登录二维码阶段', () => {
     expect(ready.auth_url).toBeUndefined()
   })
 
-  it('二维码捕获失败时 qr_state=unavailable，并下发登录页地址作为最终回退', async () => {
+  it('二维码获取失败时 qr_state=unavailable，并下发登录页地址作为最终回退', async () => {
     qr.open.mockResolvedValue(null)
     await manager.beginLogin()
 

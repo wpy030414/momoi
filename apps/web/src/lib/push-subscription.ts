@@ -4,6 +4,8 @@
 // 仅在支持 Service Worker + PushManager 的环境下工作。
 // 不支持时静默退出（无降级 —— 这是 Web Push 的硬性要求）。
 
+import { uuid } from './utils'
+
 /** 将 base64 字符串转为 Uint8Array（用于 applicationServerKey） */
 function urlB64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -149,7 +151,7 @@ function getDeviceId(): string {
   const key = 'momoi_device_id'
   let id = sessionStorage.getItem(key)
   if (!id) {
-    id = crypto.randomUUID()
+    id = uuid()
     sessionStorage.setItem(key, id)
   }
   return id

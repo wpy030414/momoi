@@ -51,6 +51,10 @@ interface MockState {
   legacyRequests: Array<{ url: string; cookie: string; body: Record<string, any> }>
   uploadRequests: Array<{ kind: 'prepare' | 'apply' | 'commit' | 'tos' | 'preHandle'; body?: any; headers?: Record<string, string>; url: string }>
   cleanupRequests: Array<{ body: any; contentType: string }>
+  /** 抖音扫码链路：get_qrcode 请求带上的 CSRF 头（应与 Cookie 一致） */
+  qrCsrfHeader: string
+  /** 抖音开放平台 oauth/check_qrcode 的独立计数 */
+  douyinQrPolls: number
 }
 
 function createMockApp() {
@@ -62,6 +66,8 @@ function createMockApp() {
     legacyRequests: [],
     uploadRequests: [],
     cleanupRequests: [],
+    qrCsrfHeader: '',
+    douyinQrPolls: 0,
   }
   const app = new Hono()
 
@@ -95,6 +101,7 @@ function createMockApp() {
   )
 
   app.get('/passport/web/get_qrcode/', (c) => {
+    state.qrCsrfHeader = c.req.header('x-tt-passport-csrf-token') || ''
     if (c.req.query('aid') !== '497858') {
       return json({ data: { error_code: 1, description: 'bad aid' }, message: 'error' })
     }
@@ -109,7 +116,51 @@ function createMockApp() {
     })
   })
 
-  app.get('/passport/web/check_qrconnect/', () => {
+  // ---- 抖音开放平台 OAuth（默认登录链路的真实通路）----
+  app.get('/oauth/get_qrcode/', () =>
+    json({
+      data: {
+        error_code: 0,
+        token: 'mock-qr-token',
+        qrcode: TINY_PNG_BASE64,
+        qrcode_index_url: 'https://open.douyin.com/platform/oauth/qr_auth/?token=mock-qr-token',
+      },
+      message: 'success',
+    }),
+  )
+
+  app.get('/oauth/check_qrcode/', () => {
+    state.douyinQrPolls += 1
+    if (state.douyinQrPolls === 1) return json({ data: { error_code: 0, status: 'new' }, message: 'success' })
+    if (state.douyinQrPolls === 2) return json({ data: { error_code: 0, status: 'scanned' }, message: 'success' })
+    return json({
+      data: { error_code: 0, status: 'confirmed', code: 'mock-douyin-code' },
+      message: 'success',
+    })
+  })
+
+  // 抖音授权确认后，豆包侧用 code 换会话（下发 sessionid）
+  app.post('/passport/web/auth/bind_with_mobile_login/', () => {
+    const res = json({
+      data: {
+        error_code: 0,
+        user_id_str: '12345',
+        screen_name: '测试用户',
+      },
+      message: 'success',
+    })
+    res.headers.append('Set-Cookie', 'sessionid=mock-session; Path=/; HttpOnly')
+    res.headers.append('Set-Cookie', 'uid_tt=12345; Path=/')
+    return res
+  })
+
+  app.get('/passport/web/check_qrconnect/', (c) => {
+    // CSRF 头必须与 Cookie 一致，否则上游返回 2035「非法请求」（线上实测）
+    const csrfHeader = c.req.header('x-tt-passport-csrf-token') || ''
+    const cookie = c.req.header('cookie') || ''
+    if (!csrfHeader || !cookie.includes(`passport_csrf_token=${csrfHeader}`)) {
+      return json({ data: { error_code: 2035, description: '非法请求' }, message: 'error' })
+    }
     state.qrPolls += 1
     if (state.qrPolls === 1) return json({ data: { error_code: 0, status: 'new' }, message: 'success' })
     if (state.qrPolls === 2) return json({ data: { error_code: 0, status: 'scanned' }, message: 'success' })
@@ -342,6 +393,8 @@ beforeEach(async () => {
   mock.state.legacyRequests = []
   mock.state.uploadRequests = []
   mock.state.cleanupRequests = []
+  mock.state.qrCsrfHeader = ''
+  mock.state.douyinQrPolls = 0
   await sessionModule.logout()
   sessionModule.resetCaptcha()
 })
@@ -376,94 +429,41 @@ describe('web-login — 扫码状态机', () => {
 })
 
 
-// ---- 抖音授权链路：用假浏览器验证二维码拦截与会话提取 ----
+// ---- 抖音扫码链路：纯 HTTP，不依赖服务器浏览器 ----
 
-function createFakeBrowser() {
-  const state = {
-    cookies: [] as Array<Record<string, unknown>>,
-    handlers: [] as Array<(res: any) => unknown>,
-    clicks: [] as string[],
-    closed: false,
-  }
-
-  const emit = async (url: string, body: unknown) => {
-    const res = { url: () => url, json: async () => body }
-    for (const h of state.handlers) await h(res)
-  }
-
-  const locatorFor = (text: string) => {
-    const loc = {
-      first: () => loc,
-      count: async () => 0,
-      waitFor: async () => {},
-      click: async () => {
-        state.clicks.push(text)
-        if (text === '抖音一键登录') {
-          await emit('https://open.douyin.com/oauth/get_qrcode/?aid=1128', {
-            data: { error_code: 0, qrcode: TINY_PNG_BASE64, token: 'douyin-qr-token' },
-            message: 'success',
-          })
-        }
-      },
-    }
-    return loc
-  }
-
-  const page = {
-    goto: async () => {},
-    waitForTimeout: async () => {},
-    getByText: (text: string) => locatorFor(text),
-    locator: (sel: string) => locatorFor(sel),
-  }
-
-  const context = {
-    on: (event: string, handler: (res: any) => unknown) => {
-      if (event === 'response') state.handlers.push(handler)
-    },
-    cookies: async () => state.cookies,
-    newPage: async () => page,
-  }
-
-  const browser = {
-    newContext: async () => context,
-    close: async () => {
-      state.closed = true
-    },
-  }
-
-  return { browser, state, emit }
-}
-
-describe('douyin-login — 抖音官方授权二维码', () => {
-  it('拦截授权页二维码，扫码后从浏览器 Cookie 建立会话', async () => {
-    const fake = createFakeBrowser()
-    const flow = new DouyinQrLogin({
-      launchBrowser: async () => fake.browser as unknown as import('playwright-core').Browser,
-    })
-
+describe('douyin-login — 抖音开放平台授权码（纯 HTTP）', () => {
+  it('走 open.douyin.com 取授权二维码，不是 accounts.doubao.com 的豆包扫码码', async () => {
+    const flow = new DouyinQrLogin()
     const qr = await flow.begin()
     expect(qr.qrDataUrl.startsWith('data:image/png;base64,')).toBe(true)
-    expect(qr.token).toBe('douyin-qr-token')
-    // 走的是「登录 → 抖音一键登录」链路，而不是豆包自助扫码
-    expect(fake.state.clicks).toContain('登录')
-    expect(fake.state.clicks).toContain('抖音一键登录')
+    expect(qr.token).toBe('mock-qr-token')
+    await flow.close()
+  })
 
-    await fake.emit('https://open.douyin.com/oauth/check_qrcode/?token=x', {
-      data: { status: 'scanned' },
-    })
+  it('new → scanned → confirmed', async () => {
+    const flow = new DouyinQrLogin()
+    await flow.begin()
+    expect((await flow.poll()).status).toBe('new')
     expect((await flow.poll()).status).toBe('scanned')
-
-    // 抖音回跳豆包 callback 后，浏览器上下文出现豆包会话 Cookie
-    fake.state.cookies = [
-      { name: 'sessionid', value: 'mock-session', domain: '.doubao.test', path: '/', expires: -1, secure: true, httpOnly: true },
-      { name: 'uid_tt', value: '12345', domain: '.doubao.test', path: '/', expires: -1 },
-    ]
     const confirmed = await flow.poll()
     expect(confirmed.status).toBe('confirmed')
-    expect(confirmed.session?.uid).toBe('12345')
-    expect(confirmed.session?.nickname).toBe('测试用户')
-    expect(confirmed.session?.cookies.some((c) => c.name === 'sessionid')).toBe(true)
-    expect(fake.state.closed).toBe(true)
+    await flow.close()
+  })
+
+  it('请求打到 open.douyin.com 的 oauth 接口', async () => {
+    const urls: string[] = []
+    const original = globalThis.fetch
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+      urls.push(String(input))
+      return (original as typeof fetch)(input, init)
+    })
+    const flow = new DouyinQrLogin()
+    await flow.begin()
+    await flow.poll()
+    await flow.close()
+    expect(urls.some((u) => u.startsWith('https://open.douyin.com/oauth/get_qrcode/'))).toBe(true)
+    expect(urls.some((u) => u.startsWith('https://open.douyin.com/oauth/check_qrcode/'))).toBe(true)
+    expect(urls.some((u) => u.includes('accounts.doubao.com'))).toBe(false)
   })
 })
 

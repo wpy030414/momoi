@@ -2138,3 +2138,93 @@
 - 前端：\`OidcRegisterScreen\`；管理端供应商表单由三 URL 输入合并为 issuer 输入
 - 测试：新增 \`oidc-verify.test.ts\`（密钥 / iss / aud / 过期 / 算法降级）、\`oidc-discovery.test.ts\`（缓存 / issuer 校验 / 覆盖项）
 - 文档：\`module-oauth.md\` → \`module-oidc.md\` 全文重写；D35 同步修订
+
+## D73：内置上游登录改用纯 HTTP，服务器不再需要浏览器
+
+**背景**：WorkBuddy 与豆包两个上游的扫码登录此前都依赖 `playwright-core`
+拉起无头系统浏览器——WorkBuddy 打开腾讯登录页截获微信二维码，豆包打开登录弹窗
+进抖音授权页截获授权码。`playwright-core` **不自带浏览器**，服务器上通常也没有
+Edge / Chrome，因此部署到服务器后两者必然在「获取二维码」这一步失败。项目定位是
+自托管服务器部署，这条依赖等于让核心功能在生产环境不可用。
+
+**决策**：两条登录链路全部改为纯 HTTP 复刻，移除 `playwright-core` 依赖与
+`lib/headless-browser.ts`。
+
+1. **WorkBuddy 微信二维码**（已对线上逐跳验证）：
+   `openid-connect/auth` 建立 Keycloak 会话 Cookie → `console/auth/wechat-url`
+   取微信授权地址 → `open.weixin.qq.com/connect/qrconnect` 页面提取 uuid →
+   `/connect/qrcode/<uuid>` 下载二维码 JPEG → `/connect/l/qrconnect` 轮询
+   扫码状态（408 未扫 / 404 已扫 / 405 已确认 / 402 失效）。
+   `wechat-url` **必须先建会话**，否则 502「failed to create wechat authorization url」。
+2. **豆包抖音授权**（已对线上逐跳验证）：直连
+   `open.douyin.com/oauth/get_qrcode/?client_key=…&aid=1128&scope=user_info&next=…&state=…`
+   取得抖音开放平台授权码 → `oauth/check_qrcode/` 轮询 → 确认后跟随回跳收集豆包 Cookie。
+   这是豆包网页端「抖音一键登录」真正使用的 OAuth 通路。
+
+**关键发现（豆包）**：`accounts.doubao.com/passport/web/get_qrcode/` **不是**抖音授权码。
+它的 `copywriting` 写着「请使用『抖音 APP』扫码验证」，极具误导性；实测解码二维码
+指向 `www.doubao.com/flow-account/scan-login`，属于豆包 App 扫码码。判定二维码归属
+必须**解码二维码内容**，不能看页面文案。
+
+**过程中的教训**：
+- 纯 HTTP 化时漏掉了 OAuth 回跳（原浏览器方案由浏览器自动完成），导致 WorkBuddy
+  扫码后平台 state 永远停在 pending。表现为「扫码后没反应」，且微信长轮询本身正常。
+- 豆包侧曾按文案误判 `accounts.doubao.com` 的二维码为抖音码，并在 headless 模式下
+  反复观察不到 `open.douyin.com` 跳转而一度误判无关；实际是 headless 被风控静默拦截，
+  有头模式才能看到真实跳转。
+
+**备选与权衡**：
+- ❌ 在服务器安装 Chromium 并要求部署流程承担：体积 +300MB、构建更慢，且与「最小部署」冲突
+- ❌ 让管理员复制链接到本机浏览器完成登录：WorkBuddy 可作为最终回退保留，但不应是主路径
+- ⚠️ 协议是逆向所得：上游改版会让扫码失败。两张二维码的获取失败都会以可读错误
+  呈现，WorkBuddy 面板额外提供「复制登录页链接 + 在浏览器打开」回退
+- ⚠️ 豆包的 `doubao` 自助扫码链路保留为应急旁路，但它展示的是**豆包 App 码**，
+  不是产品语义要求的抖音扫码，默认不启用
+
+**影响**：
+- server：重写 `ai/workbuddy/wechat-qr.ts`、`ai/doubao/douyin-login.ts`；
+  删除 `lib/headless-browser.ts`；`package.json` 移除 `playwright-core`
+- 配置：新增 `WORKBUDDY_AUTH_URL_BASE` / `REALM` / `CONSOLE_CLIENT_ID` /
+  `WECHAT_CLIENT_ID` / `WECHAT_IDP_HINT`、`DOUBAO_PASSPORT_SDK_VERSION` /
+  `PASSPORT_PCA` / `LOGIN_REQUEST_TIMEOUT_MS`；`WORKBUDDY_BROWSER_*` 标记弃用
+- 前端：二维码阶段文案改为「正在获取二维码」；不可用时提供可复制链接
+  （局域网 http 下 `navigator.clipboard` 不可用，退回 `execCommand`）
+- 测试：抖音链路用例从「假浏览器」改为纯 HTTP 契约测试，并固化 CSRF 头约束
+
+## D74：WorkBuddy 登录最终落实为纯 HTTP，彻底移除浏览器依赖
+
+**背景**：D73 一度把 APISIX 的 401 归因于 TLS 指纹 / device-token，并回退到服务端
+无头 Chromium。实测推翻了两点：curl_cffi 的多种浏览器指纹全部 401；带上真实
+TDID `x-device-token` 依然 401。真正的原因在**会话 Cookie 的获取方式**上。
+
+**最终链路（全程纯 HTTP，已线上验证换取 accessToken）**：
+
+1. 用 `/console/accounts/.apisix/redirect` 作为 `redirect_uri` 建立 Keycloak 会话，
+   state 用 32 位 hex；
+2. `console/auth/wechat-url` 取微信授权地址 → qrconnect 页面提取 uuid → 下载二维码；
+3. 微信确认后带 code 回跳 broker，跟随 Keycloak 重定向链，落到
+   `.apisix/redirect?...&code=…` —— **该响应下发 `session` 与 `session_2`**；
+4. **立即** `POST /console/login/enterprise?state=<第 1 步的 state>` 换取 accessToken。
+
+**关键发现**：
+
+- 换票接口是 `/console/login/enterprise`，不是 `/v2/plugin/auth/token`（后者是桌面客户端链路，
+  网页登录下永远 `11217 pending`）。
+- `.apisix/redirect` 的响应若继续跟随到 `/console/accounts`，平台会清空
+  `session`/`session_2`（`set-cookie: session=; session_2=;`），因此必须在拿到后立刻换票。
+- `x-device-token`（字节 TDID SDK 生成，1062 字符、每次不同、依赖 WebAssembly 与浏览器指纹）
+  **并非必需**——带与不带都能成功换票，故不在服务端复现。
+- 微信登录必须绑定到 apisix 那条 OIDC 流程；绑定到 `/login` 流程时回跳落到登录页，
+  永远拿不到 `session_2`。
+
+**备选与权衡**：
+- ❌ 服务端无头 Chromium（D73 方案）：可用但重，服务器需装约 300MB 浏览器；
+  纯 HTTP 方案验证后已回退该依赖
+- ❌ 逆向 TDID：SDK 混淆 + WASM + 浏览器指纹，成本远高于收益，且实测非必需
+
+**影响**：
+- server：`ai/workbuddy/wechat-qr.ts` 重写为纯 HTTP；`token-manager` 登录编排改为
+  扫码确认后直接调 `completeLogin()`；删除 `lib/headless-browser.ts` 与 `playwright-core` 依赖
+- 配置：新增 `WORKBUDDY_REALM` / `CONSOLE_CLIENT_ID` / `WECHAT_CLIENT_ID` / `WECHAT_IDP_HINT`；
+  `WORKBUDDY_BROWSER_*` 保留但已不使用
+- 测试：二维码用例改为纯 HTTP 契约测试（含二维码来源域名校验）

@@ -382,7 +382,7 @@
     "gatewayScanLogin": "QR コードでログイン",
     "gatewayRelogin": "再ログイン",
     "gatewayRefreshQr": "QR コードを更新",
-    "gatewayStarting": "ログインブラウザを起動しています…",
+    "gatewayStarting": "QR コードを取得しています…",
     "gatewayLogout": "ログアウト",
     "gatewayLoginSuccess": "ログインしました",
     "gatewayLoginFailed": "ログインに失敗しました",
@@ -395,7 +395,7 @@
     "workbuddyAutoRefresh": "バックグラウンド自動更新",
     "workbuddyAutoRefreshOn": "有効",
     "workbuddyOpenLoginLink": "ブラウザでログインページを開く",
-    "workbuddyQrUnavailable": "サーバーが WeChat の QR コードを取得できませんでした（Edge / Chrome が未インストールの可能性）。下のリンクからブラウザでログインしてください。",
+    "workbuddyQrUnavailable": "サーバーが WeChat の QR コードを取得できませんでした（ログインゲートウェイのエラー、またはネットワーク遮断）。下のリンクをコピーし、お使いのブラウザでログインしてください。",
     "workbuddyQrAlt": "WeChat ログイン QR コード",
     "workbuddyScanHint": "WeChat で QR コードをスキャンしてください",
     "doubaoFromEnv": "ログイン状態は環境変数（DOUBAO_COOKIES）から取得しています",
@@ -540,7 +540,10 @@
     "configSummaryProviders": "プロバイダー：更新 {{u}} / 新規 {{c}}",
     "oidcProviderIssuer": "Issuer",
     "oidcProviderIssuerPlaceholder": "https://dingtalk.auth.xrl.im/my_org",
-    "oidcProviderIssuerHint": "エンドポイントはこの Issuer の discovery から自動取得されます"
+    "oidcProviderIssuerHint": "エンドポイントはこの Issuer の discovery から自動取得されます",
+    "workbuddyCopyLoginLink": "ログインリンクをコピー",
+    "workbuddyCopyLoginLinkSuccess": "リンクをコピーしました",
+    "workbuddyCopyLoginLinkFailed": "コピーに失敗しました。リンクを選択して手動でコピーしてください"
   },
   "login": {
     "title": "ようこそ",
