@@ -631,11 +631,14 @@ export function App() {
       setDeleteWsName('')
     }
   }, [deleteWsId, chat.refreshWorkspaces, chat.refreshConversations, toast])
-  /** 搜索结果跳转 */
-  const handleSelectFromSearch = useCallback((convId: string) => {
+  /** 侧栏点击会话：选中后移动端自动收起侧栏（浮层遮住内容，需人工点遮罩才消失）。
+   *  侧栏条目与搜索结果共用此入口，移动端行为一致。 */
+  const handleSelectConversation = useCallback((convId: string) => {
     chat.selectConversation(convId)
     if (isMobile) setSidebarOpen(false)
   }, [chat.selectConversation, isMobile])
+  /** 搜索结果跳转 */
+  const handleSelectFromSearch = handleSelectConversation
   /** 世界模拟确认：对话框提交 → 进入草稿态（不落库），首条消息时服务端建会 */
   const handleConfirmWorld = useCallback(async (agentIds: string[], draft: WorldDraft) => {
     await chat.createWorldDraft(draft.laws, agentIds, draft.states)
@@ -739,7 +742,7 @@ export function App() {
             conversations={chat.conversations}
             workspaces={chat.workspaces}
             activeId={chat.activeId}
-            onSelect={chat.selectConversation}
+            onSelect={handleSelectConversation}
             onNew={handleNewChat}
             onNewGroup={handleNewGroup}
             onRename={chat.renameConversation}

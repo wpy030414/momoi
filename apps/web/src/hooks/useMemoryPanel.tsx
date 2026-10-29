@@ -69,7 +69,9 @@ export function useMemoryPanel({ agents, sidebarOpen, setSidebarOpen }: UseMemor
   const handleSelectAgent = useCallback((agentId: string) => {
     setMemoryAgentId(agentId)
     history.replaceState(null, '', `#/memories/${encodeURIComponent(agentId)}`)
-  }, [])
+    // 移动端：选中即收起侧栏
+    if (window.innerWidth < 768) setSidebarOpen(false)
+  }, [setSidebarOpen])
 
   const activeMemoryAgent = useMemo(() =>
     memoryAgentId && (agents.some((a) => a.id === memoryAgentId) || memoryEntries.some((m) => m.agent_id === memoryAgentId))

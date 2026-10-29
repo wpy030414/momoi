@@ -99,7 +99,9 @@ export function useDocsPanel({ sidebarOpen, setSidebarOpen }: UseDocsPanelOption
   const handleSelectDoc = useCallback((path: string) => {
     setActiveDoc(path)
     history.pushState(null, '', `#/docs/${encodeURIComponent(path)}`)
-  }, [])
+    // 移动端：选中即收起侧栏（与桌面端宽度切换同一状态）
+    if (window.innerWidth < 768) setSidebarOpen(false)
+  }, [setSidebarOpen])
 
   const sidebarNode = (
     <Suspense fallback={<Loading className="flex-1 h-full" size="lg" />}>

@@ -84,7 +84,9 @@ export function useAdminPanel({
   const handleTabChange = useCallback((tab: string) => {
     setAdminTab(tab)
     history.pushState(null, '', `#/settings/${tab}`)
-  }, [])
+    // 移动端：切到某设置页即收起侧栏
+    if (window.innerWidth < 768) setSidebarOpen(false)
+  }, [setSidebarOpen])
 
   const sidebarNode = (
     <Suspense fallback={<Loading className="flex-1 h-full" size="lg" />}>
