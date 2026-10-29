@@ -7,7 +7,7 @@
 //   · 中立 Agent：name 与库中现值不同 → 拒绝；avatar → warning 忽略
 //   · 推荐/追问问题：≤3 / ≤5 条，每条 trim 后 1-20 字符
 //   · 普通 Agent：id 可省略（视为新建，须提供 name），提供则须 UUID
-//   · 合并语义：Agent/OAuth 供应商按 id upsert，本地多余一律保留
+//   · 合并语义：Agent/OIDC 供应商按 id upsert，本地多余一律保留
 //
 // 全部通过 fake deps 注入，不触发 db/index.js 的建库副作用。
 
@@ -506,7 +506,7 @@ describe('buildExportBundle + stringify + parse 往返', () => {
     })
   })
 
-  it('多行 system_prompt、空数组、空串、OAuth provider 完整往返', async () => {
+  it('多行 system_prompt、空数组、空串、OIDC provider 完整往返', async () => {
     const provider: OidcProvider = {
       id: 'github', name: 'GitHub', issuer: 'https://github.com', client_id: 'Iv1.abc', client_secret: 'ghp_x',
       scopes: 'openid profile',
@@ -793,7 +793,7 @@ describe('applyImportBundle', () => {
     ])
   })
 
-  it('OAuth 供应商合并：同 id 字段级覆盖、新 id 追加、库中多余保留', async () => {
+  it('OIDC 供应商合并：同 id 字段级覆盖、新 id 追加、库中多余保留', async () => {
     const fx = makeDeps({
       __config: makeConfig({ oidc_providers: [makeProvider('old', 'Old'), makeProvider('keep', 'Keep')] }),
     })

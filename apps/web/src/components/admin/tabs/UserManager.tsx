@@ -29,12 +29,12 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   const [deleteUsername, setDeleteUsername] = useState<string | null>(null)
   const [directRegistrationOpen, setDirectRegistrationOpen] = useState(true)
   const [oidcRegistrationOpen, setOidcRegistrationOpen] = useState(true)
-  const [oidcProviders, setOauthProviders] = useState<OidcProvider[]>([])
-  const [oidcDialogOpen, setOauthDialogOpen] = useState(false)
-  const [oidcEditingId, setOauthEditingId] = useState<string | null>(null)
+  const [oidcProviders, setOidcProviders] = useState<OidcProvider[]>([])
+  const [oidcDialogOpen, setOidcDialogOpen] = useState(false)
+  const [oidcEditingId, setOidcEditingId] = useState<string | null>(null)
   const [oidcForm, setOidcForm] = useState(newProvider())
-  const [oidcDeleteId, setOauthDeleteId] = useState<string | null>(null)
-  const [oidcSaving, setOauthSaving] = useState(false)
+  const [oidcDeleteId, setOidcDeleteId] = useState<string | null>(null)
+  const [oidcSaving, setOidcSaving] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   }, [])
 
   const fetchOidcProviders = () => {
-    api.getConfig().then((c) => { setOauthProviders(c.oidc_providers || []) }).catch(console.error)
+    api.getConfig().then((c) => { setOidcProviders(c.oidc_providers || []) }).catch(console.error)
   }
 
   // useCallback 包裹后既是 effect 的合法依赖（规则要求），也被增删改操作
@@ -60,7 +60,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   useEffect(() => { fetchUsers() }, [fetchUsers])
 
   const saveOidcProviders = async (updated: OidcProvider[]) => {
-    setOauthProviders(updated)
+    setOidcProviders(updated)
     try { await api.updateConfig({ oidc_providers: updated }) }
     catch { fetchOidcProviders() }
   }
@@ -80,29 +80,29 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   // ---- OIDC CRUD ----
 
   const openOidcAdd = () => {
-    setOauthEditingId(null)
+    setOidcEditingId(null)
     setOidcForm(newProvider())
     setShowSecret(false)
-    setOauthDialogOpen(true)
+    setOidcDialogOpen(true)
   }
 
   const openOidcEdit = (provider: OidcProvider) => {
-    setOauthEditingId(provider.id)
+    setOidcEditingId(provider.id)
     setOidcForm({ ...provider })
     setShowSecret(false)
-    setOauthDialogOpen(true)
+    setOidcDialogOpen(true)
   }
 
   const handleOidcSave = async () => {
     if (!oidcForm.name.trim() || !oidcForm.id.trim()) return
-    setOauthSaving(true)
+    setOidcSaving(true)
     const updated = oidcEditingId
       ? oidcProviders.map((p) => p.id === oidcEditingId ? oidcForm : p)
       : [...oidcProviders, oidcForm]
     await saveOidcProviders(updated)
-    setOauthDialogOpen(false)
+    setOidcDialogOpen(false)
     toast({ title: t('settings.toastOidcSaved'), variant: 'success' })
-    setOauthSaving(false)
+    setOidcSaving(false)
   }
 
   const confirmOidcDelete = async () => {
@@ -110,7 +110,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
     const updated = oidcProviders.filter((p) => p.id !== oidcDeleteId)
     await saveOidcProviders(updated)
     toast({ title: t('settings.toastOidcDeleted'), variant: 'success' })
-    setOauthDeleteId(null)
+    setOidcDeleteId(null)
   }
 
   // ---- User actions ----
@@ -188,7 +188,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
                   <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openOidcEdit(p)} title={t('settings.oidcEditProvider')}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => setOauthDeleteId(p.id)} title={t('common.remove')}>
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => setOidcDeleteId(p.id)} title={t('common.remove')}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -214,7 +214,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userUsername')}</th>
-                  <th className="text-left px-3 py-2 font-medium">{t('settings.userOauthBindings')}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t('settings.userOidcBindings')}</th>
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userLastLogin')}</th>
                   <th className="text-right px-3 py-2 font-medium">{t('settings.userActions')}</th>
                 </tr>
@@ -271,7 +271,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
       </div>
 
       {/* OIDC add/edit dialog */}
-      <Dialog open={oidcDialogOpen} onOpenChange={(open) => { if (!open) setOauthDialogOpen(false) }}>
+      <Dialog open={oidcDialogOpen} onOpenChange={(open) => { if (!open) setOidcDialogOpen(false) }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -340,7 +340,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOauthDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setOidcDialogOpen(false)}>
               {t('common.cancel')}
             </Button>
             <Button onClick={handleOidcSave} disabled={oidcSaving || !oidcForm.name.trim() || !oidcForm.id.trim()}>
@@ -351,14 +351,14 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
       </Dialog>
 
       {/* OIDC delete confirmation dialog */}
-      <Dialog open={!!oidcDeleteId} onOpenChange={(open) => { if (!open) setOauthDeleteId(null) }}>
+      <Dialog open={!!oidcDeleteId} onOpenChange={(open) => { if (!open) setOidcDeleteId(null) }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('common.remove')}</DialogTitle>
             <DialogDescription>{t('settings.oidcDeleteConfirm')}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOauthDeleteId(null)}>
+            <Button variant="outline" onClick={() => setOidcDeleteId(null)}>
               {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={confirmOidcDelete}>

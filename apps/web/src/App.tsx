@@ -54,7 +54,7 @@ export function App() {
     }
     return false
   })
-  const [oidcRegisterInfo, setOauthRegisterInfo] = useState<{ providerId: string; providerUserId: string } | null>(null)
+  const [oidcRegisterInfo, setOidcRegisterInfo] = useState<{ providerId: string; providerUserId: string } | null>(null)
   const [appName, setAppName] = useState('Momoi')
   const [backgroundImage, setBackgroundImage] = useState('')
   const [supportAttachments, setSupportAttachments] = useState(false)
@@ -81,7 +81,7 @@ export function App() {
     const providerUserId = params.get('provider_user_id')
 
     if (oidcRegister === '1' && providerId && providerUserId) {
-      setOauthRegisterInfo({ providerId, providerUserId })
+      setOidcRegisterInfo({ providerId, providerUserId })
       // Clean query params from URL without reload
       const url = new URL(window.location.href)
       url.searchParams.delete('oidc_register')
@@ -697,7 +697,7 @@ export function App() {
         providerId={oidcRegisterInfo.providerId}
         providerUserId={oidcRegisterInfo.providerUserId}
         onLogin={(username, expiresAt) => {
-          setOauthRegisterInfo(null)
+          setOidcRegisterInfo(null)
           handleLogin(username, expiresAt)
         }}
       />
