@@ -163,5 +163,23 @@ export async function uploadToCdn(buffer: Buffer, _filename?: string, _mimeType?
     if (r.kind === 'fatal') break
     if (attempt === 1) await sleep(RETRY_MS)
   }
-  throw last ?? new CdnUploadError('图床上传失败')
+throw last ?? new CdnUploadError('图床上传失败')
+}
+
+/**
+ * 管理端「图片字段」入库前处理：外部图床开启且值为 data URL 时上传转 CDN。
+ * 失败保留原值（不阻塞保存）——与配置导入的 maybeUploadDataUrl 语义一致。
+ *
+ * 开关由调用方传入而非在此读取：一次保存可能含多张图，读一次开关即可，
+ * 也让本函数保持纯、便于单测。filename 仅用于日志可读性（图床按内容嗅探格式）。
+ */
+export async function maybeCdnifyDataUrl(value: string, filename: string, enabled: boolean): Promise<string> {
+  if (!value || !value.startsWith('data:') || !enabled) return value
+  try {
+    const { buffer, mimeType } = base64ToBuffer(value)
+    return await uploadToCdn(buffer, filename, mimeType)
+  } catch (err) {
+    console.warn(`Failed to upload ${filename} to CDN, keeping base64:`, (err as Error).message)
+    return value
+  }
 }

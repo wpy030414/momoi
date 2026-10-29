@@ -2,6 +2,7 @@ import { useState, useRef, useLayoutEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loading } from '../ui/spinner'
 import { MessageList } from './MessageList'
+import { StandingArt } from './StandingArt'
 import { InputBar } from './InputBar'
 import { QuestionBar } from './QuestionBar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
@@ -11,6 +12,8 @@ interface AgentBrief {
   id: string
   name: string
   avatar: string
+  /** 立绘：仅单聊展示于聊天区上半部分 */
+  standing_art?: string
   voice_enabled?: boolean
 }
 
@@ -41,6 +44,8 @@ interface ChatPanelProps {
   /** 强制合规重试（群聊）：与 onSendGroup 对应的群聊版重发 */
   onForceRetryGroup?: (index: number) => Promise<void>
   backgroundImage?: string
+  /** 移动端判定（App.tsx 的 JS 断点）——项目禁用 CSS 媒体查询，小屏策略只能走它 */
+  isMobile?: boolean
   supportAttachments?: boolean
   supportInfiniteMode?: boolean
   agents?: AgentBrief[]
@@ -89,8 +94,18 @@ interface ChatPanelProps {
 
 const NOOP = () => {}
 
+/** App 顶部悬浮 bar 的高度（App.tsx 中同值）。立绘排版区的上边界从这里开始。 */
+const TOP_BAR_HEIGHT = '60px'
+
+/** 立绘区高度：相对聊天容器。桌面按 40%（上下限兜住超高/超矮屏）；
+ *  小屏再额外保证下方消息区不少于 420px，但立绘不小于 180px。
+ *  立绘层与消息区共用此值，保证分割线严格对齐。 */
+function standingArtHeight(isMobile: boolean): string {
+  return isMobile ? 'min(40%, max(180px, calc(100% - 420px)))' : 'clamp(220px, 40%, 520px)'
+}
+
 export function ChatPanel({
-  messages, loading, viewLoading, onSend, onCancel, onEditMessage, onForceRetry, onForceRetryGroup, backgroundImage, supportAttachments, supportInfiniteMode,
+  messages, loading, viewLoading, onSend, onCancel, onEditMessage, onForceRetry, onForceRetryGroup, backgroundImage, isMobile = false, supportAttachments, supportInfiniteMode,
   agents, agentsLoading, selectedAgentId, activeAgentId, onAgentChange,
   isGroup, isQqGroup, isWorld, groupAgents, onSendGroup,
   infiniteMode = false, onInfiniteModeChange,
@@ -104,6 +119,7 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const prevFirstIdRef = useRef<number | undefined>(undefined)
@@ -133,6 +149,36 @@ export function ChatPanel({
       || (selectedAgentId ? agents?.find((a) => a.id === selectedAgentId) : undefined)
   const directAgentAvatar = directAgent?.avatar || null
   const directAgentVoiceEnabled = directAgent?.voice_enabled ?? false
+  // 立绘：仅单聊生效。群聊/世界模拟没有唯一的「当前角色」，不显示。
+  // 未配置（空串）时整块布局完全走原有路径，零改动。
+  // 立绘只在**已有对话**的单聊里展示：新会话空态保持原有居中布局，
+// 不占位、也不给「缺省图案」——某个 Agent 没配立绘就干脆不显示。
+  const standingArt = !isGroup && !isWorld && hasMessages ? (directAgent?.standing_art || '') : ''
+  const showStandingArt = standingArt !== ''
+  const standingArtHeightCss = standingArtHeight(isMobile)
+  // 立绘可见区高度（像素）。CSS 变量里的百分比在裁剪层与聊天区之间基准不一致，
+  // 故由 JS 实测聊天区高度后换算成像素，供 mask 渐隐终点使用。
+  const [visibleHeightPx, setVisibleHeightPx] = useState<number | null>(null)
+
+  useLayoutEffect(() => {
+    if (!showStandingArt) { setVisibleHeightPx(null); return }
+    const el = rootRef.current
+    if (!el) return
+    const sync = () => {
+      const h = el.getBoundingClientRect().height
+      if (!h) return
+      // 与 standingArtHeight() 同一套规则，只是换成像素：桌面 clamp(220, 40%, 520)，
+      // 小屏 min(40%, max(180, 100% - 420))。
+      const vh = isMobile
+        ? Math.min(h * 0.4, Math.max(180, h - 420))
+        : Math.min(Math.max(220, h * 0.4), 520)
+      setVisibleHeightPx(vh)
+    }
+    sync()
+    const ro = new ResizeObserver(sync)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [showStandingArt, isMobile])
   // Build a map of agent_id → voice_enabled for all agents (group chat)
   const agentVoiceMap = useMemo(() => {
     if (!agents) return new Map<string, boolean>()
@@ -244,6 +290,16 @@ export function ChatPanel({
     }
   }, [messages])
 
+  // 立绘出现/消失会改变消息区高度（40% ↔ 0）：用户本就在底部时重新钉底，
+  // 否则切换 Agent 会看到消息「掉下来一段」。
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (!el || !atBottomRef.current) return
+    programmaticScrollRef.current = true
+    el.scrollTop = el.scrollHeight
+    scrollAnchorRef.current = el.scrollTop
+  }, [showStandingArt])
+
   const handleForceRetry = useCallback(async (index: number) => {
     // 与 handleSend 同款双通道分派：群聊走群聊版（groupMode 重发），
     // 单聊走单聊版 —— 误走群聊版会因不预建流式气泡而丢失全部 token 事件。
@@ -268,7 +324,14 @@ export function ChatPanel({
   }, [isGroup, onSendGroup, onSend, selectedAgentId, infiniteMode])
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 relative justify-end">
+    <div
+      ref={rootRef}
+      className="flex-1 flex flex-col min-h-0 relative justify-end"
+      style={{
+        ['--standing-scroll-top' as string]: isMobile ? '10px' : '14px',
+        ['--standing-art-h' as string]: showStandingArt ? standingArtHeightCss : '0px',
+      }}
+    >
       {/* Grid background layer — covers entire chat panel (messages + input + question bar) */}
       {!backgroundImage && (
         <div
@@ -289,13 +352,52 @@ export function ChatPanel({
         />
       )}
 
-      {/* Messages area */}
-      <div ref={containerRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto px-4 pt-[76px] z-10">
+      {/* Standing art layer — 单聊专属。
+          尺寸语义：立绘排版区从 **top-bar 底部（60px）** 一直延伸到**视窗底**，
+          脚底踩在视窗底；但只**显示上部 40%**，且下缘渐隐融入背景。
+          实现：立绘层 = 聊天区的绝对定位子元素（top:60px → bottom:0 = 整段排版区），
+          再用 mask 把 40% 以下的区域渐隐到透明——mask 比 clip-path 多一段过渡，
+          避免人物被硬切成一条横线。 */}
+      {showStandingArt && (
+        <div
+          aria-hidden
+          className="absolute inset-x-0 z-[5] pointer-events-none standing-art-clip"
+          style={{
+            top: TOP_BAR_HEIGHT,
+            bottom: 0,
+            // 渐隐终点 = 40% 线在本层坐标下的位置 = 立绘可见高 − 60px（top-bar）。
+            // 这里必须用**像素**而不是百分比：百分比在以裁剪层高为基准时与聊天区
+            // 不一致（实测差 24px）。visibleH 由下方 ResizeObserver 实测写入。
+            ['--standing-art-fade-to' as string]: visibleHeightPx != null
+              ? `${Math.max(0, visibleHeightPx - 60)}px`
+              : '80%',
+          }}
+        >
+          <StandingArt
+            src={standingArt}
+            alt={directAgent?.name || ''}
+            isMobile={isMobile}
+            className="h-full w-full"
+          />
+        </div>
+      )}
+
+      {/* Messages area — 有立绘时从分割线下方开始，只在下区内滚动（区域高度由 CSS 变量
+          --standing-art-h 扣减得出）。无立绘时 class 与改动前逐字相同，走原全屏滚动路径。 */}
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className={showStandingArt
+          ? 'standing-chat-layer absolute inset-x-0 bottom-0 overflow-y-auto px-4 z-10'
+          : 'absolute inset-0 overflow-y-auto px-4 pt-[76px] z-10'}
+      >
         {!hasMessages && viewLoading ? (
           // 会话切换中：快照未落分区——显示加载态，而非误触发「新会话」空态
           <Loading className="h-full" size="lg" />
         ) : !hasMessages ? (
-          <div className="flex items-center justify-center h-full">
+          // 有立绘时消息层只剩下半区：h-full 自动等于下半区高度，
+          // 改 flex-col + justify-center 是防止输入框/推荐问题超高时被 items-center 裁掉顶部
+          <div className={showStandingArt ? 'flex flex-col justify-center min-h-full pb-2' : 'flex items-center justify-center h-full'}>
             <div className="w-full max-w-3xl">
               <div className="mb-4 px-4">
                 {isWorld ? (

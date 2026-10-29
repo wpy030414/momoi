@@ -59,6 +59,7 @@ function makeAgent(partial: Partial<Agent> & { id: string }): Agent {
     model: 'gpt-4o',
     system_prompt: '',
     avatar: '',
+    standing_art: '',
     role: 'default',
     created_at: 0,
     voice_enabled: false,
@@ -123,9 +124,10 @@ function makeDeps(overrides: Overrides = {}): Fixture {
       Object.assign(a, partial)
       return a
     },
-    createAgent: async (name, model, systemPrompt, avatar, role, _ve, _vsu, _vs, idOverride) => {
+    createAgent: async (opts) => {
+      const { name, model, systemPrompt = '', avatar = '', role = 'default', standingArt = '', idOverride } = opts
       calls.createAgent.push({ name, idOverride })
-      const agent = makeAgent({ id: idOverride || `gen-${calls.createAgent.length}`, name, model, system_prompt: systemPrompt, avatar, role })
+      const agent = makeAgent({ id: idOverride || `gen-${calls.createAgent.length}`, name, model, system_prompt: systemPrompt, avatar, standing_art: standingArt, role })
       agents.push(agent)
       return agent
     },
@@ -347,6 +349,22 @@ describe('validateImportBundle — agents', () => {
     const emptyAvatar = validateYAML(`agents:\n  - role: neutral\n    avatar: ""`)
     expect(emptyAvatar.parseFailed).toBe(false)
     if (!emptyAvatar.parseFailed) expect(emptyAvatar.warnings).toEqual([])
+
+    // 立绘同理：非空提示忽略、空串静默
+    const withStanding = validateYAML(`agents:
+  - role: neutral
+    standing_art: https://x/s.png`)
+    expect(withStanding.parseFailed).toBe(false)
+    if (!withStanding.parseFailed) {
+      expect(withStanding.ok).toBe(true)
+      expect(codes(withStanding.warnings)).toContain(ErrCode.CONFIG_IMPORT_NEUTRAL_AVATAR_IGNORED)
+      expect(withStanding.bundle?.agents?.[0]?.standing_art).toBeUndefined()
+    }
+    const emptyStanding = validateYAML(`agents:
+  - role: neutral
+    standing_art: ""`)
+    expect(emptyStanding.parseFailed).toBe(false)
+    if (!emptyStanding.parseFailed) expect(emptyStanding.warnings).toEqual([])
   })
 
   it('普通 Agent：id 非 UUID 拒绝；省略 id 通过（新建）', () => {
@@ -829,6 +847,49 @@ describe('applyImportBundle', () => {
     const failing = makeDeps({ __externalHosting: true, __cdnShouldFail: true })
     await applyImportBundle({ version: 1, experience: { app_background: 'data:image/png;base64,iVBOR' } }, failing.deps)
     expect(failing.calls.updateConfig[0]).toMatchObject({ app_background: 'data:image/png;base64,iVBOR' })
+  })
+
+  it('立绘：导出/导入/校验/图床转换全链路', async () => {
+    // 1) 导出：standing_art 进入 bundle
+    const fx = makeDeps()
+    const bundle = await buildExportBundle(fx.deps)
+    expect(bundle.agents?.find((a) => a.id === UUID_A)?.standing_art).toBe('')
+
+    // 2) 普通 Agent 导入：update 只带 standing_art
+    const up = makeDeps({ __agents: [makeAgent({ id: UUID_A, name: 'Momoi', standing_art: 'https://old/s.png' })] })
+    await applyImportBundle({ version: 1, agents: [{ id: UUID_A, standing_art: 'https://new/s.png' }] }, up.deps)
+    expect(up.calls.updateAgent).toEqual([[UUID_A, { standing_art: 'https://new/s.png' }]])
+
+    // 3) 新建 Agent：standingArt 透传
+    const cr = makeDeps()
+    await applyImportBundle({ version: 1, agents: [{ name: 'New', standing_art: 'https://x/s.png' }] }, cr.deps)
+    expect(cr.calls.createAgent).toHaveLength(1)
+
+    // 4) 非法值拒绝，field 指向 standing_art
+    const bad = validateYAML(`agents:
+  - id: ${UUID_A}
+    standing_art: "javascript:alert(1)"`)
+    expect(bad.parseFailed).toBe(false)
+    if (!bad.parseFailed) {
+      expect(bad.ok).toBe(false)
+      expect(codes(bad.errors)).toContain(ErrCode.CONFIG_IMPORT_BAD_IMAGE_URL)
+      expect(bad.errors.some((e) => e.params?.field === 'standing_art')).toBe(true)
+    }
+
+    // 5) 图床开启：立绘 data URL 转 CDN
+    const cdn = makeDeps({ __externalHosting: true })
+    await applyImportBundle({ version: 1, agents: [{ id: UUID_A, standing_art: 'data:image/png;base64,iVBOR' }] }, cdn.deps)
+    expect(cdn.calls.cdnUploads).toEqual(['standing-art.png'])
+  })
+
+  it('导出→再导入幂等：AGENT_KEYS 白名单覆盖全部导出字段', async () => {
+    const src = makeDeps()
+    const bundle = await buildExportBundle(src.deps)
+    const dst = makeDeps({ __agents: [makeAgent({ id: UUID_A, name: 'Momoi', model: 'gpt-4o', system_prompt: 'hello\nworld' })] })
+    const summary = await summarizeImport(bundle, dst.deps)
+    expect(summary.errors ?? []).toEqual([])
+    // 自己导出的文件不应触发任何 unknown key / 无效值
+    expect(dst.calls.cdnUploads).toEqual([])
   })
 
   it('summarize 计数与 apply 实际操作一致', async () => {

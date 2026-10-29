@@ -297,7 +297,7 @@ export const api = {
   answerQuestion: (conversationId: string, questionId: string, answer: string, selectedOptions?: string[]) => request<{ success: boolean }>(`/api/chat/${conversationId}/answer`, { method: 'POST', body: JSON.stringify({ question_id: questionId, answer, selected_options: selectedOptions }) }),
 
   // App config
-  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; support_infinite_mode: boolean; show_github: boolean; use_external_image_hosting: boolean; allow_im_conversations: boolean; recommended_questions: string[]; followup_questions: string[]; context_window?: number; stand_alone?: boolean; agents: Array<{ id: string; name: string; avatar: string }> }>('/api/app-name'),
+  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; support_infinite_mode: boolean; show_github: boolean; use_external_image_hosting: boolean; allow_im_conversations: boolean; recommended_questions: string[]; followup_questions: string[]; context_window?: number; stand_alone?: boolean; agents: Array<{ id: string; name: string; avatar: string; standing_art?: string }> }>('/api/app-name'),
 
   // User-Agent Memories (current user, cross-agent — memory management view)
   listMemories: () => request<{ memories: import('@momoi/shared/types').UserAgentMemory[] }>('/api/memories'),
@@ -328,8 +328,8 @@ export const api = {
 
   // Admin - Agent CRUD
   listAdminAgents: () => request<{ agents: import('@momoi/shared/types').Agent[] }>('/api/admin/agents'),
-  createAgent: (data: { name: string; model: string; system_prompt: string; avatar?: string }) => request<{ agent: import('@momoi/shared/types').Agent }>('/api/admin/agents', { method: 'POST', body: JSON.stringify(data) }),
-  updateAgent: (id: string, data: { name?: string; model?: string; system_prompt?: string; avatar?: string }) => request<{ agent: import('@momoi/shared/types').Agent }>(`/api/admin/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  createAgent: (data: { name: string; model: string; system_prompt: string; avatar?: string; standing_art?: string }) => request<{ agent: import('@momoi/shared/types').Agent }>('/api/admin/agents', { method: 'POST', body: JSON.stringify(data) }),
+  updateAgent: (id: string, data: { name?: string; model?: string; system_prompt?: string; avatar?: string; standing_art?: string }) => request<{ agent: import('@momoi/shared/types').Agent }>(`/api/admin/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAgent: (id: string) => request<{ success: boolean }>(`/api/admin/agents/${id}`, { method: 'DELETE' }),
   listAdminSkills: () => request<{ skills: import('@momoi/shared/types').InstalledSkill[] }>('/api/admin/skills'),
   installSkill: (name: string) => request('/api/admin/skills/install', { method: 'POST', body: JSON.stringify({ name }) }),

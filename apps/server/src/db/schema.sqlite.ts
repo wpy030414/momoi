@@ -42,6 +42,7 @@ export const agents = sqliteTable('agents', {
   model: text('model').notNull().default(''),
   system_prompt: text('system_prompt').notNull().default(''),
   avatar: text('avatar').notNull().default(''),
+  standing_art: text('standing_art').notNull().default(''),
   role: text('role').notNull().default('default'),
   created_at: integer('created_at').notNull(),
   voice_enabled: integer('voice_enabled', { mode: 'boolean' }).notNull().default(false),

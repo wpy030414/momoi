@@ -483,6 +483,7 @@ agents
 ├── model TEXT                     -- 该 Agent 使用的模型
 ├── system_prompt TEXT             -- 该 Agent 的系统提示词
 ├── avatar TEXT                    -- 头像（base64 data URL）
+├── standing_art TEXT              -- 立绘（单聊聊天区上半屏）
 ├── role TEXT                      -- 'default' | 'neutral'
 ├── created_at INTEGER             -- Unix epoch (秒)
 ├── voice_enabled INTEGER/BOOLEAN  -- 是否启用 TTS 语音（默认 false）

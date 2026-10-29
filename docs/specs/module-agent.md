@@ -29,6 +29,7 @@ interface Agent {
   model: string        // 模型名称（如 gpt-4o、deepseek-v4-flash）
   system_prompt: string // 系统提示词
   avatar: string       // 头像（base64 data URL 或空字符串）
+  standing_art: string // 立绘（base64 data URL 或 URL；空串 = 未配置，聊天布局不变）
   role: 'default' | 'neutral'  // 角色类型
   created_at: number   // Unix epoch 秒
 }
@@ -43,6 +44,7 @@ CREATE TABLE agents (
   model TEXT NOT NULL DEFAULT '',
   system_prompt TEXT NOT NULL DEFAULT '',
   avatar TEXT NOT NULL DEFAULT '',
+  standing_art TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'default',
   voice_enabled INTEGER NOT NULL DEFAULT 0,
   voice_sample_url TEXT NOT NULL DEFAULT '',
@@ -60,6 +62,7 @@ export const agents = sqliteTable('agents', {
   model: text('model').notNull().default(''),
   system_prompt: text('system_prompt').notNull().default(''),
   avatar: text('avatar').notNull().default(''),
+  standing_art: text('standing_art').notNull().default(''),
   role: text('role').notNull().default('default'),
   created_at: integer('created_at').notNull(),
 })
@@ -105,10 +108,10 @@ export const groupConversationAgents = sqliteTable('group_conversation_agents', 
 - 固定 ID：`NEUTRAL_AGENT_ID`（`"neutral-agent"`）
 - 名称：`NEUTRAL_AGENT_NAME`（`"中立 Agent"`）
 - 首次启动时由 `bootstrapAgents()` 自动创建，复用默认 Agent 的模型
-- 创建时 system_prompt 和 avatar 均为空字符串
+- 创建时 system_prompt、avatar、standing_art 均为空字符串
 - 特殊约束：
   - **不可删除**：路由层直接检查 `NEUTRAL_AGENT_ID`，返回 403
-  - **不可改名/换头像**：PUT 请求中 `name` 和 `avatar` 字段被路由层静默剥离（`delete body.name; delete body.avatar`）
+  - **不可改名/换头像/换立绘**：PUT 请求中 `name`、`avatar`、`standing_art` 字段被路由层静默剥离（`delete body.name; delete body.avatar; delete body.standing_art`）
   - 仅可修改 `model` 和 `system_prompt`
 - 用途：无限演算模式中生成追问（`follow_up` 事件）、每轮回复完成后的追问建议（`suggestions` 事件，单聊与群聊通用，无限模式除外）及群聊每轮开始前的参与成员裁决（静默，无 SSE 事件）；中立 Agent 本身不在群成员名册内
 
@@ -119,13 +122,13 @@ export const groupConversationAgents = sqliteTable('group_conversation_agents', 
 ```
 bootstrapAgents()
   → listAgents() 获取已有 Agent
-  → 中立 Agent 缺失？→ createAgent(NEUTRAL_AGENT_NAME, env.OPENAI_MODEL, '', '', 'neutral')
-  → 无任何非中立 Agent？→ createAgent('Momoi', env.OPENAI_MODEL, '')
+  → 中立 Agent 缺失？→ createAgent({ name: NEUTRAL_AGENT_NAME, model: env.OPENAI_MODEL, role: 'neutral' })
+  → 无任何非中立 Agent？→ createAgent({ name: 'Momoi', model: env.OPENAI_MODEL })
 ```
 
 关键细节：
 - `bootstrapAgents()` 仅补建缺失的 Agent，已有数据跳过（幂等）
-- 中立 Agent 的 system_prompt 和 avatar 为空，复用默认 Agent 的模型
+- 中立 Agent 的 system_prompt、avatar、standing_art 为空，复用默认 Agent 的模型
 - 引导仅执行一次（所需 Agent 均存在时跳过），后续管理员通过 CRUD 管理
 
 ## Agent CRUD
@@ -154,18 +157,24 @@ export async function getAgent(id: string): Promise<Agent | null>
 - 按 `id` 查询
 - 不存在返回 `null`
 
-### createAgent(name, model, systemPrompt, avatar?, role?)
+### createAgent(opts)
 
-创建新 Agent。
+创建新 Agent。参数为单一对象（原先 9 个位置参数在扩展立绘时已达可读性上限，改为对象传递——新增字段不再打乱既有顺序，调用点只写关心的字段）。
 
 ```typescript
-export async function createAgent(
-  name: string,
-  model: string,
-  systemPrompt: string,
-  avatar?: string,       // 默认 ''
-  role?: Agent['role']   // 默认 'default'
-): Promise<Agent>
+export interface CreateAgentOptions {
+  name: string
+  model: string
+  systemPrompt?: string   // 默认 ''
+  avatar?: string         // 默认 ''
+  role?: Agent['role']    // 默认 'default'
+  voiceEnabled?: boolean  // 默认 false
+  voiceSampleUrl?: string // 默认 ''
+  voiceSettings?: string  // 默认 '{}'
+  standingArt?: string    // 默认 ''
+  idOverride?: string     // 配置导入按原 ID 重建（保持跨实例 agent_id 引用）
+}
+export async function createAgent(opts: CreateAgentOptions): Promise<Agent>
 ```
 
 - `role === 'neutral'` → 使用固定 ID `NEUTRAL_AGENT_ID`
@@ -180,14 +189,14 @@ export async function createAgent(
 ```typescript
 export async function updateAgent(
   id: string,
-  partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar'>>
+  partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar' | 'standing_art'>>
 ): Promise<Agent | null>
 ```
 
 - 先 `getAgent(id)` 检查存在性，不存在返回 `null`
 - 仅更新 `partial` 中非 `undefined` 的字段
 - 更新后重新读取并返回完整 Agent
-- 中立 Agent 的 name/avatar 保护在路由层实现（`updateAgent` 函数本身不区分角色）
+- 中立 Agent 的 name/avatar/standing_art 保护在路由层实现（`updateAgent` 函数本身不区分角色）
 
 ### deleteAgent(id)
 
@@ -244,12 +253,14 @@ export async function deleteAgent(id: string): Promise<boolean>
   "name": "Agent名",
   "model": "deepseek-v4-flash",
   "system_prompt": "你是一个有帮助的助手",
-  "avatar": "data:image/png;base64,..."
+  "avatar": "data:image/png;base64,...",
+  "standing_art": "data:image/png;base64,..."
 }
 ```
 
 - `name` 必填，空白字符串 → 400
-- `model`、`system_prompt`、`avatar` 可选，缺失时为空字符串
+- `model`、`system_prompt`、`avatar`、`standing_art` 可选，缺失时为空字符串
+- `avatar` / `standing_art` 为 data URL 且图床开关开启时，会先转 CDN 再落库（失败保留原值，不阻塞保存）
 
 **响应**：`{ "agent": { ... } }`（完整 Agent 对象）
 
@@ -269,12 +280,14 @@ export async function deleteAgent(id: string): Promise<boolean>
   "name": "新名称",
   "model": "gpt-4o",
   "system_prompt": "新提示词",
-  "avatar": "data:image/png;base64,..."
+  "avatar": "data:image/png;base64,...",
+  "standing_art": "data:image/png;base64,..."
 }
 ```
 
 - 所有字段均为可选，仅更新提供的字段
-- 中立 Agent（`id === NEUTRAL_AGENT_ID`）：`name` 和 `avatar` 在路由层被 `delete` 移除，不被传入 `updateAgent()`
+- `standing_art: ""` 表示清除立绘
+- 中立 Agent（`id === NEUTRAL_AGENT_ID`）：`name`、`avatar`、`standing_art` 在路由层被 `delete` 移除，不被传入 `updateAgent()`
 
 **响应**：`{ "agent": { ... } }`（更新后的完整 Agent 对象）
 
@@ -296,6 +309,48 @@ export async function deleteAgent(id: string): Promise<boolean>
 | 其他 Agent 不存在 | 404 `Agent not found` |
 
 **响应**：`{ "success": true }`
+
+## 立绘（standing_art）
+
+除头像外，每个非中立 Agent 可配置一张**立绘**——用于单聊聊天区上半部分展示的角色大图。
+
+### 字段语义
+
+- `standing_art`: `string`，空串表示未配置。取值与 `avatar` 同构：base64 data URL 或 http(s) URL。
+- 图床开关（`use_external_image_hosting`，默认开）开启时，保存阶段的 data URL 会转 CDN，只存短 URL。
+- **中立 Agent 不可配置**：路由层 `delete body.standing_art`，配置导入层也会忽略（warning）。
+- 配置导入导出：`standing_art` 在 `AGENT_KEYS` 白名单内，随 Agent 段导出/导入；非法值（非 data:image / 非 http(s)）拒绝并报 `CONFIG_IMPORT_BAD_IMAGE_URL`（`params.field = 'standing_art'`）。
+
+### 展示规则
+
+| 条件 | 行为 |
+|---|---|
+| 单聊 + 当前 Agent 有立绘 + **已有对话** | 立绘排版区贯穿 top-bar 底到视窗底，**只显示上部 40%** 并在下缘渐隐；消息区从 40% 处开始滚动 |
+| 单聊 + **新会话（空态）** | 不显示立绘，保持原有居中布局 |
+| 单聊 + 未配置立绘 | 完全走原有全屏滚动布局（零差异） |
+| 群聊 / 世界模拟 | 不展示立绘（无唯一「当前角色」） |
+
+- 立绘**独立占据空间**：消息气泡不可能浮于立绘之上（消息滚动区的顶部被硬性约束在分割线以下）。
+- 按 **cover** 渲染：自动扫描图片 alpha 通道，求出非空像素团的包围盒，把它的**上沿对齐 top-bar 底部（60px）、下沿对齐视窗底**——图片自带的透明留白会被裁掉，人物从头顶到脚底贯穿整段排版区（见下方「渲染算法」）。
+- 排版区 = 从 top-bar 底到视窗底；但**只显示这块区域的上部 40%**，且下缘带**渐隐**（`mask-image` 渐变，终点精确落在 40% 线上，与消息区顶对齐）。
+- 不加柔边遮罩：cover 填充后已无非空留白，遮罩只会让边缘发虚、削掉头顶。
+- 小屏（`isMobile`，即视口宽 < 768）高度为 `min(40%, max(180px, calc(100% - 420px)))`——保证下方消息区不少于 ~420px；桌面为 `clamp(220px, 40%, 520px)`。
+- 立绘加载失败时仅不渲染图片，占位空间保留，避免布局跳变。
+
+### 渲染算法（`StandingArt.tsx`）
+
+1. 用 canvas 采样图片（长边缩到 512px），逐行扫描 alpha > 16 的像素，得到内容包围盒 `top/bottom`；
+2. 缩放比 `scale = 排版区高 / 内容高` —— 内容上沿贴 top-bar 底部、下沿贴视窗底；宽度溢出由 `overflow: hidden` 左右裁切，不足则两侧留空；
+3. 水平居中内容，垂直方向 `y = -内容顶 × scale`。
+
+**边界情况**：
+- **跨域污染**：图床（`cloudflareimg.cdn.sn`）不返回 CORS 头，因此**不能**设 `crossOrigin='anonymous'`（会导致图片直接加载失败）。不设时图片正常显示，但跨域画布被污染、`getImageData` 抛 `SecurityError` —— 此时降级为标准 cover（取宽高缩放比更大者铺满容器并居中）。
+- 整张图全透明、解码失败：同样走整图 cover 降级。
+- 加载失败（404 等）：只隐藏图片，占位空间保留，不引起布局跳变。
+
+> 注意：看到的构图取决于立绘图本身。图里画的是全身，就会完整显示全身；只画上半身，则上半身撑满立绘区。
+
+布局实现细节见 `docs/specs/module-chat.md` 的「单聊立绘布局」章节。
 
 ## 模型目录与选择
 
@@ -328,7 +383,7 @@ Agent 表单的「模型」是下拉框，打开表单时调用 `GET /api/admin/
 
 1. 默认 Agent 由 `bootstrapAgents()` 在首次启动时自动创建，无需手动配置
 2. 中立 Agent 不可删除、不可改名/换头像 —— 由路由层在 handler 内强制，而非 CRUD 函数层
-3. 中立 Agent 的 name/avatar 保护逻辑：路由层先 `delete body.name; delete body.avatar`，再调用 `updateAgent()`，因此 CRUD 函数本身不感知角色差异
+3. 中立 Agent 的 name/avatar/standing_art 保护逻辑：路由层先 `delete body.name; delete body.avatar; delete body.standing_art`，再调用 `updateAgent()`，因此 CRUD 函数本身不感知角色差异
 4. 每个 Agent 独立配置，互不干扰
 5. 对话通过 `conversations.agent_id` 关联 Agent（单 Agent 对话）
 6. 群聊对话通过 `group_conversation_agents` 关联多个 Agent，`sort_order` 控制排序
@@ -341,7 +396,8 @@ Agent 表单的「模型」是下拉框，打开表单时调用 `GET /api/admin/
 2. 管理员可创建/编辑/删除自定义 Agent
 3. 中立 Agent 不可删除（DELETE 返回 403）
 4. 中立 Agent 不可改名（PUT 中 name 被静默剥离，更新后名称不变）
-5. 中立 Agent 不可换头像（PUT 中 avatar 被静默剥离，更新后头像不变）
+5. 中立 Agent 不可换头像/立绘（PUT 中 avatar、standing_art 被静默剥离，更新后不变）
+6. 立绘仅单聊生效；群聊与世界模拟不展示，且未配置立绘时聊天布局与改动前完全一致
 6. 中立 Agent 的 model 和 system_prompt 可正常修改
 7. Agent 删除后不影响已有对话历史
 8. 旧版本全局配置（settings 表中的 model/system_prompt）自动迁移到默认 Agent

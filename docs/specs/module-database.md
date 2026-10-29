@@ -120,7 +120,8 @@ db.$client.exec('PRAGMA busy_timeout = 5000')
 | `name` | TEXT | NOT NULL, DEFAULT '' | Agent 名称 |
 | `model` | TEXT | NOT NULL, DEFAULT '' | 使用的模型 |
 | `system_prompt` | TEXT | NOT NULL, DEFAULT '' | 系统提示词 |
-| `avatar` | TEXT | NOT NULL, DEFAULT '' | 头像（base64 data URL） |
+| `avatar` | TEXT | NOT NULL, DEFAULT '' | 头像（base64 data URL 或 CDN URL） |
+| `standing_art` | TEXT | NOT NULL, DEFAULT '' | 立绘（单聊聊天区上半屏展示；空串 = 未配置，2026-10 加入） |
 | `role` | TEXT | NOT NULL, DEFAULT 'default' | 角色：`default` 或 `neutral` |
 | `created_at` | INTEGER | NOT NULL, DEFAULT (unixepoch()) | Unix epoch 秒 |
 | `voice_enabled` | INTEGER (SQLite) / BOOLEAN (PG) | NOT NULL, DEFAULT 0 / FALSE | 是否启用语音 |
@@ -329,13 +330,15 @@ PostgreSQL 版本（`schema.pg.ts`）与上面对应，差异点：
 
 ### 增量列迁移清单
 
-当前 `ADDITIVE_MIGRATIONS`（SQLite 侧）包含以下 `ALTER TABLE agents ADD COLUMN`：
+仓库中**不存在** `ADDITIVE_MIGRATIONS` 常量——迁移一律写成 `db/sqlite.ts` 内逐段的 `try { client.exec('ALTER TABLE ... ADD COLUMN ...') } catch {}`（SQLite 不支持 `ADD COLUMN IF NOT EXISTS`，靠 catch 吞掉 duplicate column）；PG 侧在 `db/pg.ts` 用 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`。
 
-| 列 | 类型 | 默认值 |
-|---|---|---|
-| `voice_enabled` | INTEGER | 0 |
-| `voice_sample_url` | TEXT | '' |
-| `voice_settings` | TEXT | '{}' |
+`agents` 表的增量列：
+
+| 列 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `standing_art` | TEXT | '' | 智能体立绘（2026-10 加入；`NOT NULL DEFAULT ''`，既有行自动补空串） |
+
+> 注：`voice_enabled` / `voice_sample_url` / `voice_settings` 是建表时即存在的列（见 `ddl.ts` 的 `CREATE TABLE`），**没有**对应的 `ALTER TABLE` 补列语句。
 
 `conversations` 的增量列以独立 try/catch 块追加在 `db/sqlite.ts`（`db.ts` 时期先例）：
 

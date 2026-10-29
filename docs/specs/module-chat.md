@@ -365,6 +365,43 @@ Pi Agent Core 适配层，将 Momoi 的工具和流式客户端桥接到 Pi 的 
 - 清空该消息的 suggestions 与语音缓存；**不触发任何上游生成**
 - 广播 `conv_changed` + `conv_sync`，其他设备整条对账
 
+## 单聊立绘布局
+
+智能体配置了 `standing_art` 时，单聊聊天区切换为「上部立绘 + 下部消息」布局。
+
+### 契约
+
+- **仅单聊**：`!isGroup && !isWorld` 且当前 Agent 的 `standing_art` 非空才生效。群聊、世界模拟、未配置立绘的 Agent 一律走原有布局。
+- **视觉上立绘只占聊天区上部 40%**；尺寸上排版区从 top-bar 底（60px）延伸到视窗底，脚底踩视窗底，再由 `mask-image` 只保留上部 40%，且下缘渐隐到透明。
+- **仅限已有对话**：新会话空态不显示立绘；未配置立绘的 Agent 也不显示（无缺省图案）。
+- **消息气泡不可浮于立绘之上**——消息滚动区的可视高度被硬性约束为 `容器高 − 立绘可见高`。
+- 背景图 / 格子背景仍铺满整个聊天区（含立绘区），立绘浮于其上（不加遮罩）。
+
+### 实现要点
+
+| 关注点 | 做法 |
+|---|---|
+| 图层顺序 | 背景 `z-0` → 立绘 `z-5` → 消息层与底部悬浮区 `z-10` |
+| 立绘层定位 | `absolute inset-x-0` + `top: 60px` + `bottom: 0`（排版区 = top-bar 底 → 视窗底） |
+| 可见区与渐隐 | `.standing-art-clip` 的 `mask-image`：不透明到「可见高 − 96px」，在「可见高」处透明。终点用**像素**（`--standing-art-fade-to`，由 ResizeObserver 实测聊天区高度换算）而非百分比——百分比在裁剪层与聊天区之间基准不一致，实测差 24px |
+| 消息层定位 | 有立绘时改用 `.standing-chat-layer`：`absolute inset-x-0 bottom-0` + `height: calc(100% - var(--standing-art-h))` |
+| **为什么不用百分比 top/margin** | CSS 中百分比 margin/top 参照包含块**宽度**，而小屏立绘高度用 `min()/calc()` 相对**高度**计算，二者数值不等会导致消息区错位进立绘内。改用 `height: calc(100% - …)` 让两者同以高度为参照 |
+| 顶部 76px 留白 | 有立绘时消息层不在顶部，`pt-[76px]` 换成 `.standing-chat-layer` 的 `--standing-scroll-top`（桌面 14px / 移动端 10px） |
+| 底部留白 | 不变：`ResizeObserver(bottomRef)` 仍把 `paddingBottom` 直接写 DOM |
+| 滚动阈值 | 不变：置底 10%、上滑 33vh 收起都按 `clientHeight` 计算，容器变矮后自动跟随 |
+| 立绘高度变化 | 额外一个 `useLayoutEffect([showStandingArt])`：用户本在底部时重新钉底，避免切换 Agent 时消息「掉下来一段」 |
+| 空态 | 有立绘时外围改为 `flex flex-col justify-center min-h-full`，使其在下半区居中且超高时可滚 |
+| 图片适配 | 按 cover 渲染并**对齐内容边界**：扫描 alpha 通道求非空包围盒，上沿贴立绘区顶、下沿贴底；跨域污染时降级为标准 cover。详见 `module-agent.md` 的「渲染算法」 |
+| 遮罩 | 无。cover 填充后无空白，遮罩只会让边缘发虚、削掉头顶 |
+| 加载失败 | `StandingArt` 的 `onError` 只隐藏图片，占位空间保留，不引起布局跳变 |
+| 小屏 | 走 JS `isMobile`（项目禁用媒体查询）：高度 `min(40%, max(180px, calc(100% - 420px)))`，且不画地线 |
+
+### 零回归约束
+
+未配置立绘时，消息层的 className 必须与改动前逐字相同：
+`absolute inset-0 overflow-y-auto px-4 pt-[76px] z-10`。
+不得"顺手统一"两条路径的 class——那会改变现有全屏滚动布局。
+
 ## 会话状态条（ConversationStats）
 
 输入框下方一行：`<工作区> | 3.4s · 128 tok/s | 1.2M tok | 35%`——**只列裸数字**（无中文标签、无 `≈` 标记）。仅在**已有会话**渲染（草稿态不显示）。数据源是服务端每次生成后算出的一份快照——**发放权威完全在服务端**，客户端只接收。

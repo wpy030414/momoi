@@ -174,6 +174,7 @@ export async function listAgents(): Promise<Agent[]> {
     model: r.model,
     system_prompt: r.system_prompt,
     avatar: r.avatar,
+    standing_art: r.standing_art,
     role: r.role as Agent['role'],
     created_at: r.created_at,
     voice_enabled: r.voice_enabled,
@@ -191,6 +192,7 @@ export async function getAgent(id: string): Promise<Agent | null> {
     model: row.model,
     system_prompt: row.system_prompt,
     avatar: row.avatar,
+    standing_art: row.standing_art,
     role: row.role as Agent['role'],
     created_at: row.created_at,
     voice_enabled: row.voice_enabled,
@@ -199,9 +201,35 @@ export async function getAgent(id: string): Promise<Agent | null> {
   }
 }
 
-export async function createAgent(name: string, model: string, systemPrompt: string, avatar = '', role: Agent['role'] = 'default', voiceEnabled = false, voiceSampleUrl = '', voiceSettings = '{}', idOverride?: string): Promise<Agent> {
-  // 中立 Agent 恒为固定 ID；idOverride 供配置导入按原 ID 重建普通 Agent，
-  // 保持跨实例的 agent_id 引用（会话、绑定等）一致。
+/** 新建 Agent 的可选参数集合。原先的 9 个位置参数在扩展立绘时已到可读性上限，
+ *  改为对象传入——调用点各自只写关心的字段，新增字段不会打乱既有顺序。 */
+export interface CreateAgentOptions {
+  name: string
+  model: string
+  systemPrompt?: string
+  avatar?: string
+  role?: Agent['role']
+  voiceEnabled?: boolean
+  voiceSampleUrl?: string
+  voiceSettings?: string
+  standingArt?: string
+  /** 配置导入按原 ID 重建普通 Agent，保持跨实例的 agent_id 引用（会话、绑定等）一致 */
+  idOverride?: string
+}
+
+export async function createAgent(opts: CreateAgentOptions): Promise<Agent> {
+  const {
+    name, model,
+    systemPrompt = '',
+    avatar = '',
+    role = 'default',
+    voiceEnabled = false,
+    voiceSampleUrl = '',
+    voiceSettings = '{}',
+    standingArt = '',
+    idOverride,
+  } = opts
+  // 中立 Agent 恒为固定 ID
   const id = role === 'neutral' ? NEUTRAL_AGENT_ID : (idOverride || randomUUID())
   const now = Math.floor(Date.now() / 1000)
   await db.insert(agents).values({
@@ -210,16 +238,17 @@ export async function createAgent(name: string, model: string, systemPrompt: str
     model,
     system_prompt: systemPrompt,
     avatar,
+    standing_art: standingArt,
     role,
     created_at: now,
     voice_enabled: voiceEnabled,
     voice_sample_url: voiceSampleUrl,
     voice_settings: voiceSettings,
   } as any).run()
-  return { id, name, model, system_prompt: systemPrompt, avatar, role, created_at: now, voice_enabled: voiceEnabled, voice_sample_url: voiceSampleUrl, voice_settings: voiceSettings }
+  return { id, name, model, system_prompt: systemPrompt, avatar, standing_art: standingArt, role, created_at: now, voice_enabled: voiceEnabled, voice_sample_url: voiceSampleUrl, voice_settings: voiceSettings }
 }
 
-export async function updateAgent(id: string, partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar' | 'voice_enabled' | 'voice_sample_url' | 'voice_settings'>>): Promise<Agent | null> {
+export async function updateAgent(id: string, partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar' | 'standing_art' | 'voice_enabled' | 'voice_sample_url' | 'voice_settings'>>): Promise<Agent | null> {
   const existing = await getAgent(id)
   if (!existing) return null
   const updates: Record<string, unknown> = {}
@@ -227,6 +256,7 @@ export async function updateAgent(id: string, partial: Partial<Pick<Agent, 'name
   if (partial.model !== undefined) updates.model = partial.model
   if (partial.system_prompt !== undefined) updates.system_prompt = partial.system_prompt
   if (partial.avatar !== undefined) updates.avatar = partial.avatar
+  if (partial.standing_art !== undefined) updates.standing_art = partial.standing_art
   if (partial.voice_enabled !== undefined) updates.voice_enabled = partial.voice_enabled ? 1 : 0
   if (partial.voice_sample_url !== undefined) updates.voice_sample_url = partial.voice_sample_url
   if (partial.voice_settings !== undefined) updates.voice_settings = partial.voice_settings
@@ -250,12 +280,12 @@ export async function bootstrapAgents(): Promise<void> {
   const model = env.OPENAI_MODEL
 
   if (!all.some((a) => a.id === NEUTRAL_AGENT_ID)) {
-    await createAgent(NEUTRAL_AGENT_NAME, model, '', '', 'neutral')
+    await createAgent({ name: NEUTRAL_AGENT_NAME, model, role: 'neutral' })
     console.log(`[bootstrap] Created neutral agent "${NEUTRAL_AGENT_NAME}" with model "${model}"`)
   }
 
   if (!all.some((a) => a.role !== 'neutral')) {
-    await createAgent('Momoi', model, '')
+    await createAgent({ name: 'Momoi', model })
     console.log(`[bootstrap] Created default agent "Momoi" with model "${model}"`)
   }
 }

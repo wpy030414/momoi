@@ -88,6 +88,14 @@ export async function initSqlite(dbPath?: string) {
     // Column already exists, safe to ignore
   }
 
+  // Migration: add standing_art（智能体立绘；仅单聊聊天区上半屏展示）
+  try {
+    client.exec(`ALTER TABLE agents ADD COLUMN standing_art TEXT NOT NULL DEFAULT ''`)
+    console.log('[db] Migration: added standing_art to agents')
+  } catch {
+    // Column already exists, safe to ignore
+  }
+
   // Migration: OAuth2 → OIDC（表 user_oauth_bindings 改名 user_oidc_bindings）
   // 旧表不删——已部署实例升级后可回退；INSERT OR IGNORE 依赖 UNIQUE(provider_id, provider_user_id)
   // 保证重复启动幂等。旧表不存在（全新部署）时 try 内语句会抛错，被 catch 吞掉。

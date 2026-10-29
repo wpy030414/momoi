@@ -21,13 +21,15 @@ import YAML from 'yaml'
 import { ErrCode } from '@momoi/shared/errors'
 import { NEUTRAL_AGENT_ID, NEUTRAL_AGENT_NAME } from '@momoi/shared/constants'
 import type { Agent, AppConfig, ConfigExportBundle, ConfigExportGateway, ImportIssue, ImportSummary, OidcProvider } from '@momoi/shared/types'
+// 仅类型导入：CreateAgentOptions 定义在 config.ts，运行时不会引入其建库副作用
+import type { CreateAgentOptions } from './config.js'
 
 export const BUNDLE_VERSION = 1
 export const MAX_IMPORT_BYTES = 10 * 1024 * 1024
 
 const EXPERIENCE_KEYS = ['app_name', 'app_favicon', 'app_background', 'show_github', 'recommended_questions', 'followup_questions'] as const
 const GATEWAY_KEYS = ['gateway_source', 'api_endpoint', 'api_key', 'context_window', 'support_attachments', 'support_infinite_mode', 'use_external_image_hosting', 'allow_im_conversations'] as const
-const AGENT_KEYS = ['id', 'role', 'name', 'model', 'system_prompt', 'avatar'] as const
+const AGENT_KEYS = ['id', 'role', 'name', 'model', 'system_prompt', 'avatar', 'standing_art'] as const
 // issuer 主字段；三个 URL 为可选覆盖（非标 Provider 才填）
 const PROVIDER_KEYS = ['id', 'name', 'issuer', 'client_id', 'client_secret', 'scopes', 'authorize_url', 'token_url', 'userinfo_url'] as const
 
@@ -37,8 +39,8 @@ export interface TransferDeps {
   getConfig(): Promise<AppConfig>
   updateConfig(partial: Partial<AppConfig>): Promise<AppConfig>
   listAgents(): Promise<Agent[]>
-  updateAgent(id: string, partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar'>>): Promise<Agent | null>
-  createAgent(name: string, model: string, systemPrompt: string, avatar: string, role: Agent['role'], voiceEnabled: boolean, voiceSampleUrl: string, voiceSettings: string, idOverride?: string): Promise<Agent>
+  updateAgent(id: string, partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar' | 'standing_art'>>): Promise<Agent | null>
+  createAgent(opts: CreateAgentOptions): Promise<Agent>
   isDirectRegistrationOpen(): Promise<boolean>
   setDirectRegistrationOpen(open: boolean): Promise<void>
   isOidcRegistrationOpen(): Promise<boolean>
@@ -55,7 +57,7 @@ async function loadDefaultDeps(): Promise<TransferDeps> {
     updateConfig: config.updateConfig,
     listAgents: config.listAgents,
     updateAgent: config.updateAgent,
-    createAgent: config.createAgent as TransferDeps['createAgent'],
+    createAgent: config.createAgent,
     isDirectRegistrationOpen: config.isDirectRegistrationOpen,
     setDirectRegistrationOpen: config.setDirectRegistrationOpen,
     isOidcRegistrationOpen: config.isOidcRegistrationOpen,
@@ -94,7 +96,7 @@ export async function buildExportBundle(deps?: TransferDeps): Promise<ConfigExpo
       followup_questions: config.followup_questions,
     },
     // 剔除 voice 三字段与 created_at
-    agents: agents.map((a) => ({ id: a.id, role: a.role, name: a.name, model: a.model, system_prompt: a.system_prompt, avatar: a.avatar })),
+    agents: agents.map((a) => ({ id: a.id, role: a.role, name: a.name, model: a.model, system_prompt: a.system_prompt, avatar: a.avatar, standing_art: a.standing_art })),
     users: {
       direct_registration_open: await d.isDirectRegistrationOpen(),
       oidc_registration_open: await d.isOidcRegistrationOpen(),
@@ -386,9 +388,12 @@ function validateAgents(v: unknown, ctx: ValidateContext, errors: ImportIssue[],
         }
         // 与现值一致 → 不进 bundle（name 永不通过导入修改）
       }
-      // 非空 avatar 才提示忽略；空串（导出文件自带）静默跳过，避免噪音
+      // 非空 avatar/standing_art 才提示忽略；空串（导出文件自带）静默跳过，避免噪音
       if (entry.avatar !== undefined && entry.avatar !== '') {
         warnings.push({ path: `agents[${i}].avatar`, code: ErrCode.CONFIG_IMPORT_NEUTRAL_AVATAR_IGNORED })
+      }
+      if (entry.standing_art !== undefined && entry.standing_art !== '') {
+        warnings.push({ path: `agents[${i}].standing_art`, code: ErrCode.CONFIG_IMPORT_NEUTRAL_AVATAR_IGNORED })
       }
       if (entry.model !== undefined) {
         if (typeof entry.model !== 'string' || entry.model.length > 200) {
@@ -449,6 +454,13 @@ function validateAgents(v: unknown, ctx: ValidateContext, errors: ImportIssue[],
         errors.push({ path: `agents[${i}].avatar`, code: ErrCode.CONFIG_IMPORT_BAD_IMAGE_URL, params: { field: 'avatar' } })
       } else {
         agent.avatar = entry.avatar
+      }
+    }
+    if (entry.standing_art !== undefined) {
+      if (typeof entry.standing_art !== 'string' || !isValidImageValue(entry.standing_art)) {
+        errors.push({ path: `agents[${i}].standing_art`, code: ErrCode.CONFIG_IMPORT_BAD_IMAGE_URL, params: { field: 'standing_art' } })
+      } else {
+        agent.standing_art = entry.standing_art
       }
     }
     // 新建（id 缺省或库中不存在）必须提供 name；更新可省略任意字段
@@ -579,6 +591,7 @@ interface ConfigTransferAgentOut {
   model?: string
   system_prompt?: string
   avatar?: string
+  standing_art?: string
 }
 
 // ---- 导入：摘要 / 应用 ----
@@ -603,7 +616,7 @@ interface ImportPlan {
   experience: { changed: string[]; unchanged: string[] } | null
   experienceUpdate: Partial<AppConfig>
   agents: ImportSummary['agents']
-  agentOps: Array<{ op: 'update'; id: string; partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar'>> } | { op: 'create'; name: string; model: string; systemPrompt: string; avatar: string; id?: string }>
+  agentOps: Array<{ op: 'update'; id: string; partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar' | 'standing_art'>> } | { op: 'create'; opts: CreateAgentOptions }>
   users: ImportSummary['users']
   directOpen?: boolean
   oidcOpen?: boolean
@@ -675,11 +688,12 @@ async function computePlan(bundle: ConfigExportBundle, deps: TransferDeps): Prom
     }
     const existing = entry.id !== undefined ? existingById.get(entry.id) : undefined
     if (existing) {
-      const partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar'>> = {}
+      const partial: Partial<Pick<Agent, 'name' | 'model' | 'system_prompt' | 'avatar' | 'standing_art'>> = {}
       if (entry.name !== undefined && entry.name !== existing.name) partial.name = entry.name
       if (entry.model !== undefined && entry.model !== existing.model) partial.model = entry.model
       if (entry.system_prompt !== undefined && entry.system_prompt !== existing.system_prompt) partial.system_prompt = entry.system_prompt
       if (entry.avatar !== undefined && entry.avatar !== existing.avatar) partial.avatar = entry.avatar
+      if (entry.standing_art !== undefined && entry.standing_art !== existing.standing_art) partial.standing_art = entry.standing_art
       if (Object.keys(partial).length === 0) {
         agentsOut.skip.push({ id: existing.id, name: existing.name, reason: 'no changes' })
       } else {
@@ -689,7 +703,7 @@ async function computePlan(bundle: ConfigExportBundle, deps: TransferDeps): Prom
     } else {
       // 新建（id 缺省 → 生成新 UUID；id 存在但库中无 → 按原 id 重建保持跨实例引用）
       agentsOut.create.push({ id: entry.id ?? null, name: entry.name! })
-      agentOps.push({ op: 'create', name: entry.name!, model: entry.model ?? '', systemPrompt: entry.system_prompt ?? '', avatar: entry.avatar ?? '', id: entry.id })
+      agentOps.push({ op: 'create', opts: { name: entry.name!, model: entry.model ?? '', systemPrompt: entry.system_prompt ?? '', avatar: entry.avatar ?? '', standingArt: entry.standing_art ?? '', idOverride: entry.id } })
     }
   }
   const agents: ImportSummary['agents'] = bundle.agents === undefined ? null : agentsOut
@@ -794,16 +808,20 @@ export async function applyImportBundle(bundle: ConfigExportBundle, deps?: Trans
     await d.updateConfig({ oidc_providers: plan.mergedProviders as OidcProvider[] })
   }
 
-  // agents：upsert（只传文件中出现的字段；avatar 过图床转换）
+  // agents：upsert（只传文件中出现的字段；avatar / standing_art 过图床转换）
   for (const op of plan.agentOps) {
     if (op.op === 'update') {
       if (op.partial.avatar !== undefined) {
         op.partial.avatar = await maybeUploadDataUrl(op.partial.avatar, 'avatar.png', d)
       }
+      if (op.partial.standing_art !== undefined) {
+        op.partial.standing_art = await maybeUploadDataUrl(op.partial.standing_art, 'standing-art.png', d)
+      }
       await d.updateAgent(op.id, op.partial)
     } else {
-      const avatar = await maybeUploadDataUrl(op.avatar, 'avatar.png', d)
-      await d.createAgent(op.name, op.model, op.systemPrompt, avatar, 'default', false, '', '{}', op.id)
+      const avatar = await maybeUploadDataUrl(op.opts.avatar ?? '', 'avatar.png', d)
+      const standingArt = await maybeUploadDataUrl(op.opts.standingArt ?? '', 'standing-art.png', d)
+      await d.createAgent({ ...op.opts, avatar, standingArt })
     }
   }
 

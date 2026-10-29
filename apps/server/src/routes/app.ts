@@ -24,6 +24,6 @@ appRoute.get('/', async (c) => {
     // The client's single discovery channel for stand-alone mode (auto-login
     // as the fixed 'admin' user, hide auth-related UI entries).
     stand_alone: STAND_ALONE,
-    agents: agents.filter((a) => a.id !== NEUTRAL_AGENT_ID).map((a) => ({ id: a.id, name: a.name, avatar: a.avatar, voice_enabled: a.voice_enabled })),
+    agents: agents.filter((a) => a.id !== NEUTRAL_AGENT_ID).map((a) => ({ id: a.id, name: a.name, avatar: a.avatar, standing_art: a.standing_art, voice_enabled: a.voice_enabled })),
   })
 })

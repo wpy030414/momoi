@@ -243,6 +243,51 @@
   background-repeat: repeat;
 }
 
+/* ---- 智能体立绘（单聊聊天区上半屏）---- */
+/* 有立绘时消息滚动层从分割线下方开始：高度 = 容器高 − 立绘高（两者都以容器高度为参照，
+   语义一致）。不用 top/margin 的百分比——它们在 CSS 里参照的是包含块**宽度**，
+   会与小屏 min()/calc() 的立绘高度不一致，导致消息区错位到立绘之内。 */
+.standing-chat-layer {
+  height: calc(100% - var(--standing-art-h, 0px));
+  padding-top: var(--standing-scroll-top, 14px);
+}
+
+/* 立绘层：cover 填充后图片已无非空留白，不再需要柔边遮罩——
+   遮罩会在人物边缘叠出渐隐、并削掉头顶。裁剪由 .standing-art-layer 的 overflow 保证。 */
+.standing-art-layer {
+  contain: paint;
+}
+
+/* 立绘裁剪层：只显示排版区上部 40%，且在下缘渐隐融入背景。
+   --standing-art-fade-to = 聊天区 40% 线换算到本层坐标的长度（见 ChatPanel）。
+   渐隐终点用长度而非百分比：本层高度与聊天区不同，百分比基准会对不上。
+   用 mask 而非 clip-path：clip-path 是硬切，会在 40% 处留下一条生硬的横线。 */
+.standing-art-clip {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 calc(var(--standing-art-fade-to, 100%) - 96px),
+    transparent var(--standing-art-fade-to, 100%),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(var(--standing-art-fade-to, 100%) - 96px),
+    transparent var(--standing-art-fade-to, 100%),
+    transparent 100%
+  );
+}
+
+/* 地线：暗示「地面」，让人物下缘与消息区分割线有视觉落点 */
+.standing-art-ground {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 70%);
+  height: 1px;
+  background: linear-gradient(to right, transparent, hsl(var(--border) / 0.7), transparent);
+}
+
 /* ===== PIN 输入标记（登录页数字键盘） ===== */
 
 /* 注册自定义属性供 keyframes 无缝插值——不注册则在 @keyframes 内置为离散跳变，

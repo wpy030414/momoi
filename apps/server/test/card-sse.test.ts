@@ -25,6 +25,7 @@ const h = vi.hoisted(() => {
     model: 'test-model',
     system_prompt: '你是测试用的人设。',
     avatar: '',
+    standing_art: '',
     role: 'default' as const,
     created_at: 0,
     voice_enabled: false,

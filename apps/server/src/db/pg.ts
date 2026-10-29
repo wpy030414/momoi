@@ -58,6 +58,7 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       model TEXT NOT NULL DEFAULT '',
       system_prompt TEXT NOT NULL DEFAULT '',
       avatar TEXT NOT NULL DEFAULT '',
+      standing_art TEXT NOT NULL DEFAULT '',
       role TEXT NOT NULL DEFAULT 'default',
       created_at INTEGER NOT NULL,
       voice_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -188,6 +189,8 @@ export async function initPg(dbUrl: string, user: string, password: string) {
   // 世界模拟「Agent 状态」（JSON），见 docs/specs/module-world.md
   await pool.query(`ALTER TABLE worlds ADD COLUMN IF NOT EXISTS states TEXT`)
   await pool.query(`ALTER TABLE worlds ADD COLUMN IF NOT EXISTS state_values TEXT`)
+  // 智能体立绘（仅单聊聊天区上半屏展示）
+  await pool.query(`ALTER TABLE agents ADD COLUMN IF NOT EXISTS standing_art TEXT NOT NULL DEFAULT ''`)
 
   // drizzle-orm 1.0-rc.4：node-postgres 的 drizzle() 不再接受 (client, config) 位置参数，
   // 改用对象形式 { client }。schema 键已被 Omit（关系 API 改用 relations）；momoi 不使用

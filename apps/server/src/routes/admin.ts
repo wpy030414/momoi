@@ -8,7 +8,7 @@ import { ApiError } from '../lib/apiError.js'
 import { STAND_ALONE } from '../lib/standalone.js'
 import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../lib/rateLimiter.js'
 import { getConfig, updateConfig, listAgents, createAgent, updateAgent, deleteAgent, listMcpServers, getMcpServer, createMcpServer, updateMcpServer, deleteMcpServer, isDirectRegistrationOpen, setDirectRegistrationOpen, isOidcRegistrationOpen, setOidcRegistrationOpen, isExternalImageHostingEnabled, getTtsConfig, updateTtsConfig, deleteUserMemories } from '../lib/config.js'
-import { base64ToBuffer, uploadToCdn } from '../lib/cdn.js'
+import { base64ToBuffer, uploadToCdn, maybeCdnifyDataUrl } from '../lib/cdn.js'
 import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '@momoi/shared/constants'
 import fs from 'fs'
 import path from 'path'
@@ -244,44 +244,45 @@ adminRoute.get('/agents', async (c) => {
 })
 
 adminRoute.post('/agents', async (c) => {
-  const body = await c.req.json<{ name: string; model: string; system_prompt: string; avatar?: string; voice_enabled?: boolean; voice_sample_url?: string; voice_settings?: string }>()
+  const body = await c.req.json<{ name: string; model: string; system_prompt: string; avatar?: string; standing_art?: string; voice_enabled?: boolean; voice_sample_url?: string; voice_settings?: string }>()
   if (!body.name?.trim()) {
     throw new ApiError(ErrCode.ADMIN_AGENT_NAME_REQUIRED)
   }
 
-  // External image hosting: convert base64 avatar → CDN URL
-  if (body.avatar && body.avatar.startsWith('data:') && await isExternalImageHostingEnabled()) {
-    try {
-      const { buffer, mimeType } = base64ToBuffer(body.avatar)
-      body.avatar = await uploadToCdn(buffer, 'avatar.png', mimeType)
-    } catch (err) {
-      console.warn('Failed to upload agent avatar to CDN, keeping base64:', (err as Error).message)
-    }
-  }
+  // External image hosting: convert base64 images → CDN URL（一次读开关，两张图共用）
+  const hosting = await isExternalImageHostingEnabled()
+  const avatar = await maybeCdnifyDataUrl(body.avatar || '', 'avatar.png', hosting)
+  const standingArt = await maybeCdnifyDataUrl(body.standing_art || '', 'standing-art.png', hosting)
 
-  const agent = await createAgent(body.name.trim(), body.model || '', body.system_prompt || '', body.avatar || '', 'default', body.voice_enabled ?? false, body.voice_sample_url || '', body.voice_settings || '{}')
+  const agent = await createAgent({
+    name: body.name.trim(),
+    model: body.model || '',
+    systemPrompt: body.system_prompt || '',
+    avatar,
+    role: 'default',
+    voiceEnabled: body.voice_enabled ?? false,
+    voiceSampleUrl: body.voice_sample_url || '',
+    voiceSettings: body.voice_settings || '{}',
+    standingArt,
+  })
   return c.json({ agent })
 })
 
 adminRoute.put('/agents/:id', async (c) => {
   const id = c.req.param('id')
-  const body = await c.req.json<{ name?: string; model?: string; system_prompt?: string; avatar?: string; voice_enabled?: boolean; voice_sample_url?: string; voice_settings?: string }>()
+  const body = await c.req.json<{ name?: string; model?: string; system_prompt?: string; avatar?: string; standing_art?: string; voice_enabled?: boolean; voice_sample_url?: string; voice_settings?: string }>()
 
   // Neutral agent: only model, system_prompt can be changed (and voice fields)
   if (id === NEUTRAL_AGENT_ID) {
     delete body.name
     delete body.avatar
+    delete body.standing_art
   }
 
-  // External image hosting: convert base64 avatar → CDN URL
-  if (body.avatar && body.avatar.startsWith('data:') && await isExternalImageHostingEnabled()) {
-    try {
-      const { buffer, mimeType } = base64ToBuffer(body.avatar)
-      body.avatar = await uploadToCdn(buffer, 'avatar.png', mimeType)
-    } catch (err) {
-      console.warn('Failed to upload agent avatar to CDN, keeping base64:', (err as Error).message)
-    }
-  }
+  // External image hosting: convert base64 images → CDN URL
+  const hosting = await isExternalImageHostingEnabled()
+  if (body.avatar !== undefined) body.avatar = await maybeCdnifyDataUrl(body.avatar, 'avatar.png', hosting)
+  if (body.standing_art !== undefined) body.standing_art = await maybeCdnifyDataUrl(body.standing_art, 'standing-art.png', hosting)
 
   const agent = await updateAgent(id, body)
   if (!agent) {
@@ -848,6 +849,7 @@ async function getAgentStub(id: string): Promise<import('@momoi/shared/types').A
     model: row.model,
     system_prompt: row.system_prompt,
     avatar: row.avatar,
+    standing_art: row.standing_art,
     role: row.role as any,
     created_at: row.created_at,
     voice_enabled: row.voice_enabled,

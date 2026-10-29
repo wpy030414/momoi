@@ -2234,3 +2234,40 @@ TDID `x-device-token` 依然 401。真正的原因在**会话 Cookie 的获取�
 - 配置：新增 `WORKBUDDY_REALM` / `CONSOLE_CLIENT_ID` / `WECHAT_CLIENT_ID` / `WECHAT_IDP_HINT`；
   `WORKBUDDY_BROWSER_*` 保留但已不使用
 - 测试：二维码用例改为纯 HTTP 契约测试（含二维码来源域名校验）
+
+---
+
+## D75：智能体立绘采用「绝对定位占位层 + 高度扣减消息层」，而非重构 ChatPanel
+
+**日期**：2026-10-30
+
+**背景**：每个智能体原本只有头像，聊天背景由全局 `app_background` 统一提供，无法让角色「站」在对话里。需求是新增**立绘**：展示在聊天窗口上半部分 40%，**独立占据空间**，消息气泡只在下半屏滚动、不可浮于其上。
+
+**决策**：不重构 ChatPanel 的 DOM 结构，只在同一层 `<div>` 上按 `showStandingArt` 切换 className：
+
+- 立绘层：`absolute inset-x-0 top-0 z-[5] pointer-events-none`，高度写入 CSS 变量 `--standing-art-h`；
+- 消息层：有立绘时换成 `.standing-chat-layer`（`absolute inset-x-0 bottom-0` + `height: calc(100% - var(--standing-art-h))`），无立绘时 className 与改动前**逐字相同**。
+
+**原因**：
+- 立绘层用**绝对定位**而非 flex 兄弟：参与 flex 会让 `40%` 变成相对「剩余空间」，还要与 `justify-end`、空态、底部悬浮区抢高度；绝对层与消息层互不参与对方布局，且 `overflow` 裁剪天然保证气泡不越界——这正是需求语义。
+- 消息层用 **`height: calc(100% - …)` 而非 `top` / `marginTop` 的百分比**：CSS 中百分比 margin/top 参照包含块**宽度**，而小屏立绘高度是 `min(40%, max(180px, calc(100% - 420px)))` 相对**高度**算的，实测两者数值不等（移动端消息区错位进立绘 180px）。让两者同以高度为参照后，桌面/移动端分割线都严格对齐（`scrollerTop === artBottom`）。
+- 未配置立绘时**零回归**：className 逐字复用，不"顺手统一"两条路径。
+- `isMobile` 必须由 App.tsx 传入：项目硬约束是禁用 CSS 媒体查询（钉钉内置内核会丢弃响应式规则）。
+- 配置导入的中立 Agent 忽略 warning **复用** `CONFIG_IMPORT_NEUTRAL_AVATAR_IGNORED` 而非新增错误码：语义同属「中立 Agent 的视觉身份字段不可导入修改」，`path` 已能精确定位到 `agents[i].standing_art`；新增码要同步枚举、状态码表、三份 i18n 与枚举一致性测试，收益仅为一句更精确的文案（本次把该码文案泛化为「头像/立绘」）。
+
+**顺带清偿的技术债**：`createAgent` 原有 9 个位置参数，再加立绘字段会陷入「插参数导致 UUID 写进立绘字段」的错位风险。本次改为单一 options 对象（`CreateAgentOptions`），并删除了 `TransferDeps` 处历史遗留的 `as TransferDeps['createAgent']` 强转——签名自然对齐，编译器可拦截漏改。
+
+**备选与权衡**：
+- ❌ flex 兄弟占位：40% 基准失真，空态与 `justify-end` 交互复杂
+- ❌ 百分比 `marginTop` 推开消息层：移动端实测错位（见上）
+- ✅ **后续修订（同日）**：`object-contain` 会让人物缩在 40% 区域内、四周露出画布留白，观感上「身体很小」。改为按 **cover 渲染并对齐非空像素边界**：canvas 扫描 alpha 通道求包围盒，缩放使内容高 = 容器高，上沿贴顶、下沿贴底；宽度溢出由 `overflow` 裁切。
+- ⚠️ 该方案**不能**设 `crossOrigin='anonymous'`：图床（cloudflareimg.cdn.sn）无 CORS 头，带上会让图片直接加载失败（实测回归）。不设时跨域画布被污染、`getImageData` 抛 `SecurityError`，此时降级为标准 cover。
+- ❌ 柔边遮罩（初版）：cover 填充后已无留白，遮罩只会让边缘发虚并削掉头顶，已移除
+- ❌ 立绘区覆盖背景：会在上半屏形成生硬色块
+- ❌ 群聊也显示立绘：群聊多角色轮转，没有唯一的「当前角色」，立绘与发言者不对应会造成困惑
+
+**影响**：
+- DB：`agents` 新增 `standing_art TEXT NOT NULL DEFAULT ''`（SQLite try/catch ALTER、PG `ADD COLUMN IF NOT EXISTS`）
+- server：`config.ts` CRUD、`CreateAgentOptions`、`cdn.ts#maybeCdnifyDataUrl`（抽出 admin.ts 两处重复块）、`admin.ts` 中立保护加 `delete body.standing_art`、`app.ts` 摘要透出、`config-transfer.ts` 全链路（含 `AGENT_KEYS` 白名单）
+- web：`StandingArt` 组件、ChatPanel 布局分支、`ImageUploadField` 组件、AgentManager 接入、三份 i18n
+- 测试：`config-transfer.test.ts` 新增 2 个用例（立绘全链路、导出→导入幂等锁白名单），并做反向验证（移除白名单键时用例确实失败）

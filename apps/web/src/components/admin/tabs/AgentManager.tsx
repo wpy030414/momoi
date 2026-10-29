@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Pencil, Trash2, Plus, Upload, Copy, Shield, Mic, Volume2, Layers } from 'lucide-react'
 import { useToast } from '../../ui/toast'
 import { ModelPicker } from './ModelPicker'
+import { ImageUploadField } from '../ImageUploadField'
 
 export interface AgentManagerHandle {
   triggerCreate: () => void
@@ -61,6 +62,7 @@ function AgentRow({
   agent, isNeutral, isEditing, onEdit, onCancel, onSave, onCopy, onDelete,
   formName, setFormName, formModel, setFormModel, formSystemPrompt, setFormSystemPrompt,
   formAvatar, setFormAvatar, avatarInputRef, handleAvatarChange,
+  formStandingArt, setFormStandingArt,
   voice, onVoiceChange, voiceAudioRef, handleVoiceUpload, handleVoiceClone, handleVoiceDelete,
   voiceCloning, loading, t,
 }: {
@@ -78,6 +80,7 @@ function AgentRow({
   formAvatar: string; setFormAvatar: (v: string) => void
   avatarInputRef: React.RefObject<HTMLInputElement | null>
   handleAvatarChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  formStandingArt: string; setFormStandingArt: (v: string) => void
   // Voice
   voice: VoiceFormState
   onVoiceChange: (partial: Partial<VoiceFormState>) => void
@@ -188,6 +191,20 @@ function AgentRow({
             )}
           </div>
         </div>
+      )}
+
+      {/* Standing art — 与头像同样对中立 Agent 隐藏 */}
+      {!isNeutral && (
+        <ImageUploadField
+          variant="standing"
+          value={formStandingArt}
+          onChange={setFormStandingArt}
+          label={t('settings.agentStandingArt')}
+          hint={t('settings.standingArtHint')}
+          uploadLabel={t('settings.uploadStandingArt')}
+          removeLabel={t('common.remove')}
+          alt={t('settings.altStandingArtPreview')}
+        />
       )}
 
       <ModelPicker value={formModel} onChange={setFormModel} />
@@ -353,6 +370,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
   const [formModel, setFormModel] = useState('')
   const [formSystemPrompt, setFormSystemPrompt] = useState('')
   const [formAvatar, setFormAvatar] = useState('')
+  const [formStandingArt, setFormStandingArt] = useState('')
   const [voice, setVoice] = useState<VoiceFormState>(DEFAULT_VOICE_FORM)
 
   const fetchAgents = async () => {
@@ -449,6 +467,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
           body.model = formModel.trim()
           body.system_prompt = formSystemPrompt
           body.avatar = formAvatar
+          body.standing_art = formStandingArt
           body.voice_enabled = voice.enabled
           body.voice_sample_url = voice.sampleUrl
           body.voice_settings = JSON.stringify({
@@ -466,6 +485,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
           model: formModel.trim(),
           system_prompt: formSystemPrompt,
           avatar: formAvatar,
+          standing_art: formStandingArt,
         } as any)
       }
       await fetchAgents()
@@ -484,6 +504,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
         model: agent.model,
         system_prompt: agent.system_prompt,
         avatar: agent.avatar,
+        standing_art: agent.standing_art,
       })
       await fetchAgents()
       toast({ title: t('settings.toastAgentCopied'), variant: 'success' })
@@ -515,6 +536,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     setFormModel(agent.model)
     setFormSystemPrompt(agent.system_prompt)
     setFormAvatar(agent.avatar || '')
+    setFormStandingArt(agent.standing_art || '')
     setVoice(voiceFormFromAgent(agent))
   }
 
@@ -525,6 +547,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     setFormModel('')
     setFormSystemPrompt('')
     setFormAvatar('')
+    setFormStandingArt('')
     setVoice(DEFAULT_VOICE_FORM)
   }
 
@@ -535,6 +558,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
     setFormModel('')
     setFormSystemPrompt('')
     setFormAvatar('')
+    setFormStandingArt('')
     setVoice(DEFAULT_VOICE_FORM)
   }
 
@@ -611,6 +635,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
               formModel={formModel} setFormModel={setFormModel}
               formSystemPrompt={formSystemPrompt} setFormSystemPrompt={setFormSystemPrompt}
               formAvatar={formAvatar} setFormAvatar={setFormAvatar}
+              formStandingArt={formStandingArt} setFormStandingArt={setFormStandingArt}
               avatarInputRef={avatarInputRef}
               handleAvatarChange={handleAvatarChange}
               voice={voice}
@@ -663,6 +688,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
                   formModel={formModel} setFormModel={setFormModel}
                   formSystemPrompt={formSystemPrompt} setFormSystemPrompt={setFormSystemPrompt}
                   formAvatar={formAvatar} setFormAvatar={setFormAvatar}
+                  formStandingArt={formStandingArt} setFormStandingArt={setFormStandingArt}
                   avatarInputRef={avatarInputRef}
                   handleAvatarChange={handleAvatarChange}
                   voice={voice}
@@ -692,6 +718,7 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
                   formModel={formModel} setFormModel={setFormModel}
                   formSystemPrompt={formSystemPrompt} setFormSystemPrompt={setFormSystemPrompt}
                   formAvatar={formAvatar} setFormAvatar={setFormAvatar}
+                  formStandingArt={formStandingArt} setFormStandingArt={setFormStandingArt}
                   avatarInputRef={avatarInputRef}
                   handleAvatarChange={handleAvatarChange}
                   voice={voice}

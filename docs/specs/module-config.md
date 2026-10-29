@@ -374,6 +374,14 @@ users:
 
 `gateway → experience → users → agents`（无事务，fail-fast）。
 
+### Agent 段字段
+
+`agents[]` 的合法键（`AGENT_KEYS` 白名单）：`id`、`role`、`name`、`model`、`system_prompt`、`avatar`、`standing_art`。白名单外的键会报 `CONFIG_IMPORT_UNKNOWN_AGENT_KEY`——**新增 Agent 字段时必须同步白名单**，否则旧导出文件回导直接失败（`config-transfer.test.ts` 的「导出→再导入幂等」用例锁死这一点）。
+
+- `avatar` / `standing_art` 均接受 `'' | data:image/* | http(s) URL`，非法值报 `CONFIG_IMPORT_BAD_IMAGE_URL`（`params.field` 区分字段）。
+- 图床开启时，导入的 base64 会转 CDN；失败保留原值。
+- **中立 Agent**（`role: neutral`）的 `avatar` / `standing_art` 非空时产生 warning `CONFIG_IMPORT_NEUTRAL_AVATAR_IGNORED`（该码文案已泛化为「头像/立绘」），且不进 bundle。
+
 **gateway 必须最先落库**，且**不能与 experience 合并成同一次 `updateConfig`**：`use_external_image_hosting` 决定后面 favicon/background/avatar 的 base64 是否转 CDN，而 `maybeUploadDataUrl` 实时调 `isExternalImageHostingEnabled()`（直读 `settings` 表，不走 config 缓存）。上传判定发生在写入之前——合并写入会让"同一份文件既开图床又带 base64 图片"的场景失效。
 
 其余副作用：外部图床开启时导入的 base64 图片先转 CDN 再落库，CDN 失败保留原值（与 `PUT /config` 行为一致）。导入成功无需手动刷新——管理面板关闭时 `useAdminPanel` 自动重拉 `getAppName`。

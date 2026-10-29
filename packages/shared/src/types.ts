@@ -386,6 +386,8 @@ export interface Agent {
   model: string
   system_prompt: string
   avatar: string
+  /** 立绘：单聊聊天区上半部分展示的大图。空串 = 未配置（聊天布局完全不变） */
+  standing_art: string
   role: 'default' | 'neutral'
   created_at: number
   // Voice
@@ -404,6 +406,8 @@ export interface ConfigTransferAgent {
   model?: string
   system_prompt?: string
   avatar?: string
+  /** 立绘（空串 = 清除） */
+  standing_art?: string
 }
 
 /**
