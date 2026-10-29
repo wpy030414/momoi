@@ -80,13 +80,14 @@ pnpm start:standalone   # 生产模式
 ## 生产部署
 
 ```bash
-pnpm build          # 构建（server tsup + web Vite）
+pnpm build          # 构建（server `vp pack` + web `vp build`）
 pnpm start          # 启动（node apps/server/dist/index.js）
 ```
 
 ## 技术栈
 
 - **前端**：React 19 + shadcn/ui（Radix + Tailwind）+ Vite 8
+- **工具链**：vp（Vite+）1.4 统一构建 / 测试 / 检查（`vp pack` / `vp test` / `vp check`）
 - **后端**：Hono 4 + Pi Agent Core + Drizzle ORM
 - **数据库**：SQLite（node:sqlite，每 commit fsync）默认；可选 PostgreSQL
 - **实时通信**：SSE（Server-Sent Events）

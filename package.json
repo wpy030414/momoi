@@ -10,11 +10,13 @@
     "start": "pnpm --filter @momoi/server start",
     "start:standalone": "pnpm --filter @momoi/server start:standalone",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "check": "vp check --no-fmt"
   },
   "devDependencies": {
     "concurrently": "^9.2.4",
     "typescript": "^5.9.3",
+    "vite-plus": "^1.4.0",
     "wait-on": "^9.1.0"
   }
 }

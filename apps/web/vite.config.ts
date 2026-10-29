@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, type Plugin } from 'vite-plus'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import dotenv from 'dotenv'

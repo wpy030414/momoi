@@ -35,7 +35,7 @@ pnpm monorepo（`apps/*` + `packages/*`），纯 workspace 协议，无外部编
 - **数据库**：SQLite（node:sqlite + Drizzle ORM，每 commit fsync）为默认；支持 PostgreSQL
 - **AI**：OpenAI 兼容 Chat Completions API + Pi Agent Core
 - **认证**：PIN（PBKDF2 哈希）+ JWT（HttpOnly Cookie 14 天滑动续期）；管理员由 `ADMIN` 环境变量名单指定
-- **共享层**：`@momoi/shared` TS 源码直引，tsup 内联到 server bundle
+- **共享层**：`@momoi/shared` TS 源码直引，`vp pack`（tsdown）内联到 server bundle
 
 ## 项目结构
 
@@ -73,9 +73,11 @@ pnpm monorepo：应用 (`apps/`) 与可复用包 (`packages/`)，纯 workspace �
 
 ```bash
 pnpm dev          # 同时运行 Vite（5173）+ Hono（11408），tsx watch 热重载
-pnpm build        # 先构建 server（tsup），再 web（Vite）——server 的 tsup --clean 会清掉旧的 client/
+pnpm build        # 先构建 server（vp pack），再 web（vp build）——vp pack 的 clean 会清掉旧的 client/
+pnpm check        # 全仓 lint（vp check --no-fmt，oxlint）
+pnpm typecheck    # 全仓类型检查（tsc --noEmit）
 pnpm start        # 运行生产构建（node apps/server/dist/index.js 从仓库根运行）
-pnpm test         # 运行各包测试（server：vitest —— 提示词规则引擎单测 + 黄金快照）
+pnpm test         # 运行各包测试（server：vp test —— 提示词规则引擎单测 + 黄金快照）
 ```
 
 ## 代码规范

@@ -2043,3 +2043,40 @@
   增加巡检吸收 Cookie、失效标记、对话 Cookie 写回用例
 - 文档：`module-workbuddy.md` 登录流程 / 接口契约 / 验收标准；`module-doubao.md` 新增〈后台凭证巡检〉；
   `PRD.md`、`ARCHITECTURE.md`、`.env.example` 同步
+
+---
+
+## D71：构建与检查统一收敛到 vp（Vite+ 1.4），并按 node-app-starter monorepo 形态对齐
+
+**日期**：2026-10-29
+
+**背景**：项目已是 pnpm workspace 三包布局（`apps/server` / `apps/web` / `packages/shared`），但工具链仍是拼装式：server 用 tsup、web 用 vite、测试用 vitest、lint 用 ESLint（仅 web），根目录没有统一的 `check`。每个工具各自一套配置文件与版本，接入新包要重复拼装。
+
+**决策**：采用 `node-app-starter` 的 node-monorepo 路线约定——构建与检查统一走 vp，同时保持本项目既有的业务形态不变：
+
+| 项 | 变更前 | 变更后 |
+|---|---|---|
+| server 构建 | `tsup.config.ts` | `apps/server/vite.config.ts` 的 `pack` 块（tsdown），`vp pack` |
+| web 构建/开发 | `vite` 命令 | `vp build` / `vp dev` |
+| 测试 | `vitest run` | `vp test run` |
+| 全仓检查 | 无 | 根 `vite.config.ts`（fmt/lint）+ 各包 `vp check --no-fmt` |
+| 运行时版本 | 无声明 | 根 `.nvmrc` = 24 |
+| `packageManager` 字段 | 无 | 保持无（由 vp 依 lockfile 自动检测） |
+
+**原因**：
+- 一个 CLI 覆盖 dev / build / pack / test / check，减少四套工具版本与配置漂移
+- vp 自带 oxfmt + oxlint，新增包无需再搭 ESLint 轮子
+- 与 starter 路线保持同构，后续扩展（CLI、子应用）照抄即可
+
+**取舍与偏离**：
+- **不做全仓重排**：既有代码按 prettier 风格书写，首次接入 oxfmt 若对全仓 `--fix` 会产出数千行纯格式 diff，淹没真实改动。因此 `check` 统一执行 `vp check --no-fmt`（lint + 类型感知关闭），格式化作为可选动作（`vp check --fix`）渐进引入。
+- **oxlint 仅报错不阻塞**：既有代码在 oxlint 下约 50 条 warning（未用变量、风格类），当前全部为 warning、零 error，CI 不会被卡住；后续逐条清理。
+- **web 的 ESLint 配置保留**：其 rules-of-hooks 是历史白屏事故（bde107b）的护栏，oxlint 的等价规则行为尚未验证，故先并存，不删除。
+- **`deps.neverBundle` 取代 `external`**：tsdown 已弃用 `external`，`pg` / `ws` 改为 `deps.neverBundle`；`@momoi/shared/**` 用 `alwaysBundle` 通配内联（子路径导入 `@momoi/shared/constants` 等也需内联，只写包名会漏）。
+- **`vp test` 不接受 `--passWithNoTests`**：改为 `vp test run`，与既有 `vitest run` 语义一致。
+
+**影响**：
+- `package.json`×4：新增 `check` 脚本、`vite-plus` 开发依赖；删除 `tsup`、`vitest`、`vite` 直接依赖
+- 新增：根 `vite.config.ts`、`apps/server/vite.config.ts`、`.nvmrc`；删除 `apps/server/tsup.config.ts`
+- `apps/web/tsconfig.json`：类型引用 `vite/client` → `vite-plus/client`
+- 文档：`README.md`、`AGENTS.md`、`docs/ARCHITECTURE.md` 同步构建命令

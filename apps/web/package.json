@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "lint": "eslint .",
+    "dev": "vp dev",
+    "build": "vp build",
+    "check": "vp check --no-fmt",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -51,6 +51,6 @@
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",
-    "vite": "^8.2.2"
+    "vite-plus": "^1.4.0"
   }
 }
