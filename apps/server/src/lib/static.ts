@@ -20,6 +20,13 @@ const clientDist = path.join(path.dirname(fileURLToPath(import.meta.url)), 'clie
 export const serveClient = async (c: Context, next: Next) => {
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return next()
 
+  // /api/* 绝不落到 SPA fallback。
+  // 否则任何不存在的 API 路径都会返回 200 + index.html：前端拿到 HTML 去 JSON.parse
+  // 会抛解析异常，掩盖真正的 404；排查时也分不清「端点不存在」和「端点报错」。
+  // 交给 registerErrorHandlers 的 app.notFound 统一返回 { code: NOT_FOUND }。
+  const reqPath = c.req.path
+  if (reqPath === '/api' || reqPath.startsWith('/api/')) return next()
+
   let file = ''
   let rel = ''
   try {
