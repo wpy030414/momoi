@@ -764,39 +764,42 @@
 
 ---
 
-## D35：OAuth2 第三方登录与账号绑定
+## D35：OIDC 第三方登录与账号绑定
 
-**日期**：2026-09-10 ~ 2026-09-11
+**日期**：2026-09-10 ~ 2026-09-11（原 OAuth2 版）· 2026-10-29 修订为 OIDC（见 D72）
 
-**背景**：项目仅支持用户名 + PIN 登录（D12），但多用户场景下每人需独立注册 PIN，且无法接入已有身份体系。需要引入标准 OAuth2 协议以降低注册门槛，同时允许已有账号绑定 OAuth 身份实现免 PIN 登录。
+**背景**：项目仅支持用户名 + PIN 登录（D12），但多用户场景下每人需独立注册 PIN，且无法接入已有身份体系。需要引入标准 OIDC 协议以降低注册门槛，同时允许已有账号绑定 OIDC 身份实现免 PIN 登录。
 
 **决策**：
-1. **OAuth2 多提供商架构**：支持配置任意 OAuth2 提供商（通过 `oauth_providers` 配置数组，管理员面板增删）。每个提供商包含 `id`、`name`、`client_id`、`client_secret`、`authorize_url`、`token_url`、`userinfo_url`、`scopes`。
-2. **三态回调路由 `GET /api/oauth/:providerId/callback`**：
-   - **已有绑定**：OAuth 身份已关联某用户 → 直接签发 JWT，设置 HttpOnly Cookie，重定向到首页（`oauth_user` + `oauth_expires` 查询参数供客户端读取）。
-   - **已登录 + 无绑定**：用户已持有有效 JWT Cookie → 自动将当前 OAuth 身份绑定到当前账号。
-   - **全新用户 + 注册开放**：重定向到首页带 `oauth_register=1` 参数，前端引导完成注册（选"关联已有账号"或"创建新账号"）；注册关闭时直接报错。
-3. **`user_oauth_bindings` 表**：`(provider_id, provider_user_id)` 唯一约束，每 OAuth 身份只绑定一个用户；绑定后可免 PIN 直接登录。
-4. **独立注册开关**：`oauth_registration_open` 设置（默认开启），管理员可独立关闭 OAuth 新用户注册，不影响已有绑定用户登录。
+1. **OIDC 多提供商架构**：支持配置任意 OIDC 提供商（通过 `oidc_providers` 配置数组，管理员面板增删）。主字段为 `id`、`name`、`issuer`、`client_id`、`client_secret`、`scopes`；`authorize_url` / `token_url` / `userinfo_url` 保留为**可选覆盖项**（仅非标 Provider 才填）。
+2. **端点由 discovery 自动获取**：`${issuer}/.well-known/openid-configuration`，进程内缓存 1 小时；拉回后比对 `doc.issuer === 配置 issuer`，不一致即拒绝。
+3. **三态回调路由 `GET /api/oidc/callback`**：
+   - **已有绑定**：OIDC 身份已关联某用户 → 直接签发 JWT，设置 HttpOnly Cookie，重定向到首页（`oidc_user` + `oidc_expires` 查询参数供客户端读取）。
+   - **已登录 + 无绑定**：用户已持有有效 JWT Cookie → 自动将当前 OIDC 身份绑定到当前账号。
+   - **全新用户 + 注册开放**：重定向到首页带 `oidc_register=1` 参数，前端引导完成注册（选"关联已有账号"或"创建新账号"）；注册关闭时直接报错。
+4. **`user_oidc_bindings` 表**：`(provider_id, provider_user_id)` 唯一约束，每 OIDC 身份只绑定一个用户；绑定后可免 PIN 直接登录。`provider_user_id` 取**验签后 id_token 的 `sub`**。
+5. **独立注册开关**：`oidc_registration_open` 设置（默认开启），管理员可独立关闭 OIDC 新用户注册，不影响已有绑定用户登录。
 
 **原因**：
-- 标准 OAuth2 Authorization Code 流程，安全性依赖 state 参数防 CSRF（`randomBytes(32)` 存在 HttpOnly Cookie 中，回调时校验）
-- provider_user_id 优先取 `sub` → `id` → `user_id` → fallback `randomUUID()`，兼容不符合 OIDC 规范的提供商
+- 标准 OIDC Authorization Code 流程，安全性依赖 state 参数防 CSRF（`randomBytes(32)` 存在 HttpOnly Cookie 中，回调时校验）
+- 身份锚定于**签名 id_token 的 `sub`**：iss / aud / exp 由密码学校验，而非信任 userinfo 返回的裸 JSON
 - Referer 头推导 SPA 真实 origin（开发模式 Vite 代理下 `c.req.url` 指向后端端口，Referer 才携带前端地址）
 - 三态回调一个端点处理全部情况，减少 URL 管理复杂度
 
 **备选与权衡**：
-- ❌ OIDC 严格模式：需要标准 `openid` scope 和 `/userinfo` 端点格式，大量国内/私有 OAuth 提供商不兼容
+- ✅ OIDC 标准模式（**当前选定**）：discovery + id_token 验签。早期以「国内私有提供商不兼容」为由否决过，后因自建 `oidc-dingtalk` Provider 提供了标准锚点而推翻——详见 D72
+- ✅ 可选覆盖项：对不发 discovery 的非标 Provider 保留手填 URL 逃生舱；`authorize_url` 与 `token_url` 同时填写时完全跳过 discovery
 - ❌ 每个提供商独立回调 URL：增加注册复杂度，统一回调可复用 redirect_uri
-- ⚠️ state 仅存 HttpOnly Cookie 10 分钟（`maxAge: 600`），超时后 OAuth 回调 state 校验失败——用户体验为跳回首页带 `oauth_error`，需重新发起登录
-- ⚠️ `remoteId` 解析 fallback 到 `randomUUID()`：非标准提供商每次回调生成不同 ID，会重复触发注册页而非直接登录——属提供商不兼容的必然代价
+- ⚠️ state 仅存 HttpOnly Cookie 10 分钟（`maxAge: 600`），超时后回调 state 校验失败——用户体验为跳回首页带 `oidc_error_code`，需重新发起登录
+- ❌ ~~`remoteId` 解析 fallback 到 `randomUUID()`~~（D72 已移除）：旧实现会让非标 Provider 每次回调都生成不同 ID，重复触发注册页；现在无 `sub` 直接报错
 
 **影响**：
-- 新增 `src/server/routes/oauth.ts`（三端点：`/providers`、`/:providerId/login`、`/callback`）与 `POST /api/oauth/register`（完成注册端点）
-- `user_oauth_bindings` 表（含 PG 双方言 schema）；`users` 表新增 `banned` 列
-- `AppConfig` 新增 `oauth_providers` 字段；`config.ts` 新增 `isOauthRegistrationOpen` / `setOauthRegistrationOpen`
-- `LoginScreen` 新增 OAuth 登录入口（按提供商列表渲染按钮）与 OAuth 注册流程（`oauth_register` 参数触发）
-- `GET /api/user/status` 新增 `oauth_registration_open` 字段
+- 新增 `apps/server/src/routes/oidc.ts`（`/providers`、`/:providerId/login`、`/callback`、`POST /register`）
+- 新增 `apps/server/src/lib/oidc-discovery.ts`（discovery 拉取与缓存）、`oidc-verify.ts`（id_token 验签）
+- `user_oidc_bindings` 表（含 PG 双方言 schema）；`users` 表新增 `banned` 列
+- `AppConfig` 新增 `oidc_providers` 字段；`config.ts` 新增 `isOidcRegistrationOpen` / `setOidcRegistrationOpen`
+- `LoginScreen` 新增 OIDC 登录入口（按提供商列表渲染按钮）与 OIDC 注册流程（`oidc_register` 参数触发）
+- `GET /api/user/status` 新增 `oidc_registration_open` 字段
 
 ---
 
@@ -1032,14 +1035,14 @@
 
 **日期**：2026-09-11
 
-**背景**：部署者可能希望仅通过 OAuth 登录（如企业微信内部使用），关闭直接注册入口。原无此能力——注册页面始终可用。需与 OAuth 注册开关（见 D35）独立控制——可同时开启、仅 OAuth、仅直接注册、全部关闭。
+**背景**：部署者可能希望仅通过 OIDC 登录（如企业微信内部使用），关闭直接注册入口。原无此能力——注册页面始终可用。需与 OIDC 注册开关（见 D35）独立控制——可同时开启、仅 OIDC、仅直接注册、全部关闭。
 
-**决策**：新增 `direct_registration_open` settings 键（默认 `true`），与 D35 的 `oauth_registration_open` 各自独立。`LoginScreen` 注册表单的可见性由 `direct_registration_open` 控制；`GET /api/user/status` 同时返回两者的当前值。
+**决策**：新增 `direct_registration_open` settings 键（默认 `true`），与 D35 的 `oidc_registration_open` 各自独立。`LoginScreen` 注册表单的可见性由 `direct_registration_open` 控制；`GET /api/user/status` 同时返回两者的当前值。
 
 **原因**：
-- 两扇独立门：部署者可按需组合——企业内部全走 OAuth（关直连）、公网双通道（全开）、维护模式（全关）
+- 两扇独立门：部署者可按需组合——企业内部全走 OIDC（关直连）、公网双通道（全开）、维护模式（全关）
 - 默认开启保持 D12 的零配置体验（用户名 + PIN 始终可用）
-- 与 `oauth_registration_open` 对称设计：一个模板 `getSetting` / `setSetting` / admin API（`GET + PUT /api/admin/direct-registration`）
+- 与 `oidc_registration_open` 对称设计：一个模板 `getSetting` / `setSetting` / admin API（`GET + PUT /api/admin/direct-registration`）
 
 **备选与权衡**：
 - ❌ 单一注册总开关（一处关闭所有注册方式）：粒度太粗——关闭全部注册等于关闭应用，不够灵活
@@ -1403,8 +1406,8 @@
 - **为什么每次导出都验（否掉「验一次发短期令牌」）**：令牌需要新的存储与失效规则，而导出的频率本就极低（迁移/备份时），每次重输的摩擦可以忽略——用一套状态机换来的便利不值
 - **为什么 dry-run 不验**：它不写库，摘要也只承载字段名（`ImportSummary` 的类型注释里写死这条）。把门禁挪到预检只会让反复试导变得难受，防线却一寸未增
 - **为什么 gateway 必须最先落库**：`use_external_image_hosting` 决定后面 favicon/background/avatar 的 base64 是否转 CDN，而 `maybeUploadDataUrl` 实时调 `isExternalImageHostingEnabled()`——**直读 `settings` 表，不走 config 缓存**。上传判定发生在任何写入之前，因此「同一份文件既开图床又带 base64 图片」只有在开关先落库时才成立；合并成一次 `updateConfig` 会静默失效
-- **为什么 `api_endpoint` 不校验 URL 形态**：`PUT /api/admin/config` 本身零校验，且 `.env` 里 `localhost:11434/v1` 这类无 scheme 写法很常见——强求 http(s) 会让**自家导出的文件被自家拒收**。`isHttpUrl` 是给图片值与 OAuth URL 写的，不该扩用到此处
-- **为什么导出「生效值」而不是 `settings` 原始行**：后者不泄露 `.env` 密钥，但 `.env`-only 实例导出的文件对迁移毫无用处，与需求直接冲突。代价（`.env` 密钥被带走 + 目标实例的该值被钉住、此后改 `.env` 不再生效）记录在 `module-config.md` 的导出范围一节与本条决策里，而不是留作暗坑——**不**占用界面文案：导出页的警示只保留一句「导出文件含 API 和 OAuth2 密钥，请谨慎保管该文件。」（三语同款短句）
+- **为什么 `api_endpoint` 不校验 URL 形态**：`PUT /api/admin/config` 本身零校验，且 `.env` 里 `localhost:11434/v1` 这类无 scheme 写法很常见——强求 http(s) 会让**自家导出的文件被自家拒收**。`isHttpUrl` 是给图片值与 OIDC URL 写的，不该扩用到此处
+- **为什么导出「生效值」而不是 `settings` 原始行**：后者不泄露 `.env` 密钥，但 `.env`-only 实例导出的文件对迁移毫无用处，与需求直接冲突。代价（`.env` 密钥被带走 + 目标实例的该值被钉住、此后改 `.env` 不再生效）记录在 `module-config.md` 的导出范围一节与本条决策里，而不是留作暗坑——**不**占用界面文案：导出页的警示只保留一句「导出文件含 API 和 OIDC 密钥，请谨慎保管该文件。」（三语同款短句）
 - **为什么 `BUNDLE_VERSION` 不升**：新段可选，v1 文件（无 gateway）仍全部有效；反之升 2 会拒收所有既存文件，而「向前兼容」本来就做不到——新文件打到旧服务端会撞顶层白名单报 `UNKNOWN_TOP_KEY`，报错信息比 `BAD_VERSION` 更具体，没有损失
 
 **影响**：
@@ -1738,7 +1741,7 @@
 
 **背景**：调研「换装 homura app-kit/auth」时顺带发现一个独立的真实安全漏洞。`verifyUserToken` 只验签 + 查 `role==='user'`，**不查 `users.banned`**；`userAuthMiddleware` 与 `adminAuthMiddleware` 同样不查。后果：管理员封禁用户后，该用户手上已签发的 JWT **仍能访问全部受保护 API 最长 14 天**；唯一止损手段是轮换 `JWT_SECRET`（误伤所有用户）。此漏洞 `module-auth.md` 旧版曾明文记载（「封禁账号的 token 验证通过但 `/verify` 返回 403」）。
 
-**决策**：新增 `isUserBanned(username)` helper，在 `userAuthMiddleware` 与 `adminAuthMiddleware` 验签成功后、注入身份前**逐请求查库**拦截封禁用户。**不引入服务端会话表**（守住 D32 零状态设计）、**不改前端契约、不改错误码注册表、不改 i18n、不动 PIN/JWT/OAuth 任何现有机制**。
+**决策**：新增 `isUserBanned(username)` helper，在 `userAuthMiddleware` 与 `adminAuthMiddleware` 验签成功后、注入身份前**逐请求查库**拦截封禁用户。**不引入服务端会话表**（守住 D32 零状态设计）、**不改前端契约、不改错误码注册表、不改 i18n、不动 PIN/JWT/OIDC 任何现有机制**。
 
 **返回码用 401 而非 403（关键取舍）**：语义上「账户被封禁」更贴切的是 403 `USER_DISABLED`，但实测前端契约（`apps/web/src/lib/api.ts` 的 `handleAuthOn401`）**只有 401 触发会话驱逐**（清会话 + `auth:expired` 事件 → 回登录页），403 不触发。若中间件返 403，用户会卡在「看似登录、但每个请求都失败」的糟糕状态。故中间件返 **401 `AUTH_INVALID_TOKEN`** → 前端驱逐回登录页 → 用户再试登录时 `/verify` 返 **403 `USER_DISABLED`**（`errors.ts` 已注册、i18n 三语已有「账户已被禁用」文案）告知原因。完美复用现有机制。
 
@@ -1766,9 +1769,9 @@
 
 **为什么不换（三条硬理由）**：
 
-1. **homura auth 主动抛弃了本地凭据认证**（文档在案）：`docs/heritage/suzuran-lessons.md` 的「明确抛弃」表格列着「自建 OAuth IdP（WebAuthn/密码/授权服务器）」；ADR-007「`OAuth2Client` 只实现标准 code flow」，重开触发条件举例是「设备码」——密码从未进入其设计空间。`OAuth2Client` 全文 108 行、2 个公开方法、构造参数 6 项全必填（不接远程 IdP 无法实例化），无凭据钩子/策略接口。`packages/auth/` 内 grep `password|PIN|credential|pbkdf2` 与 `role|isAdmin` 均零命中。→ momoi 的 PIN 认证在 homura auth 里无任何对应物。
+1. **homura auth 主动抛弃了本地凭据认证**（文档在案）：`docs/heritage/suzuran-lessons.md` 的「明确抛弃」表格列着「自建 OIDC IdP（WebAuthn/密码/授权服务器）」；ADR-007「`OIDCClient` 只实现标准 code flow」，重开触发条件举例是「设备码」——密码从未进入其设计空间。`OIDCClient` 全文 108 行、2 个公开方法、构造参数 6 项全必填（不接远程 IdP 无法实例化），无凭据钩子/策略接口。`packages/auth/` 内 grep `password|PIN|credential|pbkdf2` 与 `role|isAdmin` 均零命中。→ momoi 的 PIN 认证在 homura auth 里无任何对应物。
 
-2. **换完 momoi 仍是「自管认证」，只是 session 层更重**：`SessionManager` 确能脱离 `OAuth2Client` 独立签发（源码零 oauth2 import），但代价是——单 cookie → 双 cookie（`homura_at`+`homura_rt`）、零状态 → 必需 `refresh_tokens` 表（违背 D32）、`c.set('userId',username)` → `c.set('auth',claims)`（约 40 处 handler 要改）、`AuthUser` 是封闭类型无 admin 位（仍得自己查表）、客户端续期 → 服务端透明 rotate（前端 62 行调度器作废）、错误 wire 从 `{code}` → `{error}`（破坏前端 `toApiError`）。而 PIN 校验、`X-User` 头、cookie 落地、rate limiter、5 个 PIN 端点、is_admin 判定全得 momoi 自己留着。且 homura 模板前端无任何凭据提交范式可抄、PIN 式接入在其 hono 集成层是未测试区域、auth 链自身尚未经真实 IdP 验证（支持矩阵标 🟡）。
+2. **换完 momoi 仍是「自管认证」，只是 session 层更重**：`SessionManager` 确能脱离 `OIDCClient` 独立签发（源码零 oauth2 import），但代价是——单 cookie → 双 cookie（`homura_at`+`homura_rt`）、零状态 → 必需 `refresh_tokens` 表（违背 D32）、`c.set('userId',username)` → `c.set('auth',claims)`（约 40 处 handler 要改）、`AuthUser` 是封闭类型无 admin 位（仍得自己查表）、客户端续期 → 服务端透明 rotate（前端 62 行调度器作废）、错误 wire 从 `{code}` → `{error}`（破坏前端 `toApiError`）。而 PIN 校验、`X-User` 头、cookie 落地、rate limiter、5 个 PIN 端点、is_admin 判定全得 momoi 自己留着。且 homura 模板前端无任何凭据提交范式可抄、PIN 式接入在其 hono 集成层是未测试区域、auth 链自身尚未经真实 IdP 验证（支持矩阵标 🟡）。
 
 3. **app-kit 最值钱的部分 momoi 用不上，且换装有隐藏回退**：momoi 永远 standalone，app-kit 核心价值「双形态适配 / qw-pages / PostgREST」完全用不上。好消息（两个曾担心的冲突被证伪）：createApp 不注册 cors、onError 可注入、静态服务用 `createReadStream` 而非 `serve-static`（不重引入 Windows+tsx 挂起 bug）、`app` 是标准 Hono 可继续挂路由（渐进接入）。但三处实质回退：① 丢 brotli/gzip 预压缩（app-kit static 无协商，momoi 的 compressionPlugin 产物永不被服务）；② `sw.js` 被误设 immutable 1 年（`urlPath.includes('.')` 判定，阻断 Service Worker 自更新）；③ CORS 顺序陷阱（Hono trie-router 按插入序定优先级，createApp 后注册的 `use('*',cors)` 作用于不了经 routes 参数传入的路由）。附带 assetsDir 锚定 cwd 与 momoi 的 REPO_ROOT 锚定错位。
 
@@ -1822,7 +1825,7 @@
 **决策**：
 1. **界面文案改名**：`设置 → 网关 → 智能源` 改为 `上游类型`；数据库键 `gateway_source` 与枚举值 `custom` / `workbuddy` 保持不变（存量配置与导出文件零迁移），新增 `doubao`。
 2. **豆包内核移植进服务端**：新增 `apps/server/src/ai/doubao/`（配置、Cookie 罐、设备指纹、请求参数、SSE 解析、消息压平、登录驱动、凭证、风控标记、私有协议客户端、流式适配），路由挂在 `/api/admin/doubao/*`，前端新增二维码凭证面板。
-3. **默认登录采用抖音 OAuth 授权页**：服务端用 `playwright-core` 拉起无头系统 Edge/Chrome，复刻豆包官方登录弹窗 → 抖音官方授权页（`open.douyin.com`）；拦截授权页请求 `/oauth/get_qrcode/` 的响应，把**抖音授权二维码**原样回传管理端。用户扫码 / 短信验证码授权后，由豆包官方页面自行完成 code 换票，服务端从浏览器上下文提取 Cookie。纯 HTTP 的豆包自助扫码链路保留为 `DOUBAO_LOGIN_FLOW=doubao` 灾备选项。
+3. **默认登录采用抖音 OIDC 授权页**：服务端用 `playwright-core` 拉起无头系统 Edge/Chrome，复刻豆包官方登录弹窗 → 抖音官方授权页（`open.douyin.com`）；拦截授权页请求 `/oauth/get_qrcode/` 的响应，把**抖音授权二维码**原样回传管理端。用户扫码 / 短信验证码授权后，由豆包官方页面自行完成 code 换票，服务端从浏览器上下文提取 Cookie。纯 HTTP 的豆包自助扫码链路保留为 `DOUBAO_LOGIN_FLOW=doubao` 灾备选项。
 4. **协议适配直出 `StreamEvent`**：`provider.ts` 在 `gateway_source=doubao` 时整段委托 `streamDoubaoChat`，不把豆包私有 SSE 伪装成 OpenAI chunk；连接超时语义与自配置端点一致（只覆盖建连）。
 5. **凭证与 WorkBuddy 共用加密实现**：抽出 `lib/encrypted-settings.ts`（AES-256-GCM + 与库同存密钥），WorkBuddy / Doubao 各自使用独立的值键与密钥键；豆包没有 refresh token，因此不设后台轮换 keeper。（后续由 D70 补充：新增**不续期**的后台巡检 keeper——只探测有效性并吸收上游轮换的 Cookie，失效仍需重新扫码。）
 
@@ -1858,12 +1861,12 @@
 
 **日期**：2026-10-25
 
-**背景**：D64 的 WorkBuddy 登录让前端 `window.open(auth_url)` 打开腾讯托管登录页。实际登录页默认就是「微信扫码登录」，管理员每次都要多开一个标签页，体验与豆包面板不一致。已实测：登录页加载时会请求 `/console/auth/wechat-url` 拿到微信 OAuth 地址，随后从 `https://open.weixin.qq.com/connect/qrcode/<uuid>` 拉取二维码图片（image/jpeg）。
+**背景**：D64 的 WorkBuddy 登录让前端 `window.open(auth_url)` 打开腾讯托管登录页。实际登录页默认就是「微信扫码登录」，管理员每次都要多开一个标签页，体验与豆包面板不一致。已实测：登录页加载时会请求 `/console/auth/wechat-url` 拿到微信 OIDC 地址，随后从 `https://open.weixin.qq.com/connect/qrcode/<uuid>` 拉取二维码图片（image/jpeg）。
 
-**决策**：服务端在 `beginLogin()` 后异步用无头系统浏览器打开 `auth_url`，拦截 `open.weixin.qq.com/connect/qrcode/` 的图片响应，转成 data URL 通过 `/login/status` 的 `qr_data_url` 下发给凭证面板；浏览器保持打开，让微信 OAuth 回跳并完成 state 换票，随后仍由既有的 token 轮询取票。前端**不再自动 `window.open`**，只在二维码未出现（无浏览器 / 超时）时提供「打开登录页」链接。
+**决策**：服务端在 `beginLogin()` 后异步用无头系统浏览器打开 `auth_url`，拦截 `open.weixin.qq.com/connect/qrcode/` 的图片响应，转成 data URL 通过 `/login/status` 的 `qr_data_url` 下发给凭证面板；浏览器保持打开，让微信 OIDC 回跳并完成 state 换票，随后仍由既有的 token 轮询取票。前端**不再自动 `window.open`**，只在二维码未出现（无浏览器 / 超时）时提供「打开登录页」链接。
 
 **关键取舍**：
-- **复用同一次浏览器会话完成 OAuth**：只把二维码搬进面板，不尝试在 Node 端重放微信回调；浏览器是官方登录链路的执行者。
+- **复用同一次浏览器会话完成 OIDC**：只把二维码搬进面板，不尝试在 Node 端重放微信回调；浏览器是官方登录链路的执行者。
 - **浏览器不可用则优雅回退**：`openWechatQrLogin` 返回 null，登录仍可用旧方式（点击链接在管理员自己的浏览器完成），不会因为缺少 Edge/Chrome 而完全不可用。
 - **浏览器启动器与豆包共用**：抽出 `lib/headless-browser.ts`，两个上游各自通过 `WORKBUDDY_BROWSER_*` / `DOUBAO_BROWSER_*` 配置通道、可执行文件与参数。
 - **二维码只在下发窗口期出现**：`pending` 时随状态轮询下发，成功 / 失败后不再返回；日志不打印二维码内容。
@@ -2028,7 +2031,7 @@
 
 **为什么保留 WorkBuddy 的回退链接而不彻底删除**：
 - 服务端没有 Edge/Chrome 时，无头浏览器截获不到二维码；此时在管理员自己的浏览器打开
-  `auth_url` 仍能完成 OAuth（state 存在腾讯服务端，换票仍由服务端轮询完成）。
+  `auth_url` 仍能完成 OIDC（state 存在腾讯服务端，换票仍由服务端轮询完成）。
 - 把回退限制在 `qr_state=unavailable` 之后：正常流程干净，失败时仍有一条可用出路。
 
 **影响**：
@@ -2080,3 +2083,58 @@
 - 新增：根 `vite.config.ts`、`apps/server/vite.config.ts`、`.nvmrc`；删除 `apps/server/tsup.config.ts`
 - `apps/web/tsconfig.json`：类型引用 `vite/client` → `vite-plus/client`
 - 文档：`README.md`、`AGENTS.md`、`docs/ARCHITECTURE.md` 同步构建命令
+
+---
+
+## D72：OAuth2 改造为 OIDC，推翻 D35 的「否决 OIDC」结论
+
+**日期**：2026-10-29
+
+**背景**：D35 当初把「OIDC 严格模式」列为否决方案，理由是「大量国内/私有 OAuth 提供商不兼容」。
+但该实现留下了四个真实问题：
+
+1. **无身份断言**：\`provider_user_id\` 靠 \`sub → id → user_id → randomUUID()\` 链式猜测。
+   \`randomUUID()\` 兜底意味着非标 Provider 的同一用户**每次登录都生成新 ID**，永远走不进「已有绑定」分支。
+2. **无签名校验**：身份完全取自 userinfo 端点的裸 JSON，一旦该端点被降级或中间人篡改，攻击者可冒充任意用户。
+3. **端点变更靠人工**：IdP 升级后管理员需手工改三个 URL。
+4. **配置面过大**：6 个字段里 3 个可由 discovery 自动获取。
+
+与此同时，自建的 \`../oidc-dingtalk\`（原 \`oauth2-dingtalk\`）已升级为标准 OIDC Provider：
+暴露 discovery 文档，签发 HS256 签名、\`sub\` = 企业 userid 的 \`id_token\`。
+「不兼容」的顾虑失去了现实基础——我们有了一个标准锚点。
+
+**决策**：全面改用 OIDC，废弃 OAuth2。
+
+| 维度 | 决策 |
+|---|---|
+| 配置 | 主填 \`issuer\` + 凭证；三个 URL 降为可选覆盖项 |
+| 端点 | discovery 自动获取，进程内缓存 1h，校验 \`doc.issuer\` 一致 |
+| 身份 | **验签后的 id_token.sub**；无 id_token 时回退 userinfo，二者都无 \`sub\` 则报错（不再 randomUUID） |
+| 验签 | HS256 → clientSecret 作对称密钥；RS256/ES256 → JWKS 公钥。按 discovery 声明自动选择 |
+| 命名 | 表名 / 错误码 / 路由 / i18n / 文案全部 OAuth2 → OIDC |
+
+**原因**：
+- id_token 的 iss / aud / exp 由密码学校验，比「信任 userinfo 裸 JSON」强度高一个数量级
+- \`sub\` 语义唯一确定，消除了 randomUUID 造成的重复注册
+- discovery 让 IdP 升级对 RP 透明
+- \`algorithms\` 白名单显式传入 \`jwtVerify\`，杜绝 \`alg: none\` 降级
+
+**备选与权衡**：
+- ❌ 只支持 HS256：实现更简单，但与 Google / Keycloak 等只用 RS256 的 IdP 不兼容。改为双路径后两种 Provider 都能接
+- ❌ 彻底删掉手填 URL：会让不发 discovery 的非标 Provider 无法接入。保留为覆盖项，且 \`authorize_url\` + \`token_url\` 同时存在时**完全跳过 discovery**（不发网络请求）
+- ⚠️ **nonce 不做校验**：\`oidc-dingtalk\` 无状态，无法把 nonce 绑进 id_token（其 README 明确声明）。CSRF 由 state 独立承担；\`aud\` + 签名 + 全链 TLS 对自用场景足够
+- ⚠️ HS256 下 \`client_secret\` 既是凭据又是验签密钥，要求 Provider 与 RP 共享同一秘密。对第三方 IdP 应优先用非对称算法
+
+**迁移策略**：
+- **数据库**：SQLite 启动时幂等执行 \`INSERT OR IGNORE INTO user_oidc_bindings SELECT * FROM user_oauth_bindings\`；
+  **旧表保留不删**，已部署实例可回退。PG 需手动 \`ALTER TABLE ... RENAME TO\`
+- **配置键**：读取时优先新键、回退旧键（\`oidc_providers\` ← \`oauth_providers\`，\`oidc_registration_open\` ← \`oauth_registration_open\`），
+  写入只写新键——升级实例配置不丢，首次保存后自然迁移
+- **升级影响**：旧 \`oauth_providers\` 里存的是三个 URL 而没有 \`issuer\`，迁移后这些条目需要管理员补填 issuer 才能使用
+
+**影响**：
+- 共享层：\`OidcProvider\` 类型；\`OAUTH_*\` → \`OIDC_*\`（含新增 \`OIDC_ID_TOKEN_INVALID\`）
+- 服务端：新增 \`lib/oidc-discovery.ts\`、\`lib/oidc-verify.ts\`；\`routes/oauth.ts\` → \`routes/oidc.ts\`
+- 前端：\`OidcRegisterScreen\`；管理端供应商表单由三 URL 输入合并为 issuer 输入
+- 测试：新增 \`oidc-verify.test.ts\`（密钥 / iss / aud / 过期 / 算法降级）、\`oidc-discovery.test.ts\`（缓存 / issuer 校验 / 覆盖项）
+- 文档：\`module-oauth.md\` → \`module-oidc.md\` 全文重写；D35 同步修订

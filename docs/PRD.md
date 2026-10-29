@@ -155,20 +155,21 @@ Momoi 是一个**轻量级、可自托管的 Web AI 智能体平台**。它的�
 - 工具列表缓存（5 分钟 TTL），MCP 服务器故障时优雅降级
 - 不依赖 `@modelcontextprotocol/sdk`，手动实现 HTTP 传输
 
-### F15：OAuth2 登录
+### F15：OIDC 登录
 
-- 管理员可在后台配置多个 OAuth2 提供商（名称、ID、授权 URL、Token URL、UserInfo URL、Client ID/Secret、Scopes）
-- OAuth 提供商信息通过 `/api/oauth/providers` 公开暴露（仅 ID 和名称，不暴露密钥）
-- OAuth 登录流程：浏览器跳转提供商授权页 → 回调验证 state（防 CSRF）→ 换取 access_token → 查询 UserInfo
+- 管理员可在后台配置多个 OIDC 提供商（名称、ID、**Issuer**、Client ID/Secret、Scopes）。端点由 `<issuer>/.well-known/openid-configuration` 自动发现，无需手填
+- OIDC 提供商信息通过 `/api/oidc/providers` 公开暴露（仅 ID 和名称，不暴露密钥）
+- OIDC 登录流程：discovery 解析端点 → 浏览器跳转授权页 → 回调验证 state（防 CSRF）→ code 换 token → **验签 id_token 取 sub**
+- id_token 验签支持两条路径：HS256（clientSecret 作对称密钥）与非对称算法（JWKS 公钥），按 discovery 声明自动选择
 - 回调路由通过 Referer 头自动推断 SPA 前端 origin（兼容开发代理模式）
-- 已有绑定的 OAuth 身份直接登录，签发 JWT Cookie
-- 已登录用户使用 OAuth 时自动绑定当前账号（无需二次验证）
-- 全新 OAuth 用户进入注册页面，支持两种模式：
-  - **绑定已有账号**（action=link）：提供已有用户名+PIN，验证通过后绑定 OAuth 身份
+- 已有绑定的 OIDC 身份直接登录，签发 JWT Cookie
+- 已登录用户使用 OIDC 时自动绑定当前账号（无需二次验证）
+- 全新 OIDC 用户进入注册页面，支持两种模式：
+  - **绑定已有账号**（action=link）：提供已有用户名+PIN，验证通过后绑定 OIDC 身份
   - **创建新账号**（action=create）：提供用户名+PIN，创建账号并绑定
-- OAuth 注册受 `oauth_registration_open` 开关控制，管理员可随时关闭
-- OAuth 绑定以 `(provider_id, provider_user_id)` 唯一约束防止重复绑定
-- 账号被封禁（banned）时禁止 OAuth 登录
+- OIDC 注册受 `oidc_registration_open` 开关控制，管理员可随时关闭
+- OIDC 绑定以 `(provider_id, provider_user_id)` 唯一约束防止重复绑定
+- 账号被封禁（banned）时禁止 OIDC 登录
 
 ### F16：IM 绑定（微信 / QQ）
 
@@ -255,7 +256,7 @@ Momoi 是一个**轻量级、可自托管的 Web AI 智能体平台**。它的�
 
 - 管理员可通过数据库设置项 `direct_registration_open` 控制直接 PIN 注册的开放状态
 - 关闭后，新用户无法通过用户名+PIN 方式注册——仅已有用户可登录
-- 关闭不影响管理员创建账号、OAuth 注册等替代注册路径
+- 关闭不影响管理员创建账号、OIDC 注册等替代注册路径
 - 运行时热更新生效，无需重启服务
 
 ### F22：世界模拟（含角色状态系统）
@@ -310,12 +311,12 @@ Momoi 是一个**轻量级、可自托管的 Web AI 智能体平台**。它的�
 - Zip slip 攻击防护
 - 对话按用户隔离
 - 时序安全的 PIN 比较（`timingSafeEqual`）
-- OAuth 防 CSRF：state 参数经 HttpOnly Cookie 传递，回调时比对
-- OAuth 账号封禁检查：banned 用户禁止登录
-- OAuth 绑定唯一约束：`(provider_id, provider_user_id)` 防止账号冒用
+- OIDC 防 CSRF：state 参数经 HttpOnly Cookie 传递，回调时比对
+- OIDC 账号封禁检查：banned 用户禁止登录
+- OIDC 绑定唯一约束：`(provider_id, provider_user_id)` 防止账号冒用
 - 微信绑定 sender 校验：仅绑定的 wechat_user_id 可发送消息路由到 AI
 - 微信会话验证：目标会话被软删除后绑定自动清除，防止僵尸路由
-- 注册开关：管理员可通过开关控制 OAuth 注册和直接 PIN 注册，控制用户准入
+- 注册开关：管理员可通过开关控制 OIDC 注册和直接 PIN 注册，控制用户准入
 
 ### NF5：Agent 可扩展性
 

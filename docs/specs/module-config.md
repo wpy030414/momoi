@@ -58,11 +58,11 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 | `support_infinite_mode` | boolean | — | `true` | 无限演算模式开关 |
 | `allow_im_conversations` | boolean | — | `true` | 是否允许在 IM（QQ/微信）上对话 |
 | `use_external_image_hosting` | boolean | — | `false` | 外部图床开关 |
-| `oauth_providers` | JSON | — | `[]` | OAuth2 提供商配置 |
+| `oidc_providers` | JSON | — | `[]` | OIDC 提供商配置 |
 | `tts_api_endpoint` | string | — | `""` | TTS 服务地址 |
 | `tts_provider` | string | — | `gpt-sovits` | TTS Provider（`gpt-sovits` / `cosyvoice`） |
 | `direct_registration_open` | boolean | — | `true` | PIN 直接注册开关 |
-| `oauth_registration_open` | boolean | — | `true` | OAuth 新用户注册开关 |
+| `oidc_registration_open` | boolean | — | `true` | OIDC 新用户注册开关 |
 
 ## 环境变量层（env 对象）
 
@@ -278,11 +278,11 @@ api.getAppName().then((r) => {
 | `gateway` | `api_endpoint`、`api_key`、`context_window`、`support_attachments`、`support_infinite_mode`、`use_external_image_hosting`、`allow_im_conversations` | 与网关页的 7 项一一对应；**含 `api_key` 明文** |
 | `experience` | `app_name`、`app_favicon`、`app_background`、`show_github`、`recommended_questions`、`followup_questions` | 与体验页一致；图片为 base64 data URL 或 http(s) 链接 |
 | `agents` | `id`、`role`、`name`、`model`、`system_prompt`、`avatar` | **不含** voice 三字段与 `created_at` |
-| `users` | `direct_registration_open`、`oauth_registration_open`、`oauth_providers` | 含 `client_secret` 明文 |
+| `users` | `direct_registration_open`、`oidc_registration_open`、`oidc_providers` | 含 `client_secret` 明文 |
 
 **仍不导出**：JWT 密钥、VAPID、TTS（`tts_*`）等不与网关页对应的运行时配置（bundle 由 `buildExportBundle` 手工挑白名单字段构建，绝不整体序列化 `AppConfig`）。
 
-**导出的是「生效值」**（`map.get(key) || env.*`）：`api_key`/`api_endpoint` 可能来自 `.env` 而从未被管理员在界面上输入过——导出文件会把这份 `.env` 密钥一并带走，反向导入则会让目标实例的该值「钉」在 `settings` 表里，此后改目标实例的 `.env` 不再生效。**这一点只记录在本节**：导出页的警示文案保持简短（「导出文件含 API 和 OAuth2 密钥，请谨慎保管该文件。」），不展开 `.env` 继承与钉住效应。
+**导出的是「生效值」**（`map.get(key) || env.*`）：`api_key`/`api_endpoint` 可能来自 `.env` 而从未被管理员在界面上输入过——导出文件会把这份 `.env` 密钥一并带走，反向导入则会让目标实例的该值「钉」在 `settings` 表里，此后改目标实例的 `.env` 不再生效。**这一点只记录在本节**：导出页的警示文案保持简短（「导出文件含 API 和 OIDC 密钥，请谨慎保管该文件。」），不展开 `.env` 继承与钉住效应。
 
 > 这不是新增的暴露面：`GET /api/admin/config` 早已返回完整 `AppConfig`（含 `api_key`），见本文末「API Key 未脱敏」。新增的 PIN 门控（下节）是对这条既有事实的补偿。
 
@@ -322,8 +322,8 @@ agents:
     avatar: ""
 users:
   direct_registration_open: true
-  oauth_registration_open: true
-  oauth_providers:
+  oidc_registration_open: true
+  oidc_providers:
     - { id: github, name: GitHub, client_id: "...", client_secret: "...",
         authorize_url: https://..., token_url: https://..., userinfo_url: https://..., scopes: "read:user" }
 ```
@@ -335,7 +335,7 @@ users:
 - **字段级可选**：任何段、任何键都可省略——省略 = 不更新该键（绝非置空），手写只含目标字段的最小文件即可导入；`version` 缺省视为 1
 - **`api_key: ""` 的特殊含义**：空串合法，但要理解成「清掉 `settings` 行、读取时回落 `.env`」，而不是「把密钥设为空」
 - **Agent 按 id upsert**：带 id（UUID 格式校验）→ 存在则更新（只更新文件中出现的字段）、不存在则按原 id 新建；**省略 id → 一律视为新增**（生成新 UUID，重复导入同一文件会产生副本，dry-run 摘要提示）；本地已有但文件中不存在的 Agent **一律保留**（保护 `conversations`/`messages` 等表的 agent_id 引用）
-- **OAuth 供应商按 id 合并**：同 id 字段级覆盖（省略字段保留原值）、新 id 追加、本地多余保留
+- **OIDC 供应商按 id 合并**：同 id 字段级覆盖（省略字段保留原值）、新 id 追加、本地多余保留
 - **中立 Agent**：`name` 与库中现值不同 → **整包拒绝**；`avatar` → warning 并忽略；仅 `model`/`system_prompt` 可更新
 
 ### 校验规则（白名单 + 报错拒绝）
@@ -345,7 +345,7 @@ users:
 - `api_endpoint` trim 后 1-500 字符（**不**校验 URL 形态——`PUT /api/admin/config` 本身零校验，且 `.env` 里 `localhost:11434/v1` 这类无 scheme 写法很常见，强求 http(s) 会让自家导出的文件被自家拒收）；`api_key` ≤500 字符、允许空串、不 trim；`context_window` 须为 1..10000000 的整数（比读取路径更严：`parseContextWindow` 会把非法值静默夹成 128000）；gateway 的四个开关须严格为 boolean
 - `app_name` trim 后 1-50 字符；图片字段仅允许 空串 / `data:image/*` / `http(s)://`（拒 `javascript:` 注入）
 - 推荐问题 ≤3 条、追问 ≤5 条、每条 trim 后 1-20 字符；Agent ≤50 个、名称 1-30 字符、`system_prompt` ≤100000 字符
-- OAuth 供应商 ≤10 个；`id` 须匹配 `^[A-Za-z0-9_-]{1,64}$`（会进入 URL 路径与 cookie）；三个 URL 非空时必须 http(s)
+- OIDC 供应商 ≤10 个；`id` 须匹配 `^[A-Za-z0-9_-]{1,64}$`（会进入 URL 路径与 cookie）；三个 URL 非空时必须 http(s)
 - 校验错误结构化为 `{ path, code, params? }`（如 `agents[2].name`）；前端按 `errors.<code>` 直查三语 locale 渲染（契约见 `module-errors.md`）。**`CONFIG_IMPORT_BAD_API_KEY` 刻意不带 params**——模板里任何插值位都可能把密钥值回显进错误消息
 - `ImportSummary` 只承载**字段名**（`{changed: string[], unchanged: string[]}`），不承载字段值，因此 dry-run 响应不会泄露任何密钥
 

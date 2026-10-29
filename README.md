@@ -1,11 +1,11 @@
 # Momoi
 
-轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过内置工具执行文件读写、Shell 命令、网络请求、文档处理等任务，通过技能注入系统提示词，支持文件附件多模态交互。支持微信 / QQ 绑定、OAuth 登录、TTS 语音合成、多设备实时同步。
+轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过内置工具执行文件读写、Shell 命令、网络请求、文档处理等任务，通过技能注入系统提示词，支持文件附件多模态交互。支持微信 / QQ 绑定、OIDC 登录、TTS 语音合成、多设备实时同步。
 
 ## 核心特性
 
 - **PIN 认证登录** — 用户名 + 4 位 PIN，PBKDF2 安全哈希，JWT 经 HttpOnly Cookie 传输 + 14 天滑动续期
-- **OAuth 登录** — 支持 OAuth2 提供商登录与账号绑定
+- **OIDC 登录** — 支持 OIDC 提供商登录与账号绑定
 - **流式对话** — React + shadcn/ui 聊天界面，SSE 实时流式输出（token、思考过程、工具调用）
 - **思考模式** — 支持 AI 扩展推理，可折叠展示思考过程
 - **文件附件** — 支持图片、Excel、PDF 等附件，管理员可开关
@@ -91,7 +91,7 @@ pnpm start          # 启动（node apps/server/dist/index.js）
 - **后端**：Hono 4 + Pi Agent Core + Drizzle ORM
 - **数据库**：SQLite（node:sqlite，每 commit fsync）默认；可选 PostgreSQL
 - **实时通信**：SSE（Server-Sent Events）
-- **认证**：PBKDF2 PIN + JWT（HttpOnly Cookie）+ OAuth2
+- **认证**：PBKDF2 PIN + JWT（HttpOnly Cookie）+ OIDC
 - **文件解析**：xlsx、pdf-parse、mammoth、word-extractor
 
 ## 文档

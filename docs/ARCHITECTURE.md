@@ -6,8 +6,8 @@
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         浏览器（React SPA）                                   │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌──────────────┐  ┌──────────┐│
-│  │ Sidebar  │  │ChatPanel │  │AdminScreen│  │LoginScreen   │  │OAuthLogin││
-│  │ 对话列表  │  │ 聊天界面  │  │ 管理面板   │  │ PIN 认证登录  │  │ OAuth登录 ││
+│  │ Sidebar  │  │ChatPanel │  │AdminScreen│  │LoginScreen   │  │OIDCLogin││
+│  │ 对话列表  │  │ 聊天界面  │  │ 管理面板   │  │ PIN 认证登录  │  │ OIDC登录 ││
 │  └──────────┘  └──────────┘  └───────────┘  └──────────────┘  └──────────┘│
 │        │            │              │                │               │       │
 │        └────────────┴──────────────┴────────────────┴───────────────┘       │
@@ -19,8 +19,8 @@
 │  ┌──────────────────────────┼────────────────────────────────────────────┐  │
 │  │                        路由层                                          │  │
 │  │  ┌────────┐ ┌───────────┐ ┌───────┐ ┌────────┐ ┌──────┐ ┌────────┐  │  │
-│  │  │chat.ts │ │conversat. │ │group  │ │admin   │ │upload│ │oauth   │  │  │
-│  │  │SSE 聊天 │ │ 对话 CRUD │ │群聊API │ │管理API  │ │文件  │ │OAuth2  │  │  │
+│  │  │chat.ts │ │conversat. │ │group  │ │admin   │ │upload│ │oidc    │  │  │
+│  │  │SSE 聊天 │ │ 对话 CRUD │ │群聊API │ │管理API  │ │文件  │ │OIDC  │  │  │
 │  │  └────────┘ └───────────┘ └───────┘ └────────┘ └──────┘ └────────┘  │  │
 │  │  ┌────────┐ ┌───────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌───────┐ │  │
 │  │  │workspace│ │  app.ts  │ │user.ts │ │voice.ts│ │wechat  │ │ qq.ts │ │  │
@@ -79,7 +79,7 @@
 │  │  │  PostgreSQL (pg + Drizzle ORM, DATABASE_URL 环境变量切换)       │    │  │
 │  │  │  conversations | messages | settings | agents                 │    │  │
 │  │  │  group_conversation_agents | mcp_servers | users              │    │  │
-│  │  │  user_oauth_bindings | wechat_bindings | qq_bindings           │    │  │
+│  │  │  user_oidc_bindings | wechat_bindings | qq_bindings           │    │  │
 │  │  │  workspaces (会话分组)                                          │    │  │
 │  │  │  + data/workspaces/{conversationId}/ (会话私有工具沙盒)         │    │  │
 │  │  │  + data/workspaces/ws-{workspaceId}/ (工作区共享沙盒)           │    │  │
@@ -168,25 +168,25 @@ initQqBots()（进程启动时恢复所有已绑定用户的连接）
         → 最终失败：写入系统消息通知用户
 ```
 
-### OAuth 认证流
+### OIDC 认证流
 
 ```
 用户打开应用
-  → LoginScreen 显示 OAuth 提供商按钮（来自 GET /api/oauth/providers）
-  → 用户点击某提供商 → GET /api/oauth/:providerId/login
+  → LoginScreen 显示 OIDC 提供商按钮（来自 GET /api/oidc/providers）
+  → 用户点击某提供商 → GET /api/oidc/:providerId/login
     → 生成 state（32 字节随机 hex）+ 设置 HttpOnly Cookie
     → 重定向到提供商授权页
-  → 用户授权 → 提供商回调 GET /api/oauth/callback?code=...&state=...
+  → 用户授权 → 提供商回调 GET /api/oidc/callback?code=...&state=...
     → 校验 state（防 CSRF）
     → 用 code 换 access_token → 用 access_token 拉 userinfo
     → 获取 provider_user_id（sub/id/user_id）
-    → 查询 user_oauth_bindings 表：
+    → 查询 user_oidc_bindings 表：
       ├── 已有绑定 → 直接登录（set JWT cookie + 重定向回 SPA）
       ├── 无绑定但已登录 → 绑定到当前账号（link）
-      └── 全新 OAuth 用户 → 检查 oauth_registration_open
-            ├── 开放 → 重定向到 OAuth 注册页
+      └── 全新 OIDC 用户 → 检查 oidc_registration_open
+            ├── 开放 → 重定向到 OIDC 注册页
             └── 关闭 → 返回错误
-  → OAuth 注册 POST /api/oauth/register
+  → OIDC 注册 POST /api/oidc/register
     → action='link'：验证已有账号 PIN → 添加绑定 → 签发 JWT
     → action='create'：检查用户名唯一 + 注册门控 → 创建用户 + 绑定 → 签发 JWT
 ```
@@ -263,7 +263,7 @@ AppConfig 字段：
   use_external_image_hosting                        — 外部图床开关
   recommended_questions                             — 首页推荐问题列表（JSON，空对话展示）
   followup_questions                                — 聊天常用追问（JSON，最多 5 条，非空对话输入框上方气泡）
-  oauth_providers                                   — OAuth2 提供商配置（JSON）
+  oidc_providers                                   — OIDC 提供商配置（JSON）
 
 Agent 级配置（存储在 agents 表）：
   model, system_prompt                              — 每个 Agent 独立配置
@@ -276,7 +276,7 @@ TTS 配置（存储在 settings 表）：
 
 注册门控（存储在 settings 表）：
   direct_registration_open                          — PIN 直接注册开关（默认 true）
-  oauth_registration_open                           — OAuth 新用户注册开关（默认 true）
+  oidc_registration_open                           — OIDC 新用户注册开关（默认 true）
 ```
 
 ### 用户认证流
@@ -343,7 +343,7 @@ routes/workspaces.ts（会话分组工作区 CRUD）→ db.ts + middleware/userA
 routes/upload.ts → middleware/userAuth.ts
 routes/user.ts → auth.ts + db.ts + schema.ts + rateLimiter.ts
 
-routes/oauth.ts
+routes/oidc.ts
   ├── auth.ts（signUserToken, setAuthCookie, verifyUserToken, verifyPin, hashPin）
   ├── db.ts + schema.ts（users, userOauthBindings）
   └── config.ts（getConfig, isOauthRegistrationOpen）
@@ -470,10 +470,10 @@ settings
     support_attachments, support_infinite_mode, show_github
     use_external_image_hosting     — 外部图床开关
     recommended_questions          — 推荐问题 JSON 数组
-    oauth_providers                — OAuth 提供商 JSON 数组
+    oidc_providers                — OIDC 提供商 JSON 数组
     tts_api_endpoint, tts_provider — TTS 配置
     direct_registration_open       — PIN 注册开关
-    oauth_registration_open        — OAuth 注册开关
+    oidc_registration_open        — OIDC 注册开关
     model, system_prompt           — 旧版全局配置（已迁移至 agents 表）
     jwt_secret                     — 自动生成的 JWT 签名密钥
 
@@ -509,13 +509,13 @@ users
 ├── last_login_at INTEGER          -- 最后登录时间（Unix 秒）
 └── banned INTEGER/BOOLEAN         -- 是否被禁用（默认 false）
 
-user_oauth_bindings
+user_oidc_bindings
 ├── id TEXT PRIMARY KEY            -- UUID
 ├── user_id TEXT                   -- 本地用户名
-├── provider_id TEXT               -- OAuth 提供商 ID
-├── provider_user_id TEXT          -- OAuth 提供商用户唯一标识
+├── provider_id TEXT               -- OIDC 提供商 ID
+├── provider_user_id TEXT          -- OIDC 提供商用户唯一标识
 ├── created_at INTEGER             -- Unix epoch (秒)
-└── UNIQUE (provider_id, provider_user_id)  -- 每个 OAuth 身份只能绑定一个账号
+└── UNIQUE (provider_id, provider_user_id)  -- 每个 OIDC 身份只能绑定一个账号
 
 wechat_bindings
 ├── user_id TEXT PRIMARY KEY       -- 本地用户名（一个用户一个微信绑定）
@@ -570,7 +570,7 @@ CREATE INDEX idx_user_agent_memories  ON user_agent_memories(user_id, agent_id);
 App
 ├── LoginScreen
 │     ├── PIN 登录（用户名 + PIN 输入 / 设置）
-│     └── OAuth 登录（提供商按钮列表，来自 /api/oauth/providers）
+│     └── OIDC 登录（提供商按钮列表，来自 /api/oidc/providers）
 ├── Sidebar
 │     ├── 新建对话 / 新建群聊按钮
 │     ├── 对话列表（直接对话 + 群聊，含 Agent 数量和类型标识）
@@ -610,19 +610,19 @@ App
   请求 → HttpOnly Cookie momoi_token（同源自动携带）
   userAuthMiddleware → verifyUserToken() → c.set('userId', username)
 
-  —— OAuth 认证 ——
-  管理员配置 OAuth2 提供商（oauth_providers 配置项），用户点击提供商按钮
-  → GET /api/oauth/:providerId/login → 重定向到提供商授权页
-  → 授权回调 GET /api/oauth/callback → code 换 token → 拉取 userinfo
-  → 查询 user_oauth_bindings 表匹配已有绑定
+  —— OIDC 认证 ——
+  管理员配置 OIDC 提供商（oidc_providers 配置项），用户点击提供商按钮
+  → GET /api/oidc/:providerId/login → 重定向到提供商授权页
+  → 授权回调 GET /api/oidc/callback → code 换 token → 拉取 userinfo
+  → 查询 user_oidc_bindings 表匹配已有绑定
     ├── 已绑定：直接签发 JWT，写入 momoi_token Cookie，重定向回 SPA
     ├── 已登录但未绑定：绑定到当前账号（静默 link）
-    └── 新用户 → 检查 oauth_registration_open 门控
+    └── 新用户 → 检查 oidc_registration_open 门控
           ├── 开放 → 重定向到注册页（设置用户名 + PIN）
           └── 关闭 → 返回错误
-  → OAuth 注册 POST /api/oauth/register
-    - action=link：验证已有账号 PIN + 绑定 OAuth + 签发 JWT
-    - action=create：创建新用户 + 绑定 OAuth + 签发 JWT
+  → OIDC 注册 POST /api/oidc/register
+    - action=link：验证已有账号 PIN + 绑定 OIDC + 签发 JWT
+    - action=create：创建新用户 + 绑定 OIDC + 签发 JWT
   → 注册完成后同样写入 momoi_token Cookie
 
 IP 速率限制：
@@ -642,8 +642,8 @@ IP 速率限制：
   - JWT 经 HttpOnly Cookie 传输（SameSite=Lax；HTTPS 下 Secure）——JS 不可读，XSS 无法窃取
   - JWT 签名密钥：JWT_SECRET 环境变量，或首启随机生成并持久化到 settings 表
   - ADMIN 名单与 JWT_SECRET 不暴露给前端；客户端仅能通过 /me 得知自己是否管理员
-  - OAuth state 参数（32 字节随机 hex + HttpOnly Cookie）防 CSRF
-  - OAuth 回调使用 Referer 头推断 SPA origin，避免硬编码
+  - OIDC state 参数（32 字节随机 hex + HttpOnly Cookie）防 CSRF
+  - OIDC 回调使用 Referer 头推断 SPA origin，避免硬编码
 ```
 
 ## 部署架构
