@@ -68,7 +68,9 @@ export async function setOidcRegistrationOpen(open: boolean): Promise<void> {
 }
 
 export async function isExternalImageHostingEnabled(): Promise<boolean> {
-  return (await getSetting('use_external_image_hosting', 'false')) === 'true'
+  // 默认开启：图床把图片转为公网 URL，比内联 base64 省体积。
+  // 未显式写入 settings 的实例也为 true；管理员显式关闭后落库 'false'，此后以库为准。
+  return (await getSetting('use_external_image_hosting', 'true')) === 'true'
 }
 
 // ---- TTS Config ----
@@ -116,7 +118,8 @@ function buildConfig(map: Map<string, string>): AppConfig {
     support_infinite_mode: map.get('support_infinite_mode') !== 'false',
     allow_im_conversations: map.get('allow_im_conversations') !== 'false',
     show_github: map.get('show_github') !== 'false',
-    use_external_image_hosting: map.get('use_external_image_hosting') === 'true',
+    // 默认开启（与 isExternalImageHostingEnabled 保持一致），显式写 'false' 才关闭
+    use_external_image_hosting: map.get('use_external_image_hosting') !== 'false',
     context_window: parseContextWindow(map.get('context_window')),
     recommended_questions: JSON.parse(map.get('recommended_questions') || '[]'),
     followup_questions: JSON.parse(map.get('followup_questions') || '[]'),

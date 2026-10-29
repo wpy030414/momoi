@@ -57,7 +57,7 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 | `followup_questions` | string[]（JSON） | — | `[]` | 聊天常用追问（非空对话输入框上方气泡，最多 5 条） |
 | `support_infinite_mode` | boolean | — | `true` | 无限演算模式开关 |
 | `allow_im_conversations` | boolean | — | `true` | 是否允许在 IM（QQ/微信）上对话 |
-| `use_external_image_hosting` | boolean | — | `false` | 外部图床开关 |
+| `use_external_image_hosting` | boolean | — | `true` | 外部图床开关（上传图片转 `cloudflareimg.cdn.sn`，失败回退；显式写 `false` 才关闭） |
 | `oidc_providers` | JSON | — | `[]` | OIDC 提供商配置 |
 | `tts_api_endpoint` | string | — | `""` | TTS 服务地址 |
 | `tts_provider` | string | — | `gpt-sovits` | TTS Provider（`gpt-sovits` / `cosyvoice`） |
@@ -297,7 +297,7 @@ gateway:
   context_window: 128000
   support_attachments: true
   support_infinite_mode: true
-  use_external_image_hosting: false
+  use_external_image_hosting: true
   allow_im_conversations: true
 experience:
   app_name: Momoi

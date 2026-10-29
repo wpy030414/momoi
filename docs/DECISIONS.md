@@ -997,31 +997,37 @@
 
 ---
 
-## D41：CDN 外挂图床 — 自动转存 img.scdn.io
+## D41：CDN 外挂图床 — 自动转存 cloudflareimg.cdn.sn
 
-**日期**：2026-09-11
+**日期**：2026-09-11（2026-10-29 修订：域名迁移与默认值翻转）
 
 **背景**：管理后台允许上传自定义 favicon 和背景图，但这些图片以 base64 data URL 存入 `settings` 表（`app_favicon` / `app_background`），体积大（一张背景图可能 > 2MB）。base64 膨胀 `settings` 表、拖慢 `getConfig()` 读取，且浏览器渲染 base64 图片性能差、无法缓存。
 
-**决策**：引入外部 CDN 图床——管理后台上传图片时自动转为 CDN 永久 URL，`settings` 表仅存 URL 而非 base64。通过 `use_external_image_hosting` 管理员开关（默认关闭）控制。
+**决策**：引入外部 CDN 图床——管理后台上传图片时自动转为 CDN 永久 URL，`settings` 表仅存 URL 而非 base64。通过 `use_external_image_hosting` 管理员开关控制，**默认开启**。
 
 **原因**：
 - `settings` 表存储的 data URL 字符串长度可达 2-4MB，一条配置撑大整个 SQLite 文件（每条设置都完整序列化到 WASM heap）
 - CDN URL 仅几十字节，对 settings 表几乎无体积影响，getConfig 读取速度也有保障
 - 浏览器可直接以 `<img src>` 加载 CDN URL，利用浏览器缓存、无 base64 解码开销
-- `img.scdn.io` 免费、无需 API key、响应快速（`/api/v1.php` multipart 上传）
+- `cloudflareimg.cdn.sn` 免费、无需 API key（`/api/v1.php` multipart 上传）
+
+**域名选型（实测结论，非偏好）**：同一套接口在三个域名下都存在，但只有 `cloudflareimg.cdn.sn` 全链路可用——`img.scdn.io` 整站不可达（TCP 443 直接超时约 20s），`img.cdn1.vip` 的 `/api` 前有验证码 WAF（返回 `_guard/html.js`）。三者共享同一份 `/i/<file>` 路径，故服务端即便返回 `img.cdn1.vip` 链接，把 host 改写为 `cloudflareimg.cdn.sn` 后实测同样 200。
 
 **实现细节**：
 - `base64ToBuffer(dataUrl)`：解析 base64 data URL 为 Buffer + MIME type
-- `uploadToCdn(buffer, filename, mimeType)`：multipart/form-data 上传到 `https://img.scdn.io/api/v1.php`，返回公开 URL
-- 内置速率限制（两次请求间隔 >= 1200ms）防触发 CDN 限流（5 次/5s）；429 时等待 5s 重试一次
+- `uploadToCdn(buffer)`：multipart/form-data 上传到 `https://cloudflareimg.cdn.sn/api/v1.php`，返回 host 已归一的公开 URL
+  - 文件字段 `image`，文件名固定 `upload`（服务端按内容嗅探格式）；另带 `cdn_name=cloudflareimg.cdn.sn` 表单字段，把目标域名表达在协议层
+  - 内置节流（两次请求间隔 >= 1000ms），匹配服务端 5 次/5s、120 次/60s 限制
+  - **5xx 与网络错误重试 1 次；4xx 不重试**，服务端中文原因（如「图片无法被解码」）原样透传到 `CdnUploadError.message`
+  - undici 的 `UND_ERR_*` 连接类错误一并归入可重试；建连超时放宽到 30s（默认 10s 对跨洋线路偏紧）
 - 管理端保存 favicon/background 前检测 `use_external_image_hosting` 开关：开 → 先上传得 CDN URL，关 → 保留 base64 data URL
+- 聊天附件上传同样遵循该开关；CDN 失败时**回退到工作区 URL**，不阻断消息发送
 
 **备选与权衡**：
 - ❌ 本地 serve 静态文件：需要额外的文件服务端点 + 备份管理，且 `data/` 目录无版本化
 - ❌ 自建图床/MinIO：引入外部服务依赖，与"轻量自托管"定位冲突
-- ❌ CDN 强制开启：外部 URL 泄露 app 自定义资源到公网——部分部署场景不希望外部可见；默认关闭、管理员显式开启
-- ⚠️ CDN 服务可用性不可控：`img.scdn.io` 为第三方免费服务，SLA 无保障。不可用时上传失败返回错误，不影响已生成 URL 的图片（已持久化到 CDN）。用户可自行替换 CDN 端点（修改 `cdn.ts` 中的 URL）
+- ⚠️ 默认开启的取舍：外部 URL 会把自定义资源与聊天附件暴露到公网。原始决策为默认关闭，现按产品要求翻转为开——代价是开箱即用与省体积，风险由管理员在网关页一键关闭兜住（关闭后只影响新上传，已转存图片仍在 CDN）
+- ⚠️ CDN 服务可用性不可控：第三方免费服务，SLA 无保障，60 天无人访问的图片会被自动删除。不可用时上传失败并回退，不影响已生成 URL 的图片。可替换 `cdn.ts` 的 `CDN_HOST`
 
 **影响**：
 - 新增 `src/server/cdn.ts`（`base64ToBuffer` + `uploadToCdn`）
