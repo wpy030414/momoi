@@ -89,7 +89,7 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       banned BOOLEAN NOT NULL DEFAULT FALSE
     );
 
-    CREATE TABLE IF NOT EXISTS user_oauth_bindings (
+    CREATE TABLE IF NOT EXISTS user_oidc_bindings (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       provider_id TEXT NOT NULL,
@@ -140,7 +140,7 @@ export async function initPg(dbUrl: string, user: string, password: string) {
 
     CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_wechat_bindings_conv ON wechat_bindings(conversation_id);
-    CREATE INDEX IF NOT EXISTS idx_oauth_user ON user_oauth_bindings(user_id);
+    CREATE INDEX IF NOT EXISTS idx_oidc_user ON user_oidc_bindings(user_id);
 
     CREATE TABLE IF NOT EXISTS user_agent_memories (
       id TEXT PRIMARY KEY,

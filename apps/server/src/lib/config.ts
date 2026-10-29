@@ -55,12 +55,16 @@ export async function setDirectRegistrationOpen(open: boolean): Promise<void> {
   await setSetting('direct_registration_open', open ? 'true' : 'false')
 }
 
-export async function isOauthRegistrationOpen(): Promise<boolean> {
+export async function isOidcRegistrationOpen(): Promise<boolean> {
+  // 回退读取旧键：已部署实例从 OAuth2 升级上来时，管理员此前的开关状态不丢。
+  // 一旦管理员再次保存，就只写新键。
+  const raw = await getSetting('oidc_registration_open', '')
+  if (raw !== '') return raw === 'true'
   return (await getSetting('oauth_registration_open', 'true')) === 'true'
 }
 
-export async function setOauthRegistrationOpen(open: boolean): Promise<void> {
-  await setSetting('oauth_registration_open', open ? 'true' : 'false')
+export async function setOidcRegistrationOpen(open: boolean): Promise<void> {
+  await setSetting('oidc_registration_open', open ? 'true' : 'false')
 }
 
 export async function isExternalImageHostingEnabled(): Promise<boolean> {
@@ -116,7 +120,8 @@ function buildConfig(map: Map<string, string>): AppConfig {
     context_window: parseContextWindow(map.get('context_window')),
     recommended_questions: JSON.parse(map.get('recommended_questions') || '[]'),
     followup_questions: JSON.parse(map.get('followup_questions') || '[]'),
-    oauth_providers: JSON.parse(map.get('oauth_providers') || '[]'),
+    // 回退读取旧键：升级实例的既有 Provider 配置不丢（结构差异由 config-transfer 的导入校验兜住）
+    oidc_providers: JSON.parse(map.get('oidc_providers') ?? map.get('oauth_providers') ?? '[]'),
   }
 }
 
@@ -135,7 +140,7 @@ export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConf
     if (value !== undefined) {
       const boolKeys = ['support_attachments', 'support_infinite_mode', 'allow_im_conversations', 'show_github', 'use_external_image_hosting']
       const numberKeys = ['context_window']
-      const jsonKeys = ['recommended_questions', 'followup_questions', 'oauth_providers']
+      const jsonKeys = ['recommended_questions', 'followup_questions', 'oidc_providers']
       let stored: string
       if (jsonKeys.includes(key)) {
         stored = JSON.stringify(value)

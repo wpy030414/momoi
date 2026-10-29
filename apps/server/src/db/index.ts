@@ -37,7 +37,7 @@ export const {
   groupConversationAgents,
   mcpServers,
   users,
-  userOauthBindings,
+  userOidcBindings,
   wechatBindings,
   qqBindings,
   qqGroupConversations,

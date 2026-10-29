@@ -1,11 +1,11 @@
 import { Hono } from 'hono'
 import { ErrCode } from '@momoi/shared/errors'
-import { db, users, userOauthBindings, wechatBindings, qqBindings, conversations } from '../db/index.js'
+import { db, users, userOidcBindings, wechatBindings, qqBindings, conversations } from '../db/index.js'
 import { eq, and } from 'drizzle-orm'
 import { hashPin, verifyPin, signUserToken, isAdmin, setAuthCookie, clearAuthCookie } from '../lib/auth.js'
 import { ApiError } from '../lib/apiError.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
-import { isDirectRegistrationOpen, isOauthRegistrationOpen } from '../lib/config.js'
+import { isDirectRegistrationOpen, isOidcRegistrationOpen } from '../lib/config.js'
 import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../lib/rateLimiter.js'
 import { stopBotForUser, startBotForUser } from '../im/qq/manager.js'
 
@@ -62,8 +62,8 @@ userRoute.get('/status', async (c) => {
   const username = getUsername(c)
   if (!username) throw new ApiError(ErrCode.USER_NAME_REQUIRED)
   const row = await db.select().from(users).where(eq(users.username, username)).get()
-  const [directOpen, oauthOpen] = await Promise.all([isDirectRegistrationOpen(), isOauthRegistrationOpen()])
-  return c.json({ has_pin: !!(row?.pin_hash), direct_registration_open: directOpen, oauth_registration_open: oauthOpen })
+  const [directOpen, oidcOpen] = await Promise.all([isDirectRegistrationOpen(), isOidcRegistrationOpen()])
+  return c.json({ has_pin: !!(row?.pin_hash), direct_registration_open: directOpen, oidc_registration_open: oidcOpen })
 })
 
 // Verify PIN and return JWT
@@ -194,7 +194,7 @@ userRoute.post('/rename', userAuthMiddleware, async (c) => {
   const now = Math.floor(Date.now() / 1000)
   await db.update(users).set({ username: newName, last_login_at: now }).where(eq(users.username, oldUsername)).run()
   await db.update(conversations).set({ user_id: newName }).where(eq(conversations.user_id, oldUsername)).run()
-  await db.update(userOauthBindings).set({ user_id: newName }).where(eq(userOauthBindings.user_id, oldUsername)).run()
+  await db.update(userOidcBindings).set({ user_id: newName }).where(eq(userOidcBindings.user_id, oldUsername)).run()
   await db.update(wechatBindings).set({ user_id: newName }).where(eq(wechatBindings.user_id, oldUsername)).run()
   // QQ per-agent 绑定下需遍历全部 binding 行：旧 key 停、新 key 起。
   // 先查再更名，避免改名后旧 user_id 查不到。
@@ -215,35 +215,35 @@ userRoute.post('/rename', userAuthMiddleware, async (c) => {
   return c.json({ username: newName, expires_at: result.expires_at })
 })
 
-// ---- OAuth2 bindings (linked accounts) ----
+// ---- OIDC bindings (linked accounts) ----
 
-userRoute.get('/oauth-bindings', userAuthMiddleware, async (c) => {
+userRoute.get('/oidc-bindings', userAuthMiddleware, async (c) => {
   const username = (c as any).get('userId') as string
   const bindings = await db.select({
-    id: userOauthBindings.id,
-    provider_id: userOauthBindings.provider_id,
-    created_at: userOauthBindings.created_at,
-  }).from(userOauthBindings).where(eq(userOauthBindings.user_id, username)).all()
+    id: userOidcBindings.id,
+    provider_id: userOidcBindings.provider_id,
+    created_at: userOidcBindings.created_at,
+  }).from(userOidcBindings).where(eq(userOidcBindings.user_id, username)).all()
   return c.json({ bindings })
 })
 
-userRoute.delete('/oauth-bindings/:id', userAuthMiddleware, async (c) => {
+userRoute.delete('/oidc-bindings/:id', userAuthMiddleware, async (c) => {
   const username = (c as any).get('userId') as string
   const bindingId = c.req.param('id')
 
-  const binding = await db.select().from(userOauthBindings).where(eq(userOauthBindings.id, bindingId)).get()
+  const binding = await db.select().from(userOidcBindings).where(eq(userOidcBindings.id, bindingId)).get()
   if (!binding) throw new ApiError(ErrCode.USER_BINDING_NOT_FOUND)
   if (binding.user_id !== username) throw new ApiError(ErrCode.USER_BINDING_NOT_OWNED)
 
   // Ensure at least one login method remains (PIN or other binding)
   const userRow = await db.select().from(users).where(eq(users.username, username)).get()
-  const allBindings = await db.select().from(userOauthBindings)
-    .where(eq(userOauthBindings.user_id, username)).all()
+  const allBindings = await db.select().from(userOidcBindings)
+    .where(eq(userOidcBindings.user_id, username)).all()
   const otherBindings = allBindings.filter((b: { id: string }) => b.id !== bindingId)
   if (!userRow?.pin_hash && otherBindings.length === 0) {
     throw new ApiError(ErrCode.USER_CANNOT_REMOVE_ONLY_LOGIN)
   }
 
-  await db.delete(userOauthBindings).where(eq(userOauthBindings.id, bindingId)).run()
+  await db.delete(userOidcBindings).where(eq(userOidcBindings.id, bindingId)).run()
   return c.json({ success: true })
 })

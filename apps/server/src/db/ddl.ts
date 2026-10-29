@@ -79,7 +79,7 @@ export const MIGRATION_SQL = `
     banned INTEGER NOT NULL DEFAULT 0
   );
 
-  CREATE TABLE IF NOT EXISTS user_oauth_bindings (
+  CREATE TABLE IF NOT EXISTS user_oidc_bindings (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     provider_id TEXT NOT NULL,
@@ -163,6 +163,6 @@ export const MIGRATION_SQL = `
   CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id);
   CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id);
   CREATE INDEX IF NOT EXISTS idx_wechat_bindings_conv ON wechat_bindings(conversation_id);
-  CREATE INDEX IF NOT EXISTS idx_oauth_user ON user_oauth_bindings(user_id);
+  CREATE INDEX IF NOT EXISTS idx_oidc_user ON user_oidc_bindings(user_id);
   CREATE INDEX IF NOT EXISTS idx_user_agent_memories ON user_agent_memories(user_id, agent_id);
   CREATE INDEX IF NOT EXISTS idx_workspaces_user ON workspaces(user_id);`
