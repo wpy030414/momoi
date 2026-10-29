@@ -21,15 +21,16 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [oauthProviders, setOauthProviders] = useState<Array<{ id: string; name: string }>>([])
-  // 输错计数：每 +1 让圆点换 key 重播『变红 → 摇晃 → 淡回灰色』动画
+  // 输错计数：每 +1 换 key 重播「变红 → 摇晃 → 渐变回灰」。动画结束后 clear 并将
+  // 计数归零；下一次按键时再被 onChange 置零（防御端）。
   const [errorTick, setErrorTick] = useState(0)
 
   // 设置流程分两步收集：先新 PIN，再确认 PIN
   const [setStage, setSetStage] = useState<'new' | 'confirm'>('new')
   const [firstPin, setFirstPin] = useState('')
 
-  const verifyKeypad = usePinKeypad({ onChange: () => { setError(''); setErrorTick(0) } })
-  const setKeypad = usePinKeypad({ onChange: () => { setError(''); setErrorTick(0) } })
+  const verifyKeypad = usePinKeypad({ onChange: () => setError('') })
+  const setKeypad = usePinKeypad({ onChange: () => setError('') })
 
   const triggerInvalid = () => setErrorTick((n) => n + 1)
 
@@ -78,10 +79,12 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     try {
       const result = await api.verifyPin(username.trim(), verifyKeypad.value)
       onLogin(username.trim(), result.expires_at)
-    } catch (err) {
-      setError(errT(err))
+    } catch {
+      // PIN 错误由圆点的「变红 + 摇晃」表达，不再叠加文字提示（认证模块的 spec 也
+      // 刻意不区分「PIN 错」「用户被封」「限流」——统一走摇晃，避免侧信道）。
+      setError('')
       triggerInvalid()
-      verifyKeypad.clear()
+      // 先播动画，不立刻清空——PinDots 的 onAnimationEnd 里再 clear
     } finally {
       setLoading(false)
     }
@@ -101,8 +104,11 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       return
     }
     if (setKeypad.value !== firstPin) {
+      // 两次不一致：回到「输入新 PIN」界面重来。此时不播摇晃——要摇的是「错位的那一排」，
+      // 而它马上就会被替换掉。清空后由用户重新输入。
       setError(t('login.pinMismatch'))
-      triggerInvalid()
+      setKeypad.clear()
+      setFirstPin('')
       setSetStage('new')
       return
     }
@@ -222,18 +228,19 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
         }
         onKeyDown={setKeypad.handleKeyDown}
       >
-        <PinDots length={setKeypad.length} maxLength={PIN_MAX} errorTick={errorTick} />
-        {error && (
-          <p className="text-center text-sm text-destructive" role="alert">
-            {error}
-          </p>
-        )}
+        <PinDots
+          length={setKeypad.length}
+          maxLength={PIN_MAX}
+          errorTick={errorTick}
+          onErrorAnimEnd={() => { setKeypad.clear(); setErrorTick(0) }}
+        />
         <PinKeypad
           onDigit={setKeypad.append}
           onBackspace={setKeypad.backspace}
-          onExtra={handleSetBack}
-          extraLabel={t('login.back')}
-          showSubmit={setKeypad.length >= PIN_MIN}
+          onBack={handleSetBack}
+          backLabel={t('login.back')}
+          hasInput={setKeypad.length > 0}
+          canSubmit={setKeypad.length >= PIN_MIN}
           submitLabel={t('login.submitPin')}
           onSubmit={handleSetPinSubmit}
           disabled={loading}
@@ -249,18 +256,19 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       subtitle={t('login.verifySubtitle', { username })}
       onKeyDown={verifyKeypad.handleKeyDown}
     >
-      <PinDots length={verifyKeypad.length} maxLength={PIN_MAX} errorTick={errorTick} />
-      {error && (
-        <p className="text-center text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      )}
+      <PinDots
+        length={verifyKeypad.length}
+        maxLength={PIN_MAX}
+        errorTick={errorTick}
+        onErrorAnimEnd={() => { verifyKeypad.clear(); setErrorTick(0) }}
+      />
       <PinKeypad
         onDigit={verifyKeypad.append}
         onBackspace={verifyKeypad.backspace}
-        onExtra={handleBack}
-        extraLabel={t('login.back')}
-        showSubmit={verifyKeypad.length >= PIN_MIN}
+        onBack={handleBack}
+        backLabel={t('login.back')}
+        hasInput={verifyKeypad.length > 0}
+        canSubmit={verifyKeypad.length >= PIN_MIN}
         submitLabel={t('login.verify')}
         onSubmit={handlePinSubmit}
         disabled={loading}
