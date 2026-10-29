@@ -566,7 +566,12 @@
     "noAccessMessage": "你的账户尚未开通，请联系管理员",
     "operationFailed": "操作失败",
     "oauthDivider": "OAuth2",
-    "oauthLoginWith": "使用 {{provider}} 登录"
+    "oauthLoginWith": "使用 {{provider}} 登录",
+    "keypad": "数字键盘",
+    "backspace": "删除",
+    "submitPin": "确认",
+    "confirmPinTitle": "再次输入",
+    "confirmPinSubtitle": "请再次输入相同的 PIN 以确认"
   },
   "changePin": {
     "title": "更改 PIN",

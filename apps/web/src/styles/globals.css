@@ -242,3 +242,40 @@
   background-size: 48px 48px;
   background-repeat: repeat;
 }
+
+/* ===== PIN 输入标记（登录页数字键盘） ===== */
+/* 颜色经 --pin-dot-color 间接控制，使 pin-shake 动画能在 keyframes 里改色；
+   未在动画中时，--pin-dot-color 回落到各状态的常规颜色。 */
+.pin-dot {
+  --pin-dot-color: hsl(var(--muted-foreground) / 0.5);
+  border-color: var(--pin-dot-color);
+  background-color: transparent;
+}
+.pin-dot--filled {
+  --pin-dot-color: hsl(var(--foreground));
+  background-color: var(--pin-dot-color);
+}
+
+/* 输错：瞬间变红 → 剧烈摇晃 → 渐变回原本颜色。
+   颜色在 62% 之后才开始插值，保证「红」是瞬间出现的。 */
+@keyframes pin-shake {
+  0% {
+    --pin-dot-color: hsl(var(--destructive));
+    transform: translateX(0);
+  }
+  6% { transform: translateX(-8px); }
+  14% { transform: translateX(8px); }
+  22% { transform: translateX(-7px); }
+  30% { transform: translateX(7px); }
+  38% { transform: translateX(-5px); }
+  46% { transform: translateX(5px); }
+  54% { transform: translateX(-3px); }
+  62% {
+    --pin-dot-color: hsl(var(--destructive));
+    transform: translateX(3px);
+  }
+  100% {
+    --pin-dot-color: currentColor;
+    transform: translateX(0);
+  }
+}
