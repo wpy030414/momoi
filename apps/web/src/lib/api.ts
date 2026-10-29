@@ -208,7 +208,7 @@ export const api = {
   // Generic GET helper
   get: <T>(path: string) => request<T>(path),
   // User Auth
-  getUserStatus: (username: string) => request<{ has_pin: boolean; direct_registration_open: boolean; oauth_registration_open: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
+  getUserStatus: (username: string) => request<{ has_pin: boolean; direct_registration_open: boolean; oidc_registration_open: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
     headers: { 'X-User': encodeURIComponent(username) }
   }),
   // Token arrives via Set-Cookie (HttpOnly); the body only carries the expiry
@@ -237,15 +237,15 @@ export const api = {
     '/api/user/rename',
     { method: 'POST', body: JSON.stringify({ new_username: newUsername }) }
   ),
-  getOauthBindings: () => request<{ bindings: Array<{ id: string; provider_id: string; created_at: number }> }>(
-    '/api/user/oauth-bindings'
+  getOidcBindings: () => request<{ bindings: Array<{ id: string; provider_id: string; created_at: number }> }>(
+    '/api/user/oidc-bindings'
   ),
-  unbindOauth: (bindingId: string) => request<{ success: boolean }>(
-    `/api/user/oauth-bindings/${bindingId}`,
+  unbindOidc: (bindingId: string) => request<{ success: boolean }>(
+    `/api/user/oidc-bindings/${bindingId}`,
     { method: 'DELETE' }
   ),
-  oauthRegister: (data: { provider_id: string; provider_user_id: string; action: 'link' | 'create'; username: string; pin: string }) => request<{ username: string; expires_at: number }>(
-    '/api/oauth/register',
+  oidcRegister: (data: { provider_id: string; provider_user_id: string; action: 'link' | 'create'; username: string; pin: string }) => request<{ username: string; expires_at: number }>(
+    '/api/oidc/register',
     { method: 'POST', body: JSON.stringify(data) }
   ),
 
@@ -362,14 +362,14 @@ export const api = {
     request<{ direct_registration_open: boolean }>('/api/admin/direct-registration'),
   setDirectRegistration: (open: boolean) =>
     request<{ direct_registration_open: boolean }>('/api/admin/direct-registration', { method: 'PUT', body: JSON.stringify({ open }) }),
-  getOauthRegistration: () =>
-    request<{ oauth_registration_open: boolean }>('/api/admin/oauth-registration'),
-  setOauthRegistration: (open: boolean) =>
-    request<{ oauth_registration_open: boolean }>('/api/admin/oauth-registration', { method: 'PUT', body: JSON.stringify({ open }) }),
+  getOidcRegistration: () =>
+    request<{ oidc_registration_open: boolean }>('/api/admin/oidc-registration'),
+  setOidcRegistration: (open: boolean) =>
+    request<{ oidc_registration_open: boolean }>('/api/admin/oidc-registration', { method: 'PUT', body: JSON.stringify({ open }) }),
 
-  // OAuth2 login
-  getOauthProviders: () =>
-    request<{ providers: Array<{ id: string; name: string }> }>('/api/oauth/providers'),
+  // OIDC login
+  getOidcProviders: () =>
+    request<{ providers: Array<{ id: string; name: string }> }>('/api/oidc/providers'),
 
   // Upload (multipart/form-data — do NOT set Content-Type, let browser set boundary;
   // the HttpOnly cookie authenticates the request automatically)

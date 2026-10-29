@@ -20,7 +20,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [directRegistrationOpen, setDirectRegistrationOpen] = useState(true)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [oauthProviders, setOauthProviders] = useState<Array<{ id: string; name: string }>>([])
+  const [oidcProviders, setOauthProviders] = useState<Array<{ id: string; name: string }>>([])
   // 输错计数：每 +1 换 key 重播「变红 → 摇晃 → 渐变回灰」。动画结束后 clear 并将
   // 计数归零；下一次按键时再被 onChange 置零（防御端）。
   const [errorTick, setErrorTick] = useState(0)
@@ -35,17 +35,17 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const triggerInvalid = () => setErrorTick((n) => n + 1)
 
   useEffect(() => {
-    api.getOauthProviders().then((r) => setOauthProviders(r.providers)).catch(() => {})
-    // Show OAuth callback errors (e.g. registration closed) —
-    // 回调以 oauth_error_code（+可选 oauth_error_detail）携带服务端错误码信封
+    api.getOidcProviders().then((r) => setOauthProviders(r.providers)).catch(() => {})
+    // Show OIDC callback errors (e.g. registration closed) —
+    // 回调以 oidc_error_code（+可选 oidc_error_detail）携带服务端错误码信封
     const params = new URLSearchParams(window.location.search)
-    const oauthErrorCode = params.get('oauth_error_code')
-    if (oauthErrorCode) {
-      const detail = params.get('oauth_error_detail')
-      setError(errT(new ApiError(oauthErrorCode, 0, detail ? { detail } : undefined)))
+    const oidcErrorCode = params.get('oidc_error_code')
+    if (oidcErrorCode) {
+      const detail = params.get('oidc_error_detail')
+      setError(errT(new ApiError(oidcErrorCode, 0, detail ? { detail } : undefined)))
       const url = new URL(window.location.href)
-      url.searchParams.delete('oauth_error_code')
-      url.searchParams.delete('oauth_error_detail')
+      url.searchParams.delete('oidc_error_code')
+      url.searchParams.delete('oidc_error_detail')
       history.replaceState(null, '', url.toString())
     }
   }, [])
@@ -146,7 +146,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     setError('')
   }
 
-  // Step 1: Username input + OAuth2 provider buttons
+  // Step 1: Username input + OIDC provider buttons
   if (hasPin === null) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
@@ -170,26 +170,26 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
             </Button>
           </form>
 
-          {/* OAuth2 provider buttons */}
-          {oauthProviders.length > 0 && (
+          {/* OIDC provider buttons */}
+          {oidcProviders.length > 0 && (
             <div className="space-y-3">
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
                   <span className="w-full border-t" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-background px-2 text-muted-foreground">{t('login.oauthDivider')}</span>
+                  <span className="bg-background px-2 text-muted-foreground">{t('login.oidcDivider')}</span>
                 </div>
               </div>
               <div className="space-y-2">
-                {oauthProviders.map((p) => (
+                {oidcProviders.map((p) => (
                   <Button
                     key={p.id}
                     variant="outline"
                     className="w-full"
-                    onClick={() => { window.location.href = `/api/oauth/${p.id}/login` }}
+                    onClick={() => { window.location.href = `/api/oidc/${p.id}/login` }}
                   >
-                    {t('login.oauthLoginWith', { provider: p.name })}
+                    {t('login.oidcLoginWith', { provider: p.name })}
                   </Button>
                 ))}
               </div>

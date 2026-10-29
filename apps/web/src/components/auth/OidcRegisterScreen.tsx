@@ -8,13 +8,13 @@ import { errT } from '../../i18n'
 const PIN_MIN = 4
 const PIN_MAX = 8
 
-interface OAuthRegisterScreenProps {
+interface OidcRegisterScreenProps {
   providerId: string
   providerUserId: string
   onLogin: (username: string, expiresAt?: number) => void
 }
 
-export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAuthRegisterScreenProps) {
+export function OidcRegisterScreen({ providerId, providerUserId, onLogin }: OidcRegisterScreenProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<'link' | 'create'>('link')
 
@@ -37,7 +37,7 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
     setLoading(true)
     setError('')
     try {
-      const result = await api.oauthRegister({
+      const result = await api.oidcRegister({
         provider_id: providerId,
         provider_user_id: providerUserId,
         action: 'link',
@@ -56,18 +56,18 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
     e.preventDefault()
     if (!newUsername.trim()) return
     if (newPin.length < PIN_MIN || newPin.length > PIN_MAX) {
-      setError(t('oauthRegister.pinFormatError'))
+      setError(t('oidcRegister.pinFormatError'))
       return
     }
     if (newPin !== confirmPin) {
-      setError(t('oauthRegister.pinMismatch'))
+      setError(t('oidcRegister.pinMismatch'))
       return
     }
 
     setLoading(true)
     setError('')
     try {
-      const result = await api.oauthRegister({
+      const result = await api.oidcRegister({
         provider_id: providerId,
         provider_user_id: providerUserId,
         action: 'create',
@@ -86,8 +86,8 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
     <div className="flex items-center justify-center h-screen bg-background">
       <div className="w-full max-w-sm p-6 space-y-6">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">{t('oauthRegister.title')}</h1>
-          <p className="text-sm text-muted-foreground">{t('oauthRegister.subtitle')}</p>
+          <h1 className="text-2xl font-bold">{t('oidcRegister.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('oidcRegister.subtitle')}</p>
         </div>
 
         {/* Tab bar */}
@@ -96,13 +96,13 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
             className={`flex-1 pb-2 text-sm font-medium border-b-2 transition-colors ${tab === 'link' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
             onClick={() => { setTab('link'); setError('') }}
           >
-            {t('oauthRegister.linkTab')}
+            {t('oidcRegister.linkTab')}
           </button>
           <button
             className={`flex-1 pb-2 text-sm font-medium border-b-2 transition-colors ${tab === 'create' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
             onClick={() => { setTab('create'); setError('') }}
           >
-            {t('oauthRegister.createTab')}
+            {t('oidcRegister.createTab')}
           </button>
         </div>
 
@@ -110,7 +110,7 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
           <form onSubmit={handleLink} className="space-y-4">
             <Input
               autoFocus
-              placeholder={t('oauthRegister.usernamePlaceholder')}
+              placeholder={t('oidcRegister.usernamePlaceholder')}
               value={linkUsername}
               onChange={(e) => setLinkUsername(e.target.value)}
               disabled={loading}
@@ -125,21 +125,21 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
             />
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" className="w-full" disabled={!linkUsername.trim() || linkPin.length < PIN_MIN || loading}>
-              {loading ? t('common.loading') : t('oauthRegister.linkExisting')}
+              {loading ? t('common.loading') : t('oidcRegister.linkExisting')}
             </Button>
           </form>
         ) : (
           <form onSubmit={handleCreate} className="space-y-4">
             <Input
               autoFocus
-              placeholder={t('oauthRegister.usernamePlaceholder')}
+              placeholder={t('oidcRegister.usernamePlaceholder')}
               value={newUsername}
               onChange={(e) => setNewUsername(e.target.value)}
               disabled={loading}
             />
             <Input
               type="password"
-              placeholder={t('oauthRegister.newPinPlaceholder')}
+              placeholder={t('oidcRegister.newPinPlaceholder')}
               value={newPin}
               onChange={(e) => { setNewPin(e.target.value.replace(/\D/g, '')) }}
               maxLength={PIN_MAX}
@@ -147,7 +147,7 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
             />
             <Input
               type="password"
-              placeholder={t('oauthRegister.confirmPinPlaceholder')}
+              placeholder={t('oidcRegister.confirmPinPlaceholder')}
               value={confirmPin}
               onChange={(e) => { setConfirmPin(e.target.value.replace(/\D/g, '')) }}
               maxLength={PIN_MAX}
@@ -155,7 +155,7 @@ export function OAuthRegisterScreen({ providerId, providerUserId, onLogin }: OAu
             />
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" className="w-full" disabled={!newUsername.trim() || newPin.length < PIN_MIN || confirmPin.length < PIN_MIN || loading}>
-              {loading ? t('common.loading') : t('oauthRegister.createNew')}
+              {loading ? t('common.loading') : t('oidcRegister.createNew')}
             </Button>
           </form>
         )}

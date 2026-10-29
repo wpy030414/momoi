@@ -45,7 +45,7 @@ const h = vi.hoisted(() => {
     use_external_image_hosting: false,
     recommended_questions: [],
     followup_questions: [],
-    oauth_providers: [],
+    oidc_providers: [],
   }
   return { AGENT, CONFIG }
 })
