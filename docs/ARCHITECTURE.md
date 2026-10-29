@@ -294,7 +294,7 @@ TTS 配置（存储在 settings 表）：
 
 ## 模块依赖关系
 
-> Momoi 为 **pnpm monorepo**（`apps/server` + `apps/web` + `packages/shared`）。`@momoi/shared` 以 TS 源码直引（exports → `./src/*.ts`，零构建），tsup 内联到 server bundle；`data/`、`skills/`、`docs/`、`.env` 位于仓库根目录，`dist/` 为根级构建产物，服务端经 `REPO_ROOT`（向上找 `pnpm-workspace.yaml` 标记）锚定访问。
+> Momoi 为 **pnpm monorepo**（`apps/server` + `apps/web` + `packages/shared`）。`@momoi/shared` 以 TS 源码直引（exports → `./src/*.ts`，零构建），`vp pack`（tsdown）内联到 server bundle；`data/`、`skills/`、`docs/`、`.env` 位于仓库根目录，`dist/` 为根级构建产物，服务端经 `REPO_ROOT`（向上找 `pnpm-workspace.yaml` 标记）锚定访问。
 
 ```
 routes/chat.ts
@@ -389,7 +389,7 @@ qq/api.ts（QQ 开放平台 REST 协议客户端，手写最小实现）
 
 qq/gateway.ts（QQ WS 网关连接状态机）
   ├── qq/api.ts（token, /gateway）
-  └── ws（唯一新增依赖，外置于 tsup bundle）
+  └── ws（唯一新增依赖，外置于 server bundle）
 
 qq/manager.ts（per-user 连接注册表）
   ├── db.ts + schema.ts（qqBindings）

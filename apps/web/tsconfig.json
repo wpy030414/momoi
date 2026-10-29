@@ -3,7 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "node"],
+    "types": ["vite-plus/client", "node"],
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] }
   },

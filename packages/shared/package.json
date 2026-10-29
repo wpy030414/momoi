@@ -12,9 +12,11 @@
     "./formula": "./src/formula.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "vp check --no-fmt"
   },
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite-plus": "^1.4.0"
   }
 }
