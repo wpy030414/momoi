@@ -41,7 +41,7 @@
 | 配置导入校验失败 | `{ ok: false, errors: ImportIssue[], warnings: ImportIssue[] }`，`ImportIssue = { path, code: CONFIG_IMPORT_*, params? }` |
 | 微信绑定轮询过期 | `{ status: 'expired', code: 'WECHAT_CONV_DELETED' }` |
 | QQ 绑定信息 | `{ bound, ..., error_code?: 'QQ_CONNECTION_FAILED', error_detail?: string }` |
-| OAuth 回调失败 | `302 → /?oauth_error_code=<CODE>&oauth_error_detail=<...>` |
+| OIDC 回调失败 | `302 → /?oidc_error_code=<CODE>&oidc_error_detail=<...>` |
 | prompts 未知 target | `404 { code: 'NOT_FOUND', targets: [...] }`（保留附加字段） |
 
 ### 全局兜底

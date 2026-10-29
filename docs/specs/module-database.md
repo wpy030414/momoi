@@ -7,7 +7,7 @@
 - **本地模式（默认）**：SQLite 单文件数据库，通过 `node:sqlite`（Node 内置的 SQLite 绑定，Node ≥ 22.5）在 Node.js 进程中直接操作，每笔 commit 由 SQLite 自己 fsync 落盘（`synchronous=FULL`）。经 `@homurajs/db` 的 `createSqliteDb` 封装，Drizzle ORM（`drizzle-orm/node-sqlite`）提供类型安全的查询构建。
 - **远程模式**：PostgreSQL，当同时设置环境变量 `DATABASE_URL`、`DATABASE_USER`、`DATABASE_SECRET` 时自动启用，连接池上限 5。
 
-所有对话历史、配置、PIN 哈希、Agent 信息、用户账号、OAuth 绑定、微信绑定、MCP 服务器配置等均持久化存储。迁移策略采用 `CREATE TABLE IF NOT EXISTS` 建表 + `ALTER TABLE ADD COLUMN`（try/catch 安全）做增量列迁移，不引入外部迁移工具。
+所有对话历史、配置、PIN 哈希、Agent 信息、用户账号、OIDC 绑定、微信绑定、MCP 服务器配置等均持久化存储。迁移策略采用 `CREATE TABLE IF NOT EXISTS` 建表 + `ALTER TABLE ADD COLUMN`（try/catch 安全）做增量列迁移，不引入外部迁移工具。
 
 ## 涉及文件
 
@@ -108,7 +108,7 @@ db.$client.exec('PRAGMA busy_timeout = 5000')
 | `key` | TEXT | PRIMARY KEY | 配置键，如 `app_name`、`direct_registration_open`、`jwt_secret` |
 | `value` | TEXT | NOT NULL, DEFAULT '' | 配置值 |
 
-**用途**：存储运行时配置（`app_name`、`api_endpoint`、`api_key`、`support_attachments`、`show_github`、`use_external_image_hosting`、`recommended_questions`、`oauth_providers`、`tts_api_endpoint`、`tts_provider`、`direct_registration_open`、`oauth_registration_open`）和 JWT 签名密钥（`jwt_secret`）。
+**用途**：存储运行时配置（`app_name`、`api_endpoint`、`api_key`、`support_attachments`、`show_github`、`use_external_image_hosting`、`recommended_questions`、`oidc_providers`、`tts_api_endpoint`、`tts_provider`、`direct_registration_open`、`oidc_registration_open`）和 JWT 签名密钥（`jwt_secret`）。
 
 > 注意：用户 PIN 哈希已从 `settings` 表（键 `pin:{username}`）迁移至独立的 `users` 表（`pin_hash` 列），见下方 `users` 表。
 
@@ -151,14 +151,14 @@ db.$client.exec('PRAGMA busy_timeout = 5000')
 
 > 此表替代了此前 `settings` 表中 `pin:{username}` 键的设计，将用户身份数据集中管理。
 
-### user_oauth_bindings — OAuth 绑定
+### user_oidc_bindings — OIDC 绑定
 
 | 列名 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | `id` | TEXT | PRIMARY KEY | 绑定记录 UUID |
 | `user_id` | TEXT | NOT NULL | 关联的本地用户名 |
-| `provider_id` | TEXT | NOT NULL | OAuth 提供商标识 |
-| `provider_user_id` | TEXT | NOT NULL | 在 OAuth 提供商端的用户 ID |
+| `provider_id` | TEXT | NOT NULL | OIDC 提供商标识 |
+| `provider_user_id` | TEXT | NOT NULL | 在 OIDC 提供商端的用户 ID |
 | `created_at` | INTEGER | NOT NULL | 绑定创建时间 Unix epoch 秒 |
 
 **唯一约束**：`UNIQUE(provider_id, provider_user_id)` — 同一提供商下的同一外部账号只能绑定一个本地用户。
@@ -278,7 +278,7 @@ export const users = sqliteTable('users', {
   banned: integer('banned', { mode: 'boolean' }).notNull().default(false),
 })
 
-export const userOauthBindings = sqliteTable('user_oauth_bindings', {
+export const userOauthBindings = sqliteTable('user_oidc_bindings', {
   id: text('id').primaryKey(),
   user_id: text('user_id').notNull(),
   provider_id: text('provider_id').notNull(),
@@ -418,7 +418,7 @@ const msg = {
 |---|---|
 | `users` | `username` (PK) |
 | `conversations` | `user_id` |
-| `user_oauth_bindings` | `user_id` |
+| `user_oidc_bindings` | `user_id` |
 | `wechat_bindings` | `user_id` |
 
 ## 工作区清理

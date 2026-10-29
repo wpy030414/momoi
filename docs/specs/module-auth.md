@@ -4,7 +4,7 @@
 
 认证分为两层：**用户认证**（用户名 + 4-8 位 PIN → 用户 JWT）与**管理员授权**（用户 JWT + `ADMIN` 环境变量用户名名单）。没有独立的管理员密钥或管理员 token——管理员端点接受普通用户 JWT，并由 `adminAuthMiddleware` 逐请求校验用户名是否在 `ADMIN` 名单内。
 
-此外支持 **OAuth2 第三方登录**（简要，详细见 `module-oauth.md`）和**微信绑定**（详细见 `module-wechat.md`）。
+此外支持 **OIDC 第三方登录**（简要，详细见 `module-oidc.md`）和**微信绑定**（详细见 `module-wechat.md`）。
 
 ## 涉及文件
 
@@ -12,7 +12,7 @@
 |---|---|
 | `apps/server/src/auth.ts` | PIN 哈希/校验 + 用户 JWT 签发验证 + 签名密钥管理 + `isAdmin()`/`adminAuthMiddleware` + Cookie 操作 |
 | `apps/server/src/middleware/userAuth.ts` | 独立的用户 JWT 认证中间件（严格模式，仅从 HttpOnly Cookie 取 token） |
-| `apps/server/src/routes/user.ts` | 用户端点（状态查询/验证/设置/修改/重命名/OAuth 绑定管理）+ `GET /me` |
+| `apps/server/src/routes/user.ts` | 用户端点（状态查询/验证/设置/修改/重命名/OIDC 绑定管理）+ `GET /me` |
 | `apps/server/src/standalone.ts` | 单机模式标志（`--stand-alone` CLI 参数，零依赖叶子模块） |
 | `apps/server/src/routes/user-standalone.ts` | 单机模式极简用户路由（仅 `GET /me`） |
 | `apps/server/src/config.ts` | `env.ADMIN` 名单解析、`env.JWT_SECRET` 读取、注册开关（`isDirectRegistrationOpen` / `isOauthRegistrationOpen`） |
@@ -26,10 +26,10 @@
 
 - **标志解析**：`apps/server/src/standalone.ts` 导出 `STAND_ALONE`（`process.argv.includes('--stand-alone')`）。该模块零 import——ESM 中依赖体先于引用体执行，因此无论谁先导入（db.ts 的顶层 await 初始化、auth.ts 等）都能读到正确值
 - **中间件直通**：`userAuthMiddleware` 与 `adminAuthMiddleware` 开头短路，`c.set('userId', 'admin')` 后直接 `next()`；`isAdmin()` 恒真（后台面板永远可用）
-- **端点裁剪**：`/api/user` 挂载 `routes/user-standalone.ts`（仅 `GET /me` → `{username:'admin', is_admin:true}`，无中间件）；`/api/oauth` 整个不挂载。因此 verify/set-pin/change-pin/rename/logout/refresh/oauth-bindings/status 全部不存在，且**不可能签发任何 JWT 或 Cookie**（所有签发点都在这两个路由文件内）
+- **端点裁剪**：`/api/user` 挂载 `routes/user-standalone.ts`（仅 `GET /me` → `{username:'admin', is_admin:true}`，无中间件）；`/api/oidc` 整个不挂载。因此 verify/set-pin/change-pin/rename/logout/refresh/oidc-bindings/status 全部不存在，且**不可能签发任何 JWT 或 Cookie**（所有签发点都在这两个路由文件内）
 - **数据库**：与正常模式共用 `data/momoi.db`（不再使用独立数据库文件）；若同时配置了 `DATABASE_URL` 等远程数据库环境变量，stand-alone 模式也会使用远程数据库（不再忽略）；启动时 seed 固定 `admin` 用户行（幂等）
 - **微信/QQ 不受影响**：IM 桥接不是 Momoi 鉴权体系的一部分，绑定照常（归属 `admin`）
-- **前端发现**：`GET /api/app-name` 响应含 `stand_alone: boolean`；客户端据此自动登录 `admin`、隐藏改密/改名/OAuth 关联/登出入口、隐藏后台「用户」tab，并禁用 token 续期与 `auth:expired` 驱逐
+- **前端发现**：`GET /api/app-name` 响应含 `stand_alone: boolean`；客户端据此自动登录 `admin`、隐藏改密/改名/OIDC 关联/登出入口、隐藏后台「用户」tab，并禁用 token 续期与 `auth:expired` 驱逐
 
 ## 用户认证流程
 
@@ -39,7 +39,7 @@
     → 有 → 同源请求自动携带 Cookie，验证成功则直接进入
   → 无 → LoginScreen
     → 步骤 1：输入用户名 → GET /api/user/status（X-User 头）
-      → 响应包含 has_pin、direct_registration_open、oauth_registration_open
+      → 响应包含 has_pin、direct_registration_open、oidc_registration_open
     → 步骤 2a（已有 PIN）：输入 4-8 位 PIN → POST /api/user/verify
     → 步骤 2b（新用户，且 registration open）：设置 4-8 位 PIN → POST /api/user/set-pin
     → 步骤 2c（新用户，registration closed）：显示「注册已关闭」，无法继续
@@ -113,28 +113,28 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 | 设置键 | 默认值 | 作用 |
 |---|---|---|
 | `direct_registration_open` | `'true'` | 控制 `POST /api/user/set-pin` 是否允许新用户设置 PIN |
-| `oauth_registration_open` | `'true'` | 控制 OAuth 登录是否允许创建新用户（见 `module-oauth.md`） |
+| `oidc_registration_open` | `'true'` | 控制 OIDC 登录是否允许创建新用户（见 `module-oidc.md`） |
 
 **生效逻辑**（`POST /api/user/set-pin` 内）：
 - 已有 `users` 行但 `pin_hash` 为空（从未设过 PIN）：检查 `direct_registration_open`
 - 关闭时返回 `403 Registration is currently closed`
 - `GET /api/user/status` 的响应体中也返回这两个布尔值，前端据此决定是否显示注册入口
 
-## OAuth 认证流程（简要）
+## OIDC 认证流程（简要）
 
-> 完整流程见 `module-oauth.md`。
+> 完整流程见 `module-oidc.md`。
 
-1. 管理员在后台配置 OAuth2 Provider（存储在 `settings` 表的 `oauth_providers` JSON 中）
-2. 前端登录页调用 `GET /api/user/status` 获取 `oauth_registration_open` 决定是否显示 OAuth 按钮
-3. 用户点击「通过 XX 登录」→ 前端调 `GET /api/oauth/:providerId/login` 获取重定向 URL
-4. 服务端生成 state token（15 分钟有效期），重定向到 OAuth Provider
-5. 用户授权后回调 `GET /api/oauth/:providerId/callback`
+1. 管理员在后台配置 OIDC Provider（存储在 `settings` 表的 `oidc_providers` JSON 中）
+2. 前端登录页调用 `GET /api/user/status` 获取 `oidc_registration_open` 决定是否显示 OIDC 按钮
+3. 用户点击「通过 XX 登录」→ 前端调 `GET /api/oidc/:providerId/login` 获取重定向 URL
+4. 服务端生成 state token（15 分钟有效期），重定向到 OIDC Provider
+5. 用户授权后回调 `GET /api/oidc/:providerId/callback`
 6. 服务端用 token → userinfo → 查找或创建用户 → 签发 JWT → Set-Cookie → 重定向回前端
-7. 如果是新用户且 `oauth_registration_open` 为 `false`，拒绝创建
+7. 如果是新用户且 `oidc_registration_open` 为 `false`，拒绝创建
 
-**OAuth 绑定管理**：
-- `GET /api/user/oauth-bindings`：返回当前用户的所有 OAuth 绑定
-- `DELETE /api/user/oauth-bindings/:id`：删除一条绑定（需确保至少保留一种登录方式：PIN 或其他 OAuth 绑定）
+**OIDC 绑定管理**：
+- `GET /api/user/oidc-bindings`：返回当前用户的所有 OIDC 绑定
+- `DELETE /api/user/oidc-bindings/:id`：删除一条绑定（需确保至少保留一种登录方式：PIN 或其他 OIDC 绑定）
 
 ## IP 速率限制
 
@@ -157,7 +157,7 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 
 | 导出位置 | 是否被路由使用 | 行为 |
 |---|---|---|
-| `apps/server/src/middleware/userAuth.ts`（用户） | 是（chat / conversations / upload / workspace + user 的 `/me`、`/refresh`、`/rename`、`/oauth-bindings`） | 从 HttpOnly Cookie `momoi_token` 提取 JWT 并验签，再查封禁状态 |
+| `apps/server/src/middleware/userAuth.ts`（用户） | 是（chat / conversations / upload / workspace + user 的 `/me`、`/refresh`、`/rename`、`/oidc-bindings`） | 从 HttpOnly Cookie `momoi_token` 提取 JWT 并验签，再查封禁状态 |
 | `apps/server/src/lib/auth.ts` 的 `adminAuthMiddleware`（管理员） | 是（admin 路由） | 同上取 token + 查封禁，另加 `ADMIN` 名单校验（401/403） |
 
 **实际行为**：
@@ -175,7 +175,7 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 
 查询当前用户名是否已设置 PIN。**此端点用 `X-User` 头识别用户（登录前无 JWT）。**
 
-**响应**：`{ "has_pin": true | false, "direct_registration_open": true | false, "oauth_registration_open": true | false }`
+**响应**：`{ "has_pin": true | false, "direct_registration_open": true | false, "oidc_registration_open": true | false }`
 
 **错误**：缺少 `X-User` → `400 { "code": "USER_NAME_REQUIRED" }`
 
@@ -253,7 +253,7 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 
 ### POST /api/user/rename（需用户 JWT）
 
-重命名当前用户，级联更新 `users`、`conversations`、`user_oauth_bindings`、`wechat_bindings` 四张表，并重新签发 JWT。
+重命名当前用户，级联更新 `users`、`conversations`、`user_oidc_bindings`、`wechat_bindings` 四张表，并重新签发 JWT。
 
 **请求**：`{ "new_username": "新的用户名" }`
 **响应**：`{ "username": "新的用户名", "expires_at": 1702598400 }` + `Set-Cookie`
@@ -262,15 +262,15 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 - 新用户名与当前相同 → 400 `Same as current username`
 - 新用户名已被占用 → 409 `Username already taken`
 
-### GET /api/user/oauth-bindings（需用户 JWT）
+### GET /api/user/oidc-bindings（需用户 JWT）
 
-返回当前用户的所有 OAuth 绑定。
+返回当前用户的所有 OIDC 绑定。
 
 **响应**：`{ "bindings": [{ "id": "...", "provider_id": "...", "created_at": 1700000000 }] }`
 
-### DELETE /api/user/oauth-bindings/:id（需用户 JWT）
+### DELETE /api/user/oidc-bindings/:id（需用户 JWT）
 
-删除一条 OAuth 绑定。删除前校验：至少保留一种登录方式（PIN 或其他 OAuth 绑定），否则拒绝。
+删除一条 OIDC 绑定。删除前校验：至少保留一种登录方式（PIN 或其他 OIDC 绑定），否则拒绝。
 
 **响应**：`{ "success": true }`
 **错误**：
