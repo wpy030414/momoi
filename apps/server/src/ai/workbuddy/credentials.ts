@@ -1,7 +1,7 @@
 /**
  * WorkBuddy 凭证存储：落 SQLite settings 表，AES-256-GCM 静态加密。
  *
- * 加密实现见 lib/encrypted-settings.ts（与 Doubao 凭证共用）；本模块只负责
+ * 加密实现见 lib/encrypted-settings.ts；本模块只负责
  * WorkBuddy 凭证的形态校验。密钥键 `workbuddy_store_key`、值键
  * `workbuddy_credential` 均保持不变，存量凭证可原样读取。
  */

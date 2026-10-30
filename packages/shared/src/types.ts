@@ -234,15 +234,14 @@ export interface OidcProvider {
 }
 
 /** 网关上游类型：custom = 管理员自配置的 OpenAI 兼容端点；workbuddy = 内置 WorkBuddy
- *  上游（凭证由服务端托管并后台自动轮换）；doubao = 内置豆包网页上游（扫码登录 +
- *  Cookie 凭证，见 apps/server/src/ai/doubao/）。 */
-export type GatewaySource = 'custom' | 'workbuddy' | 'doubao'
+ *  上游（凭证由服务端托管并后台自动轮换）。 */
+export type GatewaySource = 'custom' | 'workbuddy'
 
 export interface AppConfig {
   app_name: string
   app_favicon: string  // base64 data URL, empty = use default
   app_background: string  // base64 data URL, empty = no custom background
-  /** 网关上游类型；custom 时 api_endpoint/api_key 生效，workbuddy/doubao 时由内置转发器接管 */
+  /** 网关上游类型；custom 时 api_endpoint/api_key 生效，workbuddy 时由内置转发器接管 */
   gateway_source: GatewaySource
   api_endpoint: string
   api_key: string
@@ -293,66 +292,6 @@ export interface WorkBuddyLoginStatus {
   /** 登录页地址：仅 qr_state=unavailable 时下发，供管理员复制到自己的浏览器完成登录 */
   auth_url?: string
   credential?: WorkBuddyStatus
-}
-
-// ---- Doubao（豆包网页）上游 ----
-
-/**
- * 豆包凭证后台巡检状态。
- *
- * 豆包网页登录只下发会话 Cookie，上游没有 refresh token——巡检无法续期，
- * 只能探测有效性，并把上游响应里 Set-Cookie 的轮换结果写回本地凭证。
- */
-export interface DoubaoKeepalive {
-  enabled: boolean
-  /** 最近一次巡检时间（ISO） */
-  last_checked_at?: string
-  /** 最近一次巡检结果：ok = 凭证有效；auth = 上游判定登录失效；error = 网络 / 上游异常 */
-  last_result?: 'ok' | 'auth' | 'error'
-  /** 最近一次巡检的摘要（HTTP 状态 / 业务码，不含 Cookie） */
-  last_message?: string
-}
-
-/** 豆包凭证状态（不含任何 Cookie 明文，仅用于管理端展示） */
-export interface DoubaoStatus {
-  logged_in: boolean
-  /** 凭证已被判定失效（巡检或对话返回鉴权错误）：需重新扫码登录 */
-  invalid?: boolean
-  /** 后台凭证巡检（探测有效性 + 吸收上游轮换的 Cookie） */
-  keepalive?: DoubaoKeepalive
-  /** 凭证来源：store = 扫码登录后加密存储；env = DOUBAO_COOKIES 灾备 */
-  source?: 'store' | 'env'
-  uid?: string
-  nickname?: string
-  /** 凭证保存时间（ISO） */
-  saved_at?: string
-  /** 当前有效 Cookie 条数 */
-  cookie_count?: number
-  /** 上游风控标记：需在浏览器完成人机验证后重置 */
-  needs_captcha?: boolean
-  /** 每轮会话自动清理的统计（诊断用；失败不影响对话内容） */
-  conversation_cleanup?: {
-    enabled: boolean
-    attempted: number
-    deleted: number
-    failed: number
-    lastResult?: 'deleted' | 'failed'
-    lastCode?: number
-    lastAt?: string
-  }
-}
-
-/** 豆包扫码登录进度（二维码由登录链路产出：默认抖音授权码，回退豆包自助扫码码） */
-export interface DoubaoLoginStatus {
-  status: 'idle' | 'pending' | 'scanned' | 'success' | 'failed' | 'expired'
-  /** 登录链路：douyin = 抖音授权页二维码（默认）；doubao = 豆包自助扫码（灾备） */
-  flow?: 'douyin' | 'doubao'
-  message?: string
-  /** 二维码 PNG data URL（pending / scanned 时存在） */
-  qr_data_url?: string
-  /** 二维码过期时间（ISO；链路未知时缺省） */
-  expire_at?: string
-  credential?: DoubaoStatus
 }
 
 // ---- 上游模型目录（Agent 表单的模型下拉） ----
@@ -417,7 +356,7 @@ export interface ConfigTransferAgent {
  * 覆盖目标实例的 .env。详见 docs/specs/module-config.md 的导入导出章节。
  */
 export interface ConfigExportGateway {
-  /** 上游类型（custom / workbuddy / doubao）。凭证本身不可迁移：workbuddy / doubao 导入后仍需在网关页登录。 */
+  /** 上游类型（custom / workbuddy）。凭证本身不可迁移：workbuddy 导入后仍需在网关页登录。 */
   gateway_source?: GatewaySource
   api_endpoint?: string
   api_key?: string

@@ -77,7 +77,7 @@
 
 当前上游派发的模型目录（Agent 表单的模型下拉数据源）。
 
-**响应**：`{ "source": "custom" | "workbuddy" | "doubao", "models": [{ "id", "name?", "vendor?" }], "warning?": "not_logged_in" | "upstream_error", "detail?": "..." }`
+**响应**：`{ "source": "custom" | "workbuddy", "models": [{ "id", "name?", "vendor?" }], "warning?": "not_logged_in" | "upstream_error", "detail?": "..." }`
 
 **行为**：按已保存的 `gateway_source` 分流拉取；失败降级为 `models: []` + `warning`（不返回 5xx）。契约与各上游来源见 `module-agent.md` 的「模型目录与选择」。
 

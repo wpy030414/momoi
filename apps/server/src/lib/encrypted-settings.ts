@@ -7,8 +7,8 @@
  * `aesgcm:v1:<iv>:<tag>:<ciphertext>`（base64url）自描述，将来换密钥形态
  * 可平滑迁移。
  *
- * 由 WorkBuddy（refresh token）与 Doubao（网页 Cookie）两类上游凭证共用；
- * 读写各自独立的 valueKey / storeKey，互不影响。
+ * 目前由 WorkBuddy（refresh token）凭证使用；读写各自独立的 valueKey /
+ * storeKey，将来新增凭证类型可复用同一实现。
  */
 
 import crypto from 'node:crypto'

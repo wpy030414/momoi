@@ -26,11 +26,10 @@ Momoi 不再使用自配置的 OpenAI 兼容端点，而是把对话请求转发
 | `apps/server/src/ai/workbuddy/chat.ts` | 对话转发（认证头 / 401 重试 / 链路头） |
 | `apps/server/src/ai/workbuddy/headers.ts` | 网关客户端身份头（对话与模型目录共用） |
 | `apps/server/src/ai/workbuddy/models.ts` | 云端模型目录拉取（Agent 表单的模型下拉） |
-| `apps/server/src/lib/headless-browser.ts` | 系统 Edge / Chrome 启动器（WorkBuddy / 豆包登录共用） |
 | `apps/server/src/routes/workbuddy.ts` | 管理端点（状态 / 登录 / 登录进度 / 退出） |
 | `apps/server/src/ai/provider.ts` | `gateway_source=workbuddy` 时把请求交给 `chat.ts`，解析逻辑不变 |
-| `apps/web/src/components/admin/tabs/WorkBuddyCredentialPanel.tsx` | 微信二维码展示 + 登录轮询 + 凭证状态（与豆包面板共用同一套 UI/UX 状态机） |
-| `apps/web/src/components/admin/tabs/GatewaySettings.tsx` | 上游类型选择（custom / workbuddy / doubao） |
+| `apps/web/src/components/admin/tabs/WorkBuddyCredentialPanel.tsx` | 微信二维码展示 + 登录轮询 + 凭证状态 |
+| `apps/web/src/components/admin/tabs/GatewaySettings.tsx` | 上游类型选择（custom / workbuddy） |
 | `apps/web/src/components/admin/AdminPanelMain.tsx` | 右上角动作随上游类型切换（仅自配置时显示「从环境变量加载」，WorkBuddy 时不显示） |
 
 ## 登录流程

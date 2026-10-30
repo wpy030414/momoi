@@ -1,17 +1,15 @@
 /**
  * 上游模型目录聚合：管理端 Agent 表单「模型」下拉的数据源。
  *
- * 三种上游各有来源：
+ * 两种上游各有来源：
  * - custom    : GET {api_endpoint}/models（OpenAI 兼容端点）
  * - workbuddy : WorkBuddy 云端模型目录（需已登录，见 workbuddy/models.ts）
- * - doubao    : 静态预设（豆包网页端没有可编程的目录接口）
  *
  * 拉取失败一律降级为「空列表 + warning」，绝不 500：模型永远允许管理员
  * 在表单里选「自定义」手动填写，下拉只是便利，不能成为保存 Agent 的前置条件。
  */
 
 import type { AppConfig, GatewayModelList, GatewayModelOption } from '@momoi/shared/types'
-import { listDoubaoModels } from './doubao/config.js'
 import { fetchWorkBuddyModels } from './workbuddy/models.js'
 import { getStatus as getWorkBuddyStatus } from './workbuddy/token-manager.js'
 
@@ -80,10 +78,6 @@ async function fetchOpenAICompatibleModels(config: AppConfig): Promise<GatewayMo
 
 /** 当前上游派发的模型目录；任何异常都降级为空列表 + warning */
 export async function listGatewayModels(config: AppConfig): Promise<GatewayModelList> {
-  if (config.gateway_source === 'doubao') {
-    return { source: 'doubao', models: listDoubaoModels() }
-  }
-
   if (config.gateway_source === 'workbuddy') {
     // 先看凭证：未登录时不必发起注定失败的目录请求，直接给出可操作的提示
     const status = await getWorkBuddyStatus()

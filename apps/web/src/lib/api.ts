@@ -318,12 +318,6 @@ export const api = {
   workbuddyLoginStatus: () => request<import('@momoi/shared/types').WorkBuddyLoginStatus>('/api/admin/workbuddy/login/status'),
   workbuddyLogout: () => request<{ success: boolean }>('/api/admin/workbuddy/logout', { method: 'POST', body: '{}' }),
 
-  // Admin - Doubao（豆包网页）上游（扫码登录，Cookie 凭证由服务端加密托管）
-  doubaoStatus: () => request<import('@momoi/shared/types').DoubaoStatus>('/api/admin/doubao/status'),
-  doubaoLogin: () => request<import('@momoi/shared/types').DoubaoLoginStatus>('/api/admin/doubao/login', { method: 'POST', body: '{}' }),
-  doubaoLoginStatus: () => request<import('@momoi/shared/types').DoubaoLoginStatus>('/api/admin/doubao/login/status'),
-  doubaoLogout: () => request<{ success: boolean }>('/api/admin/doubao/logout', { method: 'POST', body: '{}' }),
-  doubaoResetCaptcha: () => request<{ success: boolean }>('/api/admin/doubao/reset-captcha', { method: 'POST', body: '{}' }),
   updateConfig: (config: Partial<import('@momoi/shared/types').AppConfig>) => request<import('@momoi/shared/types').AppConfig>('/api/admin/config', { method: 'PUT', body: JSON.stringify(config) }),
 
   // Admin - Agent CRUD

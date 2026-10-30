@@ -607,13 +607,13 @@ gateway:
     expect(r.errors[0].params).toEqual({ key: 'api_key2' })
   })
 
-  it('gateway_source：仅 custom / workbuddy / doubao 通过，其余拒绝', () => {
-    for (const bad of ['openai', '""', 'WorkBuddy', '123', 'doubao2']) {
+  it('gateway_source：仅 custom / workbuddy 通过，其余拒绝', () => {
+    for (const bad of ['openai', '""', 'WorkBuddy', '123', 'doubao2', 'doubao']) {
       const r = validateYAML(`gateway:\n  gateway_source: ${bad}\n`)
       expect(codes(r.errors), `gateway_source: ${bad}`).toEqual([ErrCode.CONFIG_IMPORT_BAD_GATEWAY_SOURCE])
       expect(r.errors[0].path).toBe('gateway.gateway_source')
     }
-    for (const good of ['custom', 'workbuddy', 'doubao']) {
+    for (const good of ['custom', 'workbuddy']) {
       const r = validateYAML(`gateway:\n  gateway_source: ${good}\n`)
       expect(r.ok, `gateway_source: ${good}`).toBe(true)
       expect(r.bundle?.gateway?.gateway_source).toBe(good)

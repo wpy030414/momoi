@@ -303,7 +303,7 @@ routes/chat.ts
   │     ├── @earendil-works/pi-agent-core（runAgentLoop）
   │     ├── @earendil-works/pi-ai（createAssistantMessageEventStream）
   │     ├── @sinclair/typebox（工具参数 schema）
-  │     ├── ai/provider.ts（API 客户端；gateway_source=workbuddy/doubao 时委托对应内置上游转发）
+  │     ├── ai/provider.ts（API 客户端；gateway_source=workbuddy 时委托内置上游转发）
   │     ├── ai/tools.ts → tools/registry.ts（12 个内置工具）
   │     ├── skills/registry.ts（技能注册表）
   │     └── config.ts（获取 Agent 配置）
@@ -331,7 +331,6 @@ routes/admin.ts
   ├── config.ts（配置 + Agent CRUD + MCP Server CRUD + TTS 配置）
   ├── prompts/（提示词规则引擎，见 routes/prompts.ts —— 目录 / 单片段 / 预览）
   ├── ai/workbuddy/（WorkBuddy 上游，见 routes/workbuddy.ts —— 微信二维码登录 / 凭证状态 / 退出）
-  ├── ai/doubao/（豆包网页上游，见 routes/doubao.ts —— 抖音授权二维码登录 / Cookie 凭证 / 后台凭证巡检 / 风控标记 / ImageX 附件上传 / 每轮会话清理）
   ├── ai/models.ts（上游模型目录聚合，见 routes/admin.ts 的 /gateway/models —— Agent 表单模型下拉）
   ├── lib/encrypted-settings.ts（两类上游凭证共用的 AES-256-GCM settings 读写）
   ├── lib/headless-browser.ts（两类上游登录共用的系统 Edge/Chrome 启动器）

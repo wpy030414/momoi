@@ -35,7 +35,7 @@ export function AdminPanelMain({ activeTab, standAlone, sidebarOpen, setSidebarO
   const mcpRef = useRef<McpManagerHandle>(null)
   const skillRef = useRef<SkillManagerHandle>(null)
   // 上游类型决定右上角动作：仅自配置时提供「从环境变量加载」；
-  // WorkBuddy / Doubao 的登录入口在各自凭证面板内，头部不再显示任何动作。
+  // WorkBuddy 的登录入口在凭证面板内，头部不再显示任何动作。
   const [gatewaySource, setGatewaySource] = useState<GatewaySource>('custom')
 
   return (

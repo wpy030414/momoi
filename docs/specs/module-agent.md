@@ -13,7 +13,7 @@ Agent 是独立配置的 AI 角色，每个 Agent 拥有独立的模型、系统
 | `apps/server/src/schema.ts` | agents 表 Drizzle 定义 + group_conversation_agents 关联表 |
 | `apps/server/src/lib/config.ts` | Agent CRUD 函数 + `bootstrapAgents()` 引导逻辑 |
 | `apps/server/src/routes/admin.ts` | Agent 管理 API 端点 |
-| `apps/server/src/ai/models.ts` | 上游模型目录聚合（custom / workbuddy / doubao） |
+| `apps/server/src/ai/models.ts` | 上游模型目录聚合（custom / workbuddy） |
 | `apps/server/src/ai/workbuddy/models.ts` | WorkBuddy 云端模型目录拉取 |
 | `apps/web/src/components/admin/tabs/AgentManager.tsx` | Agent 管理面板前端组件 |
 | `apps/web/src/components/admin/tabs/ModelPicker.tsx` | 模型下拉（目录 + 自定义输入） |
@@ -360,7 +360,6 @@ Agent 表单的「模型」是下拉框，打开表单时调用 `GET /api/admin/
 |---|---|
 | `custom` | `GET {api_endpoint}/models`（OpenAI 兼容；`api_key` 非空时带 `Authorization: Bearer …`） |
 | `workbuddy` | WorkBuddy 云端目录 `GET {WORKBUDDY_BASE_URL}/v2/enterprises/personal/models`（需已登录，401/403 强制续期后重试一次） |
-| `doubao` | 静态预设 `MODEL_PRESETS`（见 `module-doubao.md` 的模型映射） |
 
 **响应**：
 ```json

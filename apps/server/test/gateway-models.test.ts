@@ -6,7 +6,7 @@
 //   1. custom 上游走 GET {api_endpoint}/models，归一化 id / 展示名 / 供应商，
 //      去重并过滤文生图模型；
 //   2. 拉取失败不抛错，降级为空列表 + warning（Agent 表单仍可手动填写）；
-//   3. doubao 用静态预设、workbuddy 未登录时不发起目录请求。
+//   3. workbuddy 未登录时不发起目录请求。
 //
 // DB 用 temp node:sqlite + mock db/index.js（与 workbuddy-token 测试同构）。
 
@@ -132,26 +132,6 @@ describe('custom — OpenAI 兼容端点模型列表', () => {
     expect(result.models).toEqual([])
     expect(result.warning).toBe('upstream_error')
     expect(result.detail).toContain('data 缺失')
-  })
-})
-
-describe('doubao — 静态模型预设', () => {
-  it('不发起网络请求，直接返回预设列表', async () => {
-    const fetchMock = stubFetch(async () => new Response('{}'))
-
-    const result = await gateway.listGatewayModels(config({ gateway_source: 'doubao' }))
-
-    expect(fetchMock).not.toHaveBeenCalled()
-    expect(result.source).toBe('doubao')
-    expect(result.warning).toBeUndefined()
-    expect(result.models.map((m) => m.id)).toEqual([
-      'doubao-fast',
-      'doubao-expert',
-      'doubao-work',
-      'doubao-work-pro',
-      'doubao-2.1-lite',
-    ])
-    expect(result.models[0]).toEqual({ id: 'doubao-fast', name: '豆包 · 快速' })
   })
 })
 

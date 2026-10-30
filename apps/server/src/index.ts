@@ -45,7 +45,6 @@ import { pushNotificationRoute } from './routes/push-notification.js'
 import { serveClient } from './lib/static.js'
 import { startWechatPoller } from './im/wechat/poller.js'
 import { startWorkBuddyKeeper } from './ai/workbuddy/token-manager.js'
-import { startDoubaoKeeper } from './ai/doubao/session.js'
 import { initQqBots } from './im/qq/manager.js'
 
 const app = new Hono()
@@ -110,9 +109,6 @@ startWechatPoller()
 
 // WorkBuddy 凭证后台自动轮换（非阻塞；无凭证时每分钟只做一次空查询）
 startWorkBuddyKeeper()
-
-// 豆包凭证后台巡检（非阻塞；探测有效性并吸收上游轮换的 Cookie）
-startDoubaoKeeper()
 
 // Restore QQ bot gateway connections for all bound users (non-blocking)
 void initQqBots().catch((e) => console.error('[qq] restore failed:', e instanceof Error ? e.message : e))

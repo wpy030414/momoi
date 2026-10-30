@@ -9,7 +9,6 @@ import { Eye, EyeOff } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../ui/toast'
 import { WorkBuddyCredentialPanel } from './WorkBuddyCredentialPanel'
-import { DoubaoCredentialPanel } from './DoubaoCredentialPanel'
 import type { GatewaySource } from '@momoi/shared/types'
 
 export interface GatewaySettingsHandle {
@@ -22,7 +21,7 @@ interface GatewaySettingsProps {
 }
 
 const normalizeSource = (value: unknown): GatewaySource =>
-  value === 'workbuddy' || value === 'doubao' ? value : 'custom'
+  value === 'workbuddy' ? value : 'custom'
 
 export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettingsProps>(function GatewaySettings(
   { onSourceChange },
@@ -93,7 +92,6 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
           <SelectContent>
             <SelectItem value="custom">{t('settings.gatewaySourceCustom')}</SelectItem>
             <SelectItem value="workbuddy">{t('settings.gatewaySourceWorkBuddy')}</SelectItem>
-            <SelectItem value="doubao">{t('settings.gatewaySourceDoubao')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -123,10 +121,8 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
             </div>
           </div>
         </>
-      ) : source === 'workbuddy' ? (
-        <WorkBuddyCredentialPanel />
       ) : (
-        <DoubaoCredentialPanel />
+        <WorkBuddyCredentialPanel />
       )}
 
       <div>
