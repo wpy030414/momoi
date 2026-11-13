@@ -257,6 +257,19 @@ export interface AppConfig {
   /** 聊天常用追问（最多 5 条，非空对话输入框上方气泡） */
   followup_questions: string[]
   oidc_providers: OidcProvider[]
+
+  // ---- 限流（后台「网关」页）----
+  /** 限流总开关；false 时两个桶都不生效。缺省 true。 */
+  rate_limit_enabled: boolean
+  /** 生成桶：POST /api/chat 及其追问/建议/结算，每人每分钟上限。缺省 10。 */
+  rate_limit_generate_per_min: number
+  /** 普通桶：其余 REST 请求（不含 /api/events 长连接），每人每分钟上限。缺省 120。 */
+  rate_limit_rest_per_min: number
+
+  // ---- 额度（后台「用户」页 + 实例总额度）----
+  /** 实例总额度（MTok/周，0 = 不限制）。与每个用户的个人额度同时生效，先到者拦截。
+   *  1 MTok = 1e6 token = 1 积分。 */
+  instance_weekly_quota_mtok: number
 }
 
 // ---- WorkBuddy 上游 ----
@@ -597,6 +610,18 @@ export interface AdminUserRow {
   last_active_at: number | null
   banned: boolean
   oidc_providers: string[]  // OAuth2 provider ids linked to this user
+  /** 个人周额度（MTok/周）；null = 不限制 */
+  weekly_quota_mtok?: number | null
+  /** 本周已用（μtoken 整数，1e6 μtoken = 1 token = 1 积分） */
+  weekly_used_micro?: number
+}
+
+/** 成本看板（审查 Tab）：近 N 天的用量聚合，单位 μtoken */
+export interface AdminCostBoard {
+  days: number
+  total_micro: number
+  by_user: Array<{ username: string; micro: number }>
+  by_day: Array<{ date: string; micro: number }>
 }
 
 // ---- API Responses ----

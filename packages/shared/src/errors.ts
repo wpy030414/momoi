@@ -55,6 +55,12 @@ export enum ErrCode {
   USER_BINDING_NOT_OWNED = 'USER_BINDING_NOT_OWNED',
   USER_CANNOT_REMOVE_ONLY_LOGIN = 'USER_CANNOT_REMOVE_ONLY_LOGIN',
 
+  // ---- 限流 / 额度（middleware/requestGate.ts + lib/quota.ts） ----
+  /** 生成类请求触发速率限制（1 分钟滑动窗口）；params.retry_after = 建议重试秒数 */
+  RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
+  /** 周额度已用尽（个人额度与实例总额度先到者）；params.reset_at = 下周一零点的 epoch 秒 */
+  QUOTA_EXCEEDED = 'QUOTA_EXCEEDED',
+
   // ---- OIDC（* = 主要经 302 ?oidc_error_code= 传递） ----
   OIDC_UNKNOWN_PROVIDER = 'OIDC_UNKNOWN_PROVIDER',
   /** IdP 回调自带 error 参数；params.detail = IdP 原始 error 值 * */
@@ -305,6 +311,8 @@ export const ERR_REGISTRY: Readonly<Record<ErrCode, ErrMeta>> = {
   // USER
   [ErrCode.USER_NAME_REQUIRED]: { status: 400 },
   [ErrCode.USER_RATE_LIMITED]: { status: 429, params: ['seconds'] },
+  [ErrCode.RATE_LIMIT_EXCEEDED]: { status: 429, params: ['retry_after'] },
+  [ErrCode.QUOTA_EXCEEDED]: { status: 429, params: ['reset_at', 'scope'] },
   [ErrCode.USER_PIN_FORMAT]: { status: 400 },
   [ErrCode.USER_PIN_NOT_SET]: { status: 404 },
   [ErrCode.USER_DISABLED]: { status: 403 },
