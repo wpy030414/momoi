@@ -4,6 +4,90 @@ import { Button } from '../../ui/button'
 import { Loading } from '../../ui/spinner'
 import { api } from '../../../lib/api'
 
+/** μtoken → 积分（1e6 μtoken = 1 token；1 MTok = 1e12 μtoken = 1 积分） */
+function microToCredits(micro: number): string {
+  const credits = micro / 1e12
+  if (credits >= 100) return credits.toFixed(0)
+  if (credits >= 1) return credits.toFixed(2)
+  return credits.toFixed(3)
+}
+
+const COST_RANGE_DAYS = 7
+
+/**
+ * 成本看板（审查 Tab 顶部）：近 7 天用量，按用户与按天两个维度。
+ * 数据来自 usage_ledger（周额度账本），与额度拦截同一口径。
+ */
+function CostBoard() {
+  const { t } = useTranslation()
+  const [board, setBoard] = useState<import('@momoi/shared/types').AdminCostBoard | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.getAdminCostBoard(COST_RANGE_DAYS)
+      .then(setBoard)
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <Loading />
+  if (!board || board.total_micro === 0) {
+    return (
+      <div className="rounded-md border p-4">
+        <h3 className="text-sm font-semibold mb-1">{t('settings.costBoard')}</h3>
+        <p className="text-muted-foreground text-sm">{t('settings.costNoData')}</p>
+      </div>
+    )
+  }
+
+  const maxDay = Math.max(...board.by_day.map((d) => d.micro), 1)
+
+  return (
+    <div className="rounded-md border p-4">
+      <div className="flex items-baseline justify-between mb-3">
+        <h3 className="text-sm font-semibold">{t('settings.costBoard')}</h3>
+        <span className="text-xs text-muted-foreground">{t('settings.costBoardRange', { days: board.days })}</span>
+      </div>
+      <div className="mb-4">
+        <span className="text-xs text-muted-foreground">{t('settings.costBoardTotal')}</span>
+        <span className="ml-2 text-lg font-semibold">{microToCredits(board.total_micro)}</span>
+        <span className="ml-1 text-xs text-muted-foreground">MTok</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* 按天：简易条形图 */}
+        <div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">{t('settings.costByDay')}</div>
+          <div className="space-y-1">
+            {board.by_day.map((d) => (
+              <div key={d.date} className="flex items-center gap-2 text-xs">
+                <span className="w-20 shrink-0 text-muted-foreground">{d.date.slice(5)}</span>
+                <div className="flex-1 h-2 rounded bg-muted overflow-hidden">
+                  <div className="h-full bg-primary" style={{ width: `${(d.micro / maxDay) * 100}%` }} />
+                </div>
+                <span className="w-16 text-right tabular-nums">{microToCredits(d.micro)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 按用户 */}
+        <div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">{t('settings.costByUser')}</div>
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {board.by_user.map((u) => (
+              <div key={u.username} className="flex items-center justify-between text-xs">
+                <span className="truncate">{u.username}</span>
+                <span className="tabular-nums ml-2 shrink-0">{microToCredits(u.micro)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function ReviewPanel() {
   const { t } = useTranslation()
   const [conversations, setConversations] = useState<any[]>([])
@@ -67,7 +151,8 @@ export function ReviewPanel() {
   const paginatedConversations = conversations.slice(startIndex, endIndex)
 
   return (
-    <div className="pt-4">
+    <div className="pt-4 space-y-6">
+      <CostBoard />
       {conversations.length === 0 ? (
         <p className="text-muted-foreground">{t('settings.statsNoConversations')}</p>
       ) : (

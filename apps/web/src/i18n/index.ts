@@ -51,6 +51,19 @@ export default i18n
 export function errT(e: unknown): string {
   if (!isApiError(e)) return e instanceof Error ? e.message : String(e)
   const key = `errors.${e.code}`
-  if (i18n.exists(key)) return i18n.t(key, e.params ?? {})
+  if (i18n.exists(key)) {
+    const params: Record<string, unknown> = { ...(e.params ?? {}) }
+    // QUOTA_EXCEEDED 的 reset_at 是 epoch 秒：由**前端**按用户本地时区格式化
+    // （服务端时区与用户时区可能不同，后端 toLocaleString 会给出错误的时间）；
+    // scope 走 i18n 键，避免服务端硬编码某一种语言的文本。
+    if (e.code === 'QUOTA_EXCEEDED') {
+      const reset = Number(params.reset_at)
+      params.reset_at = Number.isFinite(reset) && reset > 0
+        ? new Date(reset * 1000).toLocaleString()
+        : ''
+      params.scope = i18n.t(`quotaScope.${String(params.scope)}`)
+    }
+    return i18n.t(key, params)
+  }
   return i18n.t('errors.__unknown', { code: e.code })
 }

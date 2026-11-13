@@ -340,9 +340,16 @@ export const api = {
 
   // Admin - User Management
   listAdminUsers: (page = 1, pageSize = 10) =>
-    request<{ users: import('@momoi/shared/types').AdminUserRow[]; total: number; page: number; page_size: number }>(
+    request<{ users: import('@momoi/shared/types').AdminUserRow[]; total: number; page: number; page_size: number; week_start?: number }>(
       `/api/admin/users?page=${page}&page_size=${pageSize}`
     ),
+  setUserQuota: (username: string, weeklyQuotaMtok: number | null) =>
+    request<{ success: boolean; weekly_quota_mtok: number | null }>(
+      `/api/admin/users/${encodeURIComponent(username)}/quota`,
+      { method: 'PUT', body: JSON.stringify({ weekly_quota_mtok: weeklyQuotaMtok }) }
+    ),
+  getAdminCostBoard: (days = 7) =>
+    request<import('@momoi/shared/types').AdminCostBoard>(`/api/admin/stats/cost?days=${days}`),
   setUserBan: (username: string, banned: boolean) =>
     request<{ success: boolean; banned: boolean }>(`/api/admin/users/${encodeURIComponent(username)}/ban`, { method: 'PUT', body: JSON.stringify({ banned }) }),
   deleteUser: (username: string) =>

@@ -20,6 +20,81 @@ function newProvider(): OidcProvider {
 
 const PAGE_SIZE = 10
 
+/** μtoken → MTok 显示（1e6 μtoken = 1 token；1 MTok = 1e12 μtoken） */
+function formatMtok(micro: number): string {
+  const mtok = micro / 1e12
+  if (mtok >= 100) return mtok.toFixed(0)
+  if (mtok >= 1) return mtok.toFixed(2)
+  return mtok.toFixed(3)
+}
+
+/**
+ * 周额度单元格：本周已用 + 个人额度（行内编辑）。
+ * 额度单位 MTok/周；留空或 0 = 不限制。见 lib/quota.ts。
+ */
+function QuotaCell({ user, onSaved }: { user: AdminUserRow; onSaved: () => void }) {
+  const { t } = useTranslation()
+  const { toast } = useToast()
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(user.weekly_quota_mtok ? String(user.weekly_quota_mtok) : '')
+  const [saving, setSaving] = useState(false)
+
+  const usedMicro = user.weekly_used_micro ?? 0
+  const quotaMtok = user.weekly_quota_mtok ?? 0
+  const over = quotaMtok > 0 && usedMicro >= quotaMtok * 1e12
+
+  const save = async () => {
+    setSaving(true)
+    const parsed = Number(value)
+    const next = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null
+    try {
+      await api.setUserQuota(user.username, next)
+      toast({ title: t('settings.toastSaved'), variant: 'success' })
+      setEditing(false)
+      onSaved()
+    } catch (err) {
+      console.error(err)
+    }
+    setSaving(false)
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="text-left hover:underline decoration-dotted"
+        onClick={() => { setValue(user.weekly_quota_mtok ? String(user.weekly_quota_mtok) : ''); setEditing(true) }}
+        title={t('settings.weeklyQuotaHint')}
+      >
+        <span className={over ? 'text-destructive font-medium' : ''}>
+          {formatMtok(usedMicro)} MTok
+        </span>
+        <span className="text-muted-foreground">
+          {' / '}{quotaMtok > 0 ? `${quotaMtok} MTok` : '∞'}
+        </span>
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <Input
+        type="number"
+        min={0}
+        value={value}
+        placeholder="∞"
+        className="h-7 w-20 text-xs"
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') save() }}
+        autoFocus
+      />
+      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={save} disabled={saving}>
+        {saving ? t('common.saving') : t('common.save')}
+      </Button>
+    </div>
+  )
+}
+
 export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_props, ref) {
   const { t } = useTranslation()
   const { toast } = useToast()
@@ -217,6 +292,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userUsername')}</th>
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userOidcBindings')}</th>
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userLastLogin')}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t('settings.weeklyUsed')}</th>
                   <th className="text-right px-3 py-2 font-medium">{t('settings.userActions')}</th>
                 </tr>
               </thead>
@@ -230,6 +306,9 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
                         : '-'}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">{formatTime(u.last_active_at ?? u.last_login_at)}</td>
+                    <td className="px-3 py-2">
+                      <QuotaCell user={u} onSaved={fetchUsers} />
+                    </td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <Button variant="ghost" size="sm" className="text-amber-600 hover:text-amber-700" onClick={() => handleForgetMemories(u.username)}>

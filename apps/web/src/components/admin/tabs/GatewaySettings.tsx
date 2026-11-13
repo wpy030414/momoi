@@ -163,6 +163,53 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
           onCheckedChange={(v) => setConfig({ ...config, allow_im_conversations: v })}
         />
       </div>
+      {/* 限流：分桶滑动窗口，见 middleware/requestGate.ts */}
+      <div className="pt-2 border-t">
+        <div className="flex items-center gap-3 mb-3">
+          <label className="text-sm font-medium">{t('settings.rateLimitEnabled')}</label>
+          <Switch
+            checked={config.rate_limit_enabled !== false}
+            onCheckedChange={(v) => setConfig({ ...config, rate_limit_enabled: v })}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">{t('settings.rateLimitHint')}</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-sm font-medium">{t('settings.rateLimitGenerate')}</label>
+            <Input
+              type="number"
+              min={0}
+              value={config.rate_limit_generate_per_min ?? 10}
+              onChange={(e) => setConfig({ ...config, rate_limit_generate_per_min: Math.max(0, Number(e.target.value) || 0) })}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">{t('settings.rateLimitRest')}</label>
+            <Input
+              type="number"
+              min={0}
+              value={config.rate_limit_rest_per_min ?? 120}
+              onChange={(e) => setConfig({ ...config, rate_limit_rest_per_min: Math.max(0, Number(e.target.value) || 0) })}
+              className="mt-1"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* 实例总额度：与各用户个人额度先到者拦截，见 lib/quota.ts */}
+      <div className="pt-2 border-t">
+        <label className="text-sm font-medium">{t('settings.instanceQuota')}</label>
+        <Input
+          type="number"
+          min={0}
+          value={config.instance_weekly_quota_mtok ?? 0}
+          onChange={(e) => setConfig({ ...config, instance_weekly_quota_mtok: Math.max(0, Number(e.target.value) || 0) })}
+          className="mt-1"
+        />
+        <p className="text-xs text-muted-foreground mt-1">{t('settings.instanceQuotaHint')}</p>
+      </div>
+
       <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>
   )
