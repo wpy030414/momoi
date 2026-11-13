@@ -418,9 +418,8 @@
     "rateLimitHint": "按用户与 IP 双向计数，滑动窗口 60 秒。填 0 表示该档不限制；事件流长连接不计数。",
     "rateLimitGenerate": "生成请求 / 分钟（聊天）",
     "rateLimitRest": "普通请求 / 分钟",
-    "weeklyQuota": "每周额度（MTok）",
-    "weeklyQuotaHint": "留空 = 不限制。1 MTok = 100 万 token = 1 积分。",
-    "weeklyUsed": "本周已用",
+    "weeklyQuota": "周限额（已用 / 额度，MTok）",
+    "weeklyQuotaHint": "留空 = 不限制。1 MTok = 100 万 token。",
     "instanceQuota": "实例每周总额度（MTok）",
     "instanceQuotaHint": "与各用户个人额度同时生效，先到者拦截。0 = 不限制。",
     "costBoard": "成本看板",
@@ -559,9 +558,8 @@
     "workbuddyCopyLoginLink": "复制登录页链接",
     "workbuddyCopyLoginLinkSuccess": "链接已复制",
     "workbuddyCopyLoginLinkFailed": "复制失败，请手动选中链接复制",
-    "creditUnit": "积分",
     "defaultNewUserQuota": "默认新用户周限额",
-    "defaultNewUserQuotaHint": "新创建账号的初始每周额度（积分/周；0 = 不限制）。已有用户不受影响。"
+    "defaultNewUserQuotaHint": "新创建账号的初始每周额度（MTok/周，整数；0 = 不限制）。已有用户不受影响。"
   },
   "login": {
     "title": "欢迎",

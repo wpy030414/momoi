@@ -418,9 +418,8 @@
     "rateLimitHint": "Counted per user and per IP with a 60-second sliding window. 0 disables that tier; the event-stream long connection is not counted.",
     "rateLimitGenerate": "Generation requests / min (chat)",
     "rateLimitRest": "Other requests / min",
-    "weeklyQuota": "Weekly quota (MTok)",
-    "weeklyQuotaHint": "Leave empty for unlimited. 1 MTok = 1 million tokens = 1 credit.",
-    "weeklyUsed": "Used this week",
+    "weeklyQuota": "Weekly quota (used / limit, MTok)",
+    "weeklyQuotaHint": "Leave empty for unlimited. 1 MTok = 1 million tokens.",
     "instanceQuota": "Instance-wide weekly quota (MTok)",
     "instanceQuotaHint": "Applies alongside per-user quotas; whichever is hit first blocks. 0 = unlimited.",
     "costBoard": "Cost overview",
@@ -559,9 +558,8 @@
     "workbuddyCopyLoginLink": "Copy sign-in link",
     "workbuddyCopyLoginLinkSuccess": "Link copied",
     "workbuddyCopyLoginLinkFailed": "Copy failed — select the link and copy manually",
-    "creditUnit": "credits",
     "defaultNewUserQuota": "Default new user weekly quota",
-    "defaultNewUserQuotaHint": "Initial weekly allowance for new accounts (credits/week; 0 = unlimited). Existing users are unaffected."
+    "defaultNewUserQuotaHint": "Initial weekly allowance for new accounts (MTok/week, integers; 0 = unlimited). Existing users are unaffected."
   },
   "login": {
     "title": "Welcome",

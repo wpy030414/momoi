@@ -20,15 +20,15 @@ function newProvider(): OidcProvider {
 
 const PAGE_SIZE = 10
 
-/** token 数 → 积分显示（1e6 token = 1 积分）。**一律固定 2 位小数**。 */
-function tokensToCredits(tokens: number): string {
+/** token 数 → MTok 用量显示（1e6 token = 1 MTok）。已用量需 2 位小数保精度。 */
+function tokensToMtok(tokens: number): string {
   return (tokens / 1e6).toFixed(2)
 }
 
 /**
- * 周限额单元格：已用 / 限额（行内编辑）。**统一以积分显示**（1 积分 = 1 MTok）。
- * 已用值来自 `weekly_used_tokens`（原始 token），积分在此实时推算，不读任何积分存储。
- * 留空或 0 = 不限制。见 lib/quota.ts。
+ * 周限额单元格：已用 / 限额（行内编辑）。**后台一律用 MTok**（1 MTok = 1e6 token）。
+ * 已用值来自 `weekly_used_tokens`（原始 token），MTok 在此实时推算，不读任何存储值。
+ * 额度只接受整数 MTok；留空或 0 = 不限制。见 lib/quota.ts。
  */
 function QuotaCell({ user, onSaved }: { user: AdminUserRow; onSaved: () => void }) {
   const { t } = useTranslation()
@@ -37,15 +37,16 @@ function QuotaCell({ user, onSaved }: { user: AdminUserRow; onSaved: () => void 
   const [value, setValue] = useState(user.weekly_quota_mtok ? String(user.weekly_quota_mtok) : '')
   const [saving, setSaving] = useState(false)
 
-  // 本周已用 token 数（积分是它的派生量）
+  // 本周已用 token 数（MTok 是它的派生量）
   const usedTokens = user.weekly_used_tokens ?? 0
-  // 额度存储仍是 MTok（与后端同口径）；1 MTok = 1 积分 = 1e6 token
+  // 额度存储为整数 MTok（与后端同口径）；1 MTok = 1e6 token
   const quotaMtok = user.weekly_quota_mtok ?? 0
   const over = quotaMtok > 0 && usedTokens >= quotaMtok * 1e6
 
   const save = async () => {
     setSaving(true)
     const parsed = Number(value)
+    // 额度只接受整数 MTok
     const next = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null
     try {
       await api.setUserQuota(user.username, next)
@@ -67,10 +68,10 @@ function QuotaCell({ user, onSaved }: { user: AdminUserRow; onSaved: () => void 
         title={t('settings.weeklyQuotaHint')}
       >
         <span className={over ? 'text-destructive font-medium' : ''}>
-          {tokensToCredits(usedTokens)}
+          {tokensToMtok(usedTokens)}
         </span>
         <span className="text-muted-foreground">
-          {' / '}{quotaMtok > 0 ? tokensToCredits(quotaMtok * 1e6) : '∞'}
+          {' / '}{quotaMtok > 0 ? `${quotaMtok} MTok` : '∞'}
         </span>
       </button>
     )
@@ -81,6 +82,7 @@ function QuotaCell({ user, onSaved }: { user: AdminUserRow; onSaved: () => void 
       <Input
         type="number"
         min={0}
+        step={1}
         value={value}
         placeholder="∞"
         className="h-7 w-20 text-xs"
@@ -306,7 +308,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
             placeholder="0"
             className="w-32"
           />
-          <span className="text-sm text-muted-foreground">{t('settings.creditUnit')}</span>
+          <span className="text-sm text-muted-foreground">MTok</span>
         </div>
         <p className="text-xs text-muted-foreground mt-1">{t('settings.defaultNewUserQuotaHint')}</p>
       </div>

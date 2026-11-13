@@ -4,8 +4,8 @@ import { Button } from '../../ui/button'
 import { Loading } from '../../ui/spinner'
 import { api } from '../../../lib/api'
 
-/** token 数 → 积分显示（1e6 token = 1 积分）。**一律固定 2 位小数**。 */
-function tokensToCredits(tokens: number): string {
+/** token 数 → MTok 用量显示（1e6 token = 1 MTok）。已用量需 2 位小数保精度。 */
+function tokensToMtok(tokens: number): string {
   return (tokens / 1e6).toFixed(2)
 }
 
@@ -47,8 +47,8 @@ function CostBoard() {
       </div>
       <div className="mb-4">
         <span className="text-xs text-muted-foreground">{t('settings.costBoardTotal')}</span>
-        <span className="ml-2 text-lg font-semibold">{tokensToCredits(board.total_tokens)}</span>
-        <span className="ml-1 text-xs text-muted-foreground">{t('settings.creditUnit')}</span>
+        <span className="ml-2 text-lg font-semibold">{tokensToMtok(board.total_tokens)}</span>
+        <span className="ml-1 text-xs text-muted-foreground">MTok</span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -62,7 +62,7 @@ function CostBoard() {
                 <div className="flex-1 h-2 rounded bg-muted overflow-hidden">
                   <div className="h-full bg-primary" style={{ width: `${(d.tokens / maxDay) * 100}%` }} />
                 </div>
-                <span className="w-16 text-right tabular-nums">{tokensToCredits(d.tokens)}</span>
+                <span className="w-16 text-right tabular-nums">{tokensToMtok(d.tokens)}</span>
               </div>
             ))}
           </div>
@@ -75,7 +75,7 @@ function CostBoard() {
             {board.by_user.map((u) => (
               <div key={u.username} className="flex items-center justify-between text-xs">
                 <span className="truncate">{u.username}</span>
-                <span className="tabular-nums ml-2 shrink-0">{tokensToCredits(u.tokens)}</span>
+                <span className="tabular-nums ml-2 shrink-0">{tokensToMtok(u.tokens)}</span>
               </div>
             ))}
           </div>
