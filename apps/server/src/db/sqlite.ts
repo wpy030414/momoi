@@ -104,6 +104,17 @@ export async function initSqlite(dbPath?: string) {
     // Column already exists, safe to ignore
   }
 
+  // Migration: usage_ledger.micro → micro_credits（D77 口径从 μtoken 改为微积分）。
+  // CREATE TABLE IF NOT EXISTS 对已存在的表不补列，因此升级实例必须显式改名；
+  // 列已存在时改名本身会抛错，被 catch 吞掉——幂等。
+  // 表是纯追加的用量流水，旧列名只存在于首个开发版本，按等值改名即可。
+  try {
+    client.exec(`ALTER TABLE usage_ledger RENAME COLUMN micro TO micro_credits`)
+    console.log('[db] Migration: renamed usage_ledger.micro → micro_credits')
+  } catch {
+    // 列已改名或表由新版 DDL 创建，safe to ignore
+  }
+
   // Migration: OAuth2 → OIDC（表 user_oauth_bindings 改名 user_oidc_bindings）
   // 旧表不删——已部署实例升级后可回退；INSERT OR IGNORE 依赖 UNIQUE(provider_id, provider_user_id)
   // 保证重复启动幂等。旧表不存在（全新部署）时 try 内语句会抛错，被 catch 吞掉。
