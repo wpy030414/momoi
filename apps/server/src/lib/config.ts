@@ -106,6 +106,20 @@ function parseGatewaySource(raw: string | undefined): AppConfig['gateway_source'
   return raw === 'workbuddy' ? raw : 'custom'
 }
 
+/** 正整数收口（限流阈值）：非法/缺失 → fallback；显式 0 表示「不限制」，原样保留 */
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === '') return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback
+}
+
+/** 非负整数收口（额度）：非法/缺失 → fallback */
+function parseNonNegativeInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === '') return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback
+}
+
 function buildConfig(map: Map<string, string>): AppConfig {
   return {
     app_name: map.get('app_name') || DEFAULT_APP_NAME,
@@ -125,6 +139,14 @@ function buildConfig(map: Map<string, string>): AppConfig {
     followup_questions: JSON.parse(map.get('followup_questions') || '[]'),
     // 回退读取旧键：升级实例的既有 Provider 配置不丢（结构差异由 config-transfer 的导入校验兜住）
     oidc_providers: JSON.parse(map.get('oidc_providers') ?? map.get('oauth_providers') ?? '[]'),
+    // 限流：未写入 settings 的实例走缺省（开启 + 10/120）；管理员显式保存后以库为准
+    rate_limit_enabled: map.get('rate_limit_enabled') !== 'false',
+    rate_limit_generate_per_min: parsePositiveInt(map.get('rate_limit_generate_per_min'), 10),
+    rate_limit_rest_per_min: parsePositiveInt(map.get('rate_limit_rest_per_min'), 120),
+    // 实例周总额度（MTok）；0 = 不限制
+    instance_weekly_quota_mtok: parseNonNegativeInt(map.get('instance_weekly_quota_mtok'), 0),
+    // 默认新用户周额度（MTok）；0 = 不限制，仅影响之后新建的账号
+    default_new_user_quota_mtok: parseNonNegativeInt(map.get('default_new_user_quota_mtok'), 0),
   }
 }
 
@@ -141,8 +163,8 @@ export async function getConfig(): Promise<AppConfig> {
 export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConfig> {
   for (const [key, value] of Object.entries(partial)) {
     if (value !== undefined) {
-      const boolKeys = ['support_attachments', 'support_infinite_mode', 'allow_im_conversations', 'show_github', 'use_external_image_hosting']
-      const numberKeys = ['context_window']
+      const boolKeys = ['support_attachments', 'support_infinite_mode', 'allow_im_conversations', 'show_github', 'use_external_image_hosting', 'rate_limit_enabled']
+      const numberKeys = ['context_window', 'rate_limit_generate_per_min', 'rate_limit_rest_per_min', 'instance_weekly_quota_mtok', 'default_new_user_quota_mtok']
       const jsonKeys = ['recommended_questions', 'followup_questions', 'oidc_providers']
       let stored: string
       if (jsonKeys.includes(key)) {

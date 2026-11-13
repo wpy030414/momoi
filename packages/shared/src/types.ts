@@ -257,6 +257,22 @@ export interface AppConfig {
   /** 聊天常用追问（最多 5 条，非空对话输入框上方气泡） */
   followup_questions: string[]
   oidc_providers: OidcProvider[]
+
+  // ---- 限流（后台「网关」页）----
+  /** 限流总开关；false 时两个桶都不生效。缺省 true。 */
+  rate_limit_enabled: boolean
+  /** 生成桶：POST /api/chat 及其追问/建议/结算，每人每分钟上限。缺省 10。 */
+  rate_limit_generate_per_min: number
+  /** 普通桶：其余 REST 请求（不含 /api/events 长连接），每人每分钟上限。缺省 120。 */
+  rate_limit_rest_per_min: number
+
+  // ---- 额度（后台「用户」页 + 实例总额度）----
+  /** 实例总额度（MTok/周，0 = 不限制）。与每个用户的个人额度同时生效，先到者拦截。
+   *  1 MTok = 1e6 token = 1 积分。 */
+  instance_weekly_quota_mtok: number
+  /** 默认新用户周额度（MTok/周，0 = 不限制）。新账号创建时写入其 users.weekly_quota_mtok；
+   *  已有用户不受影响（改这里不会追溯调整）。 */
+  default_new_user_quota_mtok: number
 }
 
 // ---- WorkBuddy 上游 ----
@@ -597,6 +613,31 @@ export interface AdminUserRow {
   last_active_at: number | null
   banned: boolean
   oidc_providers: string[]  // OAuth2 provider ids linked to this user
+  /** 个人周额度（MTok/周）；null = 不限制 */
+  weekly_quota_mtok?: number | null
+  /** 本周已用 token 数（原始消耗量；积分由它实时推算，不落库） */
+  weekly_used_tokens?: number
+}
+
+/** 成本看板（审查 Tab）：近 N 天的用量聚合。**单位为 token**，积分由前端实时换算。 */
+export interface AdminCostBoard {
+  days: number
+  total_tokens: number
+  by_user: Array<{ username: string; tokens: number }>
+  by_day: Array<{ date: string; tokens: number }>
+}
+
+/** 当前用户的积分余额（GET /api/user/me）——所有者自查，非管理员视图。
+ *  积分全部由 token 实时推算，**不存储**。额度为 NULL/0 时 `limit_credits` 为 null，前端显示「∞」。 */
+export interface MyQuotaInfo {
+  /** 本周已用（积分，固定 2 位小数） */
+  used_credits: number
+  /** 本周额度（积分，固定 2 位小数）；null = 不限制 */
+  limit_credits: number | null
+  /** 剩余积分（固定 2 位小数）；不限制时为 null */
+  remaining_credits: number | null
+  /** 额度重置时刻（epoch 秒，下周一 00:00） */
+  reset_at: number
 }
 
 // ---- API Responses ----

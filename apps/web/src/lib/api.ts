@@ -228,7 +228,7 @@ export const api = {
     headers: { 'X-User': encodeURIComponent(username) }
   }),
   // Current user info (admin status detection)
-  getMe: () => request<{ username: string; is_admin: boolean }>('/api/user/me'),
+  getMe: () => request<{ username: string; is_admin: boolean; quota?: import('@momoi/shared/types').MyQuotaInfo | null }>('/api/user/me'),
   // Exchange a still-valid cookie for a fresh 14-day one (sliding session renewal)
   refreshToken: () => request<{ expires_at: number }>('/api/user/refresh', { method: 'POST' }),
   // Clear the HttpOnly cookie server-side (JS cannot delete it itself)
@@ -340,9 +340,16 @@ export const api = {
 
   // Admin - User Management
   listAdminUsers: (page = 1, pageSize = 10) =>
-    request<{ users: import('@momoi/shared/types').AdminUserRow[]; total: number; page: number; page_size: number }>(
+    request<{ users: import('@momoi/shared/types').AdminUserRow[]; total: number; page: number; page_size: number; week_start?: number }>(
       `/api/admin/users?page=${page}&page_size=${pageSize}`
     ),
+  setUserQuota: (username: string, weeklyQuotaMtok: number | null) =>
+    request<{ success: boolean; weekly_quota_mtok: number | null }>(
+      `/api/admin/users/${encodeURIComponent(username)}/quota`,
+      { method: 'PUT', body: JSON.stringify({ weekly_quota_mtok: weeklyQuotaMtok }) }
+    ),
+  getAdminCostBoard: (days = 7) =>
+    request<import('@momoi/shared/types').AdminCostBoard>(`/api/admin/stats/cost?days=${days}`),
   setUserBan: (username: string, banned: boolean) =>
     request<{ success: boolean; banned: boolean }>(`/api/admin/users/${encodeURIComponent(username)}/ban`, { method: 'PUT', body: JSON.stringify({ banned }) }),
   deleteUser: (username: string) =>

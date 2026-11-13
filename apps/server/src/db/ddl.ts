@@ -63,6 +63,23 @@ export const MIGRATION_SQL = `
   CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
   CREATE INDEX IF NOT EXISTS idx_group_conv_agents_conv ON group_conversation_agents(conversation_id);
 
+  -- 用量流水（周额度账本）：每次生成追加一行，按周聚合。见 docs/DECISIONS.md D77。
+  --   · micro = 本次生成的 μtoken（1e6 μtoken = 1 token；整数，永不丢精度）
+  --   · estimated = 该行含字符估算值（整轮未拿到上游 usage）
+  --   · week_start = 归属自然周的周一 00:00（站点本地时区）的 epoch 秒，写入时算好，
+  --     读时按它聚合——跨时区/跨年不用再算，也不会因时区配置变化而错位
+  CREATE TABLE IF NOT EXISTS usage_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL DEFAULT '',
+    tokens INTEGER NOT NULL,
+    estimated INTEGER NOT NULL DEFAULT 0,
+    week_start INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_usage_ledger_week ON usage_ledger(week_start, user_id);
+  CREATE INDEX IF NOT EXISTS idx_usage_ledger_user ON usage_ledger(user_id, created_at);
+
   CREATE TABLE IF NOT EXISTS mcp_servers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
@@ -77,7 +94,8 @@ export const MIGRATION_SQL = `
     first_login_at INTEGER NOT NULL,
     last_login_at INTEGER NOT NULL,
     last_active_at INTEGER,
-    banned INTEGER NOT NULL DEFAULT 0
+    banned INTEGER NOT NULL DEFAULT 0,
+    weekly_quota_mtok INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS user_oidc_bindings (

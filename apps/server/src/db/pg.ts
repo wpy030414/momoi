@@ -87,7 +87,8 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       first_login_at INTEGER NOT NULL,
       last_login_at INTEGER NOT NULL,
       last_active_at INTEGER,
-      banned BOOLEAN NOT NULL DEFAULT FALSE
+      banned BOOLEAN NOT NULL DEFAULT FALSE,
+      weekly_quota_mtok INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS user_oidc_bindings (
@@ -180,6 +181,18 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_workspaces_user ON workspaces(user_id);
+
+    CREATE TABLE IF NOT EXISTS usage_ledger (
+      id SERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL DEFAULT '',
+      tokens INTEGER NOT NULL,
+      estimated INTEGER NOT NULL DEFAULT 0,
+      week_start INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_ledger_week ON usage_ledger(week_start, user_id);
+    CREATE INDEX IF NOT EXISTS idx_usage_ledger_user ON usage_ledger(user_id, created_at);
   `)
 
   // 既有 PG 部署补列（幂等）：分组工作区锚定列，见 docs/specs/module-workspace.md
@@ -191,6 +204,26 @@ export async function initPg(dbUrl: string, user: string, password: string) {
   await pool.query(`ALTER TABLE worlds ADD COLUMN IF NOT EXISTS state_values TEXT`)
   // 智能体立绘（仅单聊聊天区上半屏展示）
   await pool.query(`ALTER TABLE agents ADD COLUMN IF NOT EXISTS standing_art TEXT NOT NULL DEFAULT ''`)
+  // 用户周额度（NULL = 不限制），见 docs/DECISIONS.md D77
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_quota_mtok INTEGER`)
+  // 用量流水口径演化（D77 两次修订）：micro（μtoken）→ micro_credits → tokens。
+  // 最终只存 token 数；积分由它实时推算。逐级改名，每级都先查 information_schema。
+  for (const [from, to] of [['micro', 'micro_credits'], ['micro_credits', 'tokens']] as const) {
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'usage_ledger' AND column_name = '${from}'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'usage_ledger' AND column_name = '${to}'
+        ) THEN
+          ALTER TABLE usage_ledger RENAME COLUMN ${from} TO ${to};
+        END IF;
+      END $$;
+    `)
+  }
 
   // drizzle-orm 1.0-rc.4：node-postgres 的 drizzle() 不再接受 (client, config) 位置参数，
   // 改用对象形式 { client }。schema 键已被 Omit（关系 API 改用 relations）；momoi 不使用

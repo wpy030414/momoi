@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, primaryKey, uniqueIndex, index } from 'drizzle-orm/sqlite-core'
 
 export const conversations = sqliteTable('conversations', {
   id: text('id').primaryKey(),
@@ -73,6 +73,8 @@ export const users = sqliteTable('users', {
   last_login_at: integer('last_login_at').notNull(),
   last_active_at: integer('last_active_at'),
   banned: integer('banned', { mode: 'boolean' }).notNull().default(false),
+  /** 周额度（MTok/周）；NULL 或 0 = 不限制。与实例总额度先到者拦截。见 lib/quota.ts */
+  weekly_quota_mtok: integer('weekly_quota_mtok'),
 })
 
 export const userOidcBindings = sqliteTable('user_oidc_bindings', {
@@ -139,6 +141,21 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
   // 与 db/ddl.ts 的 UNIQUE(user_id, device_id) 对齐（此前 schema 未声明，
   // 曾致 endpoint 键控 upsert 撞物理约束 500）
   uniqueIndex('uq_push_user_device').on(t.user_id, t.device_id),
+])
+
+// 用量流水（周额度账本）：每次生成一行，按 week_start 聚合。
+// micro = μtoken：1 token = 1e6 μtoken；1 MTok = 1e12 μtoken = 1 积分。整数存储不丢精度。
+export const usageLedger = sqliteTable('usage_ledger', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  user_id: text('user_id').notNull(),
+  conversation_id: text('conversation_id').notNull().default(''),
+  tokens: integer('tokens').notNull(),
+  estimated: integer('estimated').notNull().default(0),
+  week_start: integer('week_start').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (t) => [
+  index('idx_usage_ledger_week').on(t.week_start, t.user_id),
+  index('idx_usage_ledger_user').on(t.user_id, t.created_at),
 ])
 
 // 世界模拟侧表：与 conversations 1:1。法则与状态（定义 + 当前值）可随时修改。

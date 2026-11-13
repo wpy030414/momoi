@@ -81,6 +81,7 @@
 │  │  │  group_conversation_agents | mcp_servers | users              │    │  │
 │  │  │  user_oidc_bindings | wechat_bindings | qq_bindings           │    │  │
 │  │  │  workspaces (会话分组)                                          │    │  │
+│  │  │  usage_ledger (周额度账本)                                      │    │  │
 │  │  │  + data/workspaces/{conversationId}/ (会话私有工具沙盒)         │    │  │
 │  │  │  + data/workspaces/ws-{workspaceId}/ (工作区共享沙盒)           │    │  │
 │  │  │  + data/voice/{agentId}/{messageId}/ (TTS 音频缓存)            │    │  │
@@ -507,7 +508,17 @@ users
 ├── pin_hash TEXT                  -- PBKDF2 PIN 哈希
 ├── first_login_at INTEGER         -- 首次登录时间（Unix 秒）
 ├── last_login_at INTEGER          -- 最后登录时间（Unix 秒）
+├── weekly_quota_mtok INTEGER      -- 周额度（MTok）；NULL = 不限制（见 D77）
 └── banned INTEGER/BOOLEAN         -- 是否被禁用（默认 false）
+
+usage_ledger                       -- 用量流水（周额度账本，纯追加，见 D77）
+├── id INTEGER PRIMARY KEY AUTOINCREMENT
+├── user_id TEXT                   -- 消耗归属者（空串 = 计入实例总额度）
+├── conversation_id TEXT           -- 来源会话
+├── tokens INTEGER                  -- token 消耗量（积分由它实时推算，不落库）
+├── estimated INTEGER              -- 是否含字符估算
+├── week_start INTEGER             -- 归属自然周的周一 00:00（本地时区）
+└── created_at INTEGER             -- Unix epoch (秒)
 
 user_oidc_bindings
 ├── id TEXT PRIMARY KEY            -- UUID

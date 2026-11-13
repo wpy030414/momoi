@@ -6,6 +6,8 @@ import { logger } from 'hono/logger'
 
 import { env, bootstrapAgents } from './lib/config.js'
 import { registerErrorHandlers } from './lib/errorHandler.js'
+import { restGateMiddleware } from './middleware/requestGate.js'
+import { warnIfMultiInstanceSuspected } from './lib/process-state.js'
 import { STAND_ALONE } from './lib/standalone.js'
 import { db, users } from './db/index.js'
 
@@ -59,6 +61,10 @@ app.use('*', cors({
 
 // 错误序列化收口（onError/notFound 详见 lib/errorHandler.ts 与 docs/specs/module-errors.md）
 registerErrorHandlers(app)
+
+// 普通桶限流：覆盖 /api/*（聊天入口由 routes/chat.ts 的生成桶负责，/api/events 长连接排除）。
+// 阈值与开关在后台「网关」页；见 middleware/requestGate.ts。
+app.use('/api/*', restGateMiddleware())
 
 // API Routes
 app.route('/api/conversations', conversationsRoute)
@@ -125,6 +131,9 @@ const visualWidth = (s: string): number => {
 }
 const padVisual = (s: string, cols: number) => s + ' '.repeat(Math.max(0, cols - visualWidth(s)))
 const contentCols = 34
+
+// 单实例部署自检（见 lib/process-state.ts）：检测到多实例信号时显式告警。
+warnIfMultiInstanceSuspected()
 
 console.log(`
 ╔══════════════════════════════════════╗

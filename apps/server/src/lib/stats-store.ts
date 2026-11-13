@@ -20,11 +20,14 @@ import { db, conversations } from '../db/index.js'
 import { eq } from 'drizzle-orm'
 import type { ConversationStats } from '@momoi/shared/types'
 import { mergeCumulativeTotals, parseCumulativeTotals, type CumulativeTotals } from '../ai/conversation-stats.js'
+import { recordUsage } from './quota.js'
 
 export async function persistConversationStats(
   convId: string,
   stats: ConversationStats | undefined,
   bill?: { billTokens: number; billEstimated: boolean; priorBillEstimate: number },
+  /** 消耗归属者（周额度账本用）；缺省时按空串记入实例总额度。 */
+  userId?: string,
 ): Promise<void> {
   if (!stats || !convId) return
   try {
@@ -44,5 +47,12 @@ export async function persistConversationStats(
       .run()
   } catch (err) {
     console.error('[stats] Failed to persist conversation stats:', (err as Error).message)
+  }
+
+  // 周额度账本（与快照同一口径、同一落点）：每次生成追加一行流水，
+  // 与上面的「读旧值 → 加增量 → 写回」不同，这里是纯追加，无竞态可丢。
+  // 失败开放——账本写失败绝不中断对话。
+  if (bill && bill.billTokens > 0) {
+    await recordUsage(userId || '', convId, bill.billTokens, bill.billEstimated)
   }
 }

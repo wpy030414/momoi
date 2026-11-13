@@ -17,6 +17,8 @@
     "AUTH_INVALID_CURRENT_PIN": "現在の PIN が無効です",
     "USER_NAME_REQUIRED": "ユーザー名は必須です",
     "USER_RATE_LIMITED": "試行回数が多すぎます。{{seconds}} 秒後にもう一度お試しください。",
+    "QUOTA_EXCEEDED": "今週の利用枠を使い切りました（{{scope}}）。{{reset_at}} にリセットされます。",
+    "RATE_LIMIT_EXCEEDED": "リクエストが多すぎます。{{retry_after}} 秒後にもう一度お試しください。",
     "USER_PIN_FORMAT": "PIN は 4〜8 桁の数字である必要があります",
     "USER_PIN_NOT_SET": "PIN が設定されていません",
     "USER_DISABLED": "アカウントが無効化されています",
@@ -169,6 +171,10 @@
     "__unknown": "エラーが発生しました（{{code}}）",
     "OIDC_ID_TOKEN_INVALID": "id_token の検証に失敗しました：{{detail}}"
   },
+  "quotaScope": {
+    "personal": "個人の利用枠",
+    "instance": "インスタンス全体の利用枠"
+  },
   "common": {
     "loading": "読み込み中...",
     "error": "エラー",
@@ -310,7 +316,9 @@
     "pushDeniedHint": "通知が拒否されました。ブラウザ設定から許可してください。",
     "on": "オン",
     "off": "オフ",
-    "adminSettings": "管理"
+    "adminSettings": "管理",
+    "creditBalance": "クレジット残高",
+    "creditHint": "今週の残り、月曜 0 時にリセット"
   },
   "docs": {
     "title": "ドキュメント",
@@ -406,6 +414,20 @@
     "allowImConversations": "IM での会話を許可",
     "useExternalImageHosting": "外部画像ホスティングを使用",
     "contextWindow": "モデルコンテキストウィンドウ（トークン）",
+    "rateLimitEnabled": "リクエスト制限を有効にする",
+    "rateLimitHint": "ユーザー単位と IP 単位でカウントします（60 秒のスライディングウィンドウ）。0 でその段階は無制限。イベントストリームの長接続はカウントしません。",
+    "rateLimitGenerate": "生成リクエスト / 分（チャット）",
+    "rateLimitRest": "通常リクエスト / 分",
+    "weeklyQuota": "週間枠（使用量 / 上限、MTok）",
+    "weeklyQuotaHint": "空欄 = 無制限。1 MTok = 100 万トークン。",
+    "instanceQuota": "インスタンス全体の週間枠（MTok）",
+    "instanceQuotaHint": "各ユーザーの枠と同時に適用され、先に達した方でブロックします。0 = 無制限。",
+    "costBoard": "コストボード",
+    "costBoardRange": "直近 {{days}} 日",
+    "costBoardTotal": "合計",
+    "costByUser": "ユーザー別",
+    "costByDay": "日別",
+    "costNoData": "まだ使用データがありません",
     "agentName": "エージェント名",
     "agentModel": "モデル",
     "agentModelSelect": "モデルを選択",
@@ -535,7 +557,9 @@
     "oidcProviderIssuerHint": "エンドポイントはこの Issuer の discovery から自動取得されます",
     "workbuddyCopyLoginLink": "ログインリンクをコピー",
     "workbuddyCopyLoginLinkSuccess": "リンクをコピーしました",
-    "workbuddyCopyLoginLinkFailed": "コピーに失敗しました。リンクを選択して手動でコピーしてください"
+    "workbuddyCopyLoginLinkFailed": "コピーに失敗しました。リンクを選択して手動でコピーしてください",
+    "defaultNewUserQuota": "新規ユーザーのデフォルト週間枠",
+    "defaultNewUserQuotaHint": "新規アカウントの初期週間枠（MTok/週、整数; 0 = 無制限）。既存ユーザーは影響を受けません。"
   },
   "login": {
     "title": "ようこそ",

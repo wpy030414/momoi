@@ -96,6 +96,28 @@ export async function initSqlite(dbPath?: string) {
     // Column already exists, safe to ignore
   }
 
+  // Migration: add weekly_quota_mtok（用户周额度；NULL = 不限制，见 lib/quota.ts）
+  try {
+    client.exec(`ALTER TABLE users ADD COLUMN weekly_quota_mtok INTEGER`)
+    console.log('[db] Migration: added weekly_quota_mtok to users')
+  } catch {
+    // Column already exists, safe to ignore
+  }
+
+  // Migration: usage_ledger 列名演化（D77 两次修订）
+  //   micro（μtoken）→ micro_credits（微积分）→ tokens（原始 token 数）
+  // 最终形态是 `tokens INTEGER`：账本只存消耗量，积分由它实时推算，不落库。
+  // CREATE TABLE IF NOT EXISTS 对已存在的表不补列，所以升级实例必须逐步改名。
+  // 每一步都幂等：列不存在时该步的 SQL 抛错，被 catch 吞掉。
+  for (const [from, to] of [['micro', 'micro_credits'], ['micro_credits', 'tokens']] as const) {
+    try {
+      client.exec(`ALTER TABLE usage_ledger RENAME COLUMN ${from} TO ${to}`)
+      console.log(`[db] Migration: renamed usage_ledger.${from} → ${to}`)
+    } catch {
+      // 该历史列不存在（已升级过或全新库），safe to ignore
+    }
+  }
+
   // Migration: OAuth2 → OIDC（表 user_oauth_bindings 改名 user_oidc_bindings）
   // 旧表不删——已部署实例升级后可回退；INSERT OR IGNORE 依赖 UNIQUE(provider_id, provider_user_id)
   // 保证重复启动幂等。旧表不存在（全新部署）时 try 内语句会抛错，被 catch 吞掉。
