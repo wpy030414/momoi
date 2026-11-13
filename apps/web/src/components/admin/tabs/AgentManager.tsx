@@ -490,7 +490,6 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
       }
       await fetchAgents()
       resetForm()
-      toast({ title: t('settings.toastAgentSaved'), variant: 'success' })
     } catch (err) {
       console.error('Failed to save agent:', err)
     }
@@ -602,8 +601,6 @@ export const AgentManager = forwardRef<AgentManagerHandle>(function AgentManager
 
     if (failed > 0) {
       toast({ title: t('settings.bulkModelPartialFail', { failed, total: targets.length }), variant: 'error' })
-    } else {
-      toast({ title: t('settings.bulkModelSaved'), variant: 'success' })
     }
   }
 

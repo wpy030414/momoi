@@ -418,7 +418,7 @@
     "rateLimitHint": "Counted per user and per IP with a 60-second sliding window. 0 disables that tier; the event-stream long connection is not counted.",
     "rateLimitGenerate": "Generation requests / min (chat)",
     "rateLimitRest": "Other requests / min",
-    "weeklyQuota": "Weekly quota (used / limit, MTok)",
+    "weeklyQuota": "Weekly quota",
     "weeklyQuotaHint": "Leave empty for unlimited. 1 MTok = 1 million tokens.",
     "instanceQuota": "Instance-wide weekly quota (MTok)",
     "instanceQuotaHint": "Applies alongside per-user quotas; whichever is hit first blocks. 0 = unlimited.",

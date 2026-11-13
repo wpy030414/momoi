@@ -1,13 +1,12 @@
-import { useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react'
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Input } from '../../ui/input'
-import { Button } from '../../ui/button'
 import { Switch } from '../../ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select'
 import { Loading } from '../../ui/spinner'
 import { Eye, EyeOff } from 'lucide-react'
 import { api } from '../../../lib/api'
-import { useToast } from '../../ui/toast'
+import { useAutoSave } from '../../../hooks/useAutoSave'
 import { WorkBuddyCredentialPanel } from './WorkBuddyCredentialPanel'
 import type { GatewaySource } from '@momoi/shared/types'
 
@@ -28,12 +27,23 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
   ref,
 ) {
   const { t } = useTranslation()
-  const { toast } = useToast()
   const [config, setConfig] = useState<any>(null)
-  const [saving, setSaving] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
 
+  // 自动保存读最新 config（不能在 hook 里闭包捕获，否则存的是旧值）
+  const configRef = useRef<any>(null)
+  configRef.current = config
+
   const source: GatewaySource = normalizeSource(config?.gateway_source)
+
+  /** 改完即存：开关/下拉立即，文本/数字失焦（见 hooks/useAutoSave.ts）。
+   *  成功静默（后台设置不弹成功提示），失败由 api 层统一 toast。 */
+  const autoSave = useAutoSave({
+    save: async () => {
+      if (!configRef.current) return
+      await api.updateConfig(configRef.current)
+    },
+  })
 
   useEffect(() => {
     api.getConfig().then((cfg) => {
@@ -43,6 +53,13 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
     // onSourceChange 在父级是稳定 setState，无需进 deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /** 改一个字段并（按类型）触发保存 */
+  const patch = useCallback((next: Record<string, unknown>, mode: 'now' | 'blur') => {
+    setConfig((prev: any) => prev ? { ...prev, ...next } : prev)
+    if (mode === 'now') autoSave.saveNow()
+    else autoSave.markDirty()   // 实际提交由字段的 onBlur 触发
+  }, [autoSave])
 
   const handleLoadFromEnv = useCallback(async () => {
     // 空值守卫折进函数式更新（prev ? {...} : prev）：闭包不再引用 config，
@@ -64,20 +81,10 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
     const next = normalizeSource(value)
     setConfig((prev: any) => prev ? { ...prev, gateway_source: next } : prev)
     onSourceChange?.(next)
-  }, [onSourceChange])
+    autoSave.saveNow()
+  }, [onSourceChange, autoSave])
 
   useImperativeHandle(ref, () => ({ loadFromEnv: handleLoadFromEnv }), [handleLoadFromEnv])
-
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      await api.updateConfig(config)
-      toast({ title: t('settings.toastSaved'), variant: 'success' })
-    } catch (err) {
-      console.error(err)
-    }
-    setSaving(false)
-  }
 
   if (!config) return <Loading className="py-16" />
 
@@ -100,7 +107,7 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
         <>
           <div>
             <label className="text-sm font-medium">{t('settings.apiEndpoint')}</label>
-            <Input value={config.api_endpoint || ''} onChange={(e) => setConfig({ ...config, api_endpoint: e.target.value })} className="mt-1" />
+            <Input value={config.api_endpoint || ''} onChange={(e) => patch({ api_endpoint: e.target.value }, 'blur')} onBlur={() => autoSave.saveSoon()} className="mt-1" />
           </div>
           <div>
             <label className="text-sm font-medium">{t('settings.apiKey')}</label>
@@ -108,7 +115,8 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
               <Input
                 type={showApiKey ? 'text' : 'password'}
                 value={config.api_key || ''}
-                onChange={(e) => setConfig({ ...config, api_key: e.target.value })}
+                onChange={(e) => patch({ api_key: e.target.value }, 'blur')}
+                onBlur={() => autoSave.saveSoon()}
                 className="pr-10"
               />
               <button
@@ -131,7 +139,8 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
           type="number"
           min={1}
           value={config.context_window ?? 128000}
-          onChange={(e) => setConfig({ ...config, context_window: Number(e.target.value) || 128000 })}
+          onChange={(e) => patch({ context_window: Number(e.target.value) || 128000 }, 'blur')}
+          onBlur={() => autoSave.saveSoon()}
           className="mt-1"
         />
       </div>
@@ -139,28 +148,28 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
         <label className="text-sm font-medium">{t('settings.supportInfiniteMode')}</label>
         <Switch
           checked={config.support_infinite_mode !== false}
-          onCheckedChange={(v) => setConfig({ ...config, support_infinite_mode: v })}
+          onCheckedChange={(v) => patch({ support_infinite_mode: v }, 'now')}
         />
       </div>
       <div className="flex items-center gap-3">
         <label className="text-sm font-medium">{t('settings.supportAttachments')}</label>
         <Switch
           checked={!!config.support_attachments}
-          onCheckedChange={(v) => setConfig({ ...config, support_attachments: v })}
+          onCheckedChange={(v) => patch({ support_attachments: v }, 'now')}
         />
       </div>
       <div className="flex items-center gap-3">
         <label className="text-sm font-medium">{t('settings.useExternalImageHosting')}</label>
         <Switch
           checked={!!config.use_external_image_hosting}
-          onCheckedChange={(v) => setConfig({ ...config, use_external_image_hosting: v })}
+          onCheckedChange={(v) => patch({ use_external_image_hosting: v }, 'now')}
         />
       </div>
       <div className="flex items-center gap-3">
         <label className="text-sm font-medium">{t('settings.allowImConversations')}</label>
         <Switch
           checked={config.allow_im_conversations !== false}
-          onCheckedChange={(v) => setConfig({ ...config, allow_im_conversations: v })}
+          onCheckedChange={(v) => patch({ allow_im_conversations: v }, 'now')}
         />
       </div>
       {/* 限流：分桶滑动窗口，见 middleware/requestGate.ts */}
@@ -169,7 +178,7 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
           <label className="text-sm font-medium">{t('settings.rateLimitEnabled')}</label>
           <Switch
             checked={config.rate_limit_enabled !== false}
-            onCheckedChange={(v) => setConfig({ ...config, rate_limit_enabled: v })}
+            onCheckedChange={(v) => patch({ rate_limit_enabled: v }, 'now')}
           />
         </div>
         <p className="text-xs text-muted-foreground mb-3">{t('settings.rateLimitHint')}</p>
@@ -180,7 +189,7 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
               type="number"
               min={0}
               value={config.rate_limit_generate_per_min ?? 10}
-              onChange={(e) => setConfig({ ...config, rate_limit_generate_per_min: Math.max(0, Number(e.target.value) || 0) })}
+              onChange={(e) => patch({ rate_limit_generate_per_min: Math.max(0, Number(e.target.value) || 0) }, 'blur')} onBlur={() => autoSave.saveSoon()}
               className="mt-1"
             />
           </div>
@@ -190,7 +199,7 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
               type="number"
               min={0}
               value={config.rate_limit_rest_per_min ?? 120}
-              onChange={(e) => setConfig({ ...config, rate_limit_rest_per_min: Math.max(0, Number(e.target.value) || 0) })}
+              onChange={(e) => patch({ rate_limit_rest_per_min: Math.max(0, Number(e.target.value) || 0) }, 'blur')} onBlur={() => autoSave.saveSoon()}
               className="mt-1"
             />
           </div>
@@ -204,13 +213,11 @@ export const GatewaySettings = forwardRef<GatewaySettingsHandle, GatewaySettings
           type="number"
           min={0}
           value={config.instance_weekly_quota_mtok ?? 0}
-          onChange={(e) => setConfig({ ...config, instance_weekly_quota_mtok: Math.max(0, Number(e.target.value) || 0) })}
+          onChange={(e) => patch({ instance_weekly_quota_mtok: Math.max(0, Number(e.target.value) || 0) }, 'blur')} onBlur={() => autoSave.saveSoon()}
           className="mt-1"
         />
         <p className="text-xs text-muted-foreground mt-1">{t('settings.instanceQuotaHint')}</p>
       </div>
-
-      <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>
   )
 })

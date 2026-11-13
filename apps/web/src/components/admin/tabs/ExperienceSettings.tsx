@@ -5,6 +5,7 @@ import { Button } from '../../ui/button'
 import { Switch } from '../../ui/switch'
 import { Loading } from '../../ui/spinner'
 import { api } from '../../../lib/api'
+import { useAutoSave } from '../../../hooks/useAutoSave'
 import { useToast } from '../../ui/toast'
 
 /** 首页推荐问题条数（空对话展示） */
@@ -18,11 +19,49 @@ export function ExperienceSettings() {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [config, setConfig] = useState<any>(null)
-  const [saving, setSaving] = useState(false)
   const [questions, setQuestions] = useState<string[]>(() => Array(RECOMMENDED_QUESTION_COUNT).fill(''))
   const [followups, setFollowups] = useState<string[]>(() => Array(FOLLOWUP_QUESTION_COUNT).fill(''))
   const faviconInputRef = useRef<HTMLInputElement>(null)
   const backgroundInputRef = useRef<HTMLInputElement>(null)
+
+  // 自动保存读最新状态（闭包捕获会拿到旧值）
+  const configRef = useRef<any>(null)
+  configRef.current = config
+  const questionsRef = useRef<string[]>(questions)
+  questionsRef.current = questions
+  const followupsRef = useRef<string[]>(followups)
+  followupsRef.current = followups
+
+  /**
+   * 改完即存（见 hooks/useAutoSave.ts）。
+   * 校验放在提交前：任何一项超长都拒绝提交并提示，不写入半截数据。
+   */
+  const autoSave = useAutoSave({
+    save: async () => {
+      if (!configRef.current) return
+      const rq = questionsRef.current.map((q) => q.trim()).filter(Boolean)
+      const fq = followupsRef.current.map((q) => q.trim()).filter(Boolean)
+      // 软限制：每条问题 ≤ 20 字。超长则整次不提交（同一份 config 原子写入）
+      if (rq.some((q) => q.length > QUESTION_MAX_LENGTH)) throw new Error('QUESTION_TOO_LONG')
+      if (fq.some((q) => q.length > QUESTION_MAX_LENGTH)) throw new Error('FOLLOWUP_TOO_LONG')
+
+      const c = configRef.current
+      await api.updateConfig({
+        app_name: c.app_name,
+        app_favicon: c.app_favicon,
+        app_background: c.app_background,
+        show_github: c.show_github,
+        recommended_questions: rq,
+        followup_questions: fq,
+      })
+    },
+    onError: (err: unknown) => {
+      const msg = (err as Error)?.message
+      if (msg === 'QUESTION_TOO_LONG') toast({ title: t('settings.questionTooLong'), variant: 'error' })
+      else if (msg === 'FOLLOWUP_TOO_LONG') toast({ title: t('settings.followupTooLong'), variant: 'error' })
+      else console.error(err)
+    },
+  })
 
   useEffect(() => {
     api.getConfig().then((c) => {
@@ -34,43 +73,13 @@ export function ExperienceSettings() {
     }).catch(console.error)
   }, [])
 
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      const rq = questions.map((q) => q.trim()).filter(Boolean)
-      const fq = followups.map((q) => q.trim()).filter(Boolean)
-      // Soft limit: each question must be ≤20 chars
-      if (rq.some((q) => q.length > QUESTION_MAX_LENGTH)) {
-        toast({ title: t('settings.questionTooLong'), variant: 'error' })
-        setSaving(false)
-        return
-      }
-      if (fq.some((q) => q.length > QUESTION_MAX_LENGTH)) {
-        toast({ title: t('settings.followupTooLong'), variant: 'error' })
-        setSaving(false)
-        return
-      }
-      await api.updateConfig({
-        app_name: config.app_name,
-        app_favicon: config.app_favicon,
-        app_background: config.app_background,
-        show_github: config.show_github,
-        recommended_questions: rq,
-        followup_questions: fq,
-      })
-      toast({ title: t('settings.toastSaved'), variant: 'success' })
-    } catch (err) {
-      console.error(err)
-    }
-    setSaving(false)
-  }
-
   const handleFaviconChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
     reader.onload = () => {
-      setConfig({ ...config, app_favicon: reader.result as string })
+      setConfig((prev: any) => prev ? { ...prev, app_favicon: reader.result as string } : prev)
+      autoSave.saveSoon()
     }
     reader.readAsDataURL(file)
   }
@@ -80,12 +89,13 @@ export function ExperienceSettings() {
     if (!file) return
     const reader = new FileReader()
     reader.onload = () => {
-      setConfig({ ...config, app_background: reader.result as string })
+      setConfig((prev: any) => prev ? { ...prev, app_background: reader.result as string } : prev)
+      autoSave.saveSoon()
     }
     reader.readAsDataURL(file)
   }
 
-  /** 通用问题输入组：带长度计数器，超长标红 */
+  /** 通用问题输入组：带长度计数器，超长标红；失焦时提交（校验在 save 内） */
   const renderQuestionInputs = (values: string[], setValues: (v: string[]) => void, placeholderKey: string) => (
     <div className="space-y-2 mt-1">
       {values.map((val, i) => (
@@ -96,7 +106,9 @@ export function ExperienceSettings() {
               const next = [...values]
               next[i] = e.target.value
               setValues(next)
+              autoSave.markDirty()
             }}
+            onBlur={() => autoSave.saveSoon()}
             placeholder={t(placeholderKey, { n: i + 1 })}
             className="pr-12"
           />
@@ -116,7 +128,8 @@ export function ExperienceSettings() {
         <label className="text-sm font-medium">{t('settings.appName')}</label>
         <Input
           value={config.app_name || ''}
-          onChange={(e) => setConfig({ ...config, app_name: e.target.value })}
+          onChange={(e) => { setConfig((prev: any) => prev ? { ...prev, app_name: e.target.value } : prev); autoSave.markDirty() }}
+          onBlur={() => autoSave.saveSoon()}
           className="mt-1"
           placeholder={t('settings.appNamePlaceholder')}
         />
@@ -134,7 +147,7 @@ export function ExperienceSettings() {
             {t('settings.uploadFavicon')}
           </Button>
           {config.app_favicon && (
-            <Button variant="ghost" size="sm" onClick={() => setConfig({ ...config, app_favicon: '' })}>
+            <Button variant="ghost" size="sm" onClick={() => { setConfig((prev: any) => prev ? { ...prev, app_favicon: '' } : prev); autoSave.saveSoon() }}>
               {t('common.remove')}
             </Button>
           )}
@@ -153,7 +166,7 @@ export function ExperienceSettings() {
             {t('settings.uploadBackground')}
           </Button>
           {config.app_background && (
-            <Button variant="ghost" size="sm" onClick={() => setConfig({ ...config, app_background: '' })}>
+            <Button variant="ghost" size="sm" onClick={() => { setConfig((prev: any) => prev ? { ...prev, app_background: '' } : prev); autoSave.saveSoon() }}>
               {t('common.remove')}
             </Button>
           )}
@@ -161,7 +174,7 @@ export function ExperienceSettings() {
       </div>
       <div className="flex items-center gap-3">
         <label className="text-sm font-medium">{t('settings.showGithub')}</label>
-        <Switch checked={config.show_github !== false} onCheckedChange={(v) => setConfig({ ...config, show_github: v })} />
+        <Switch checked={config.show_github !== false} onCheckedChange={(v) => { setConfig((prev: any) => prev ? { ...prev, show_github: v } : prev); autoSave.saveNow() }} />
       </div>
       <div>
         <label className="text-sm font-medium">{t('settings.recommendedQuestions')}</label>
@@ -171,7 +184,6 @@ export function ExperienceSettings() {
         <label className="text-sm font-medium">{t('settings.followupQuestions')}</label>
         {renderQuestionInputs(followups, setFollowups, 'settings.followupPlaceholder')}
       </div>
-      <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>
   )
 }

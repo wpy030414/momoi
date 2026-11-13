@@ -69,7 +69,6 @@ export const McpManager = forwardRef<McpManagerHandle>(function McpManager(_prop
       }
       setDialogOpen(false)
       fetchServers()
-      toast({ title: t('settings.toastMcpSaved'), variant: 'success' })
     } catch (err) {
       setFormError(errT(err))
     }

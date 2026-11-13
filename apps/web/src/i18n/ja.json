@@ -418,7 +418,7 @@
     "rateLimitHint": "ユーザー単位と IP 単位でカウントします（60 秒のスライディングウィンドウ）。0 でその段階は無制限。イベントストリームの長接続はカウントしません。",
     "rateLimitGenerate": "生成リクエスト / 分（チャット）",
     "rateLimitRest": "通常リクエスト / 分",
-    "weeklyQuota": "週間枠（使用量 / 上限、MTok）",
+    "weeklyQuota": "週間枠",
     "weeklyQuotaHint": "空欄 = 無制限。1 MTok = 100 万トークン。",
     "instanceQuota": "インスタンス全体の週間枠（MTok）",
     "instanceQuotaHint": "各ユーザーの枠と同時に適用され、先に達した方でブロックします。0 = 無制限。",

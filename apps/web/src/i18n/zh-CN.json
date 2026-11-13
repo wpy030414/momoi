@@ -418,7 +418,7 @@
     "rateLimitHint": "按用户与 IP 双向计数，滑动窗口 60 秒。填 0 表示该档不限制；事件流长连接不计数。",
     "rateLimitGenerate": "生成请求 / 分钟（聊天）",
     "rateLimitRest": "普通请求 / 分钟",
-    "weeklyQuota": "周限额（已用 / 额度，MTok）",
+    "weeklyQuota": "周限额",
     "weeklyQuotaHint": "留空 = 不限制。1 MTok = 100 万 token。",
     "instanceQuota": "实例每周总额度（MTok）",
     "instanceQuotaHint": "与各用户个人额度同时生效，先到者拦截。0 = 不限制。",

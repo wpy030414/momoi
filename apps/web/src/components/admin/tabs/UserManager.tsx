@@ -5,7 +5,7 @@ import { Loading } from '../../ui/spinner'
 import { Input } from '../../ui/input'
 import { Switch } from '../../ui/switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog'
-import { Plus, Trash2, Pencil, Eye, EyeOff, Brain } from 'lucide-react'
+import { Plus, Trash2, Pencil, Eye, EyeOff } from 'lucide-react'
 import { api } from '../../../lib/api'
 import { errT } from '../../../i18n'
 import { useToast } from '../../ui/toast'
@@ -32,7 +32,6 @@ function tokensToMtok(tokens: number): string {
  */
 function QuotaCell({ user, onSaved }: { user: AdminUserRow; onSaved: () => void }) {
   const { t } = useTranslation()
-  const { toast } = useToast()
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(user.weekly_quota_mtok ? String(user.weekly_quota_mtok) : '')
   const [saving, setSaving] = useState(false)
@@ -50,7 +49,6 @@ function QuotaCell({ user, onSaved }: { user: AdminUserRow; onSaved: () => void 
     const next = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null
     try {
       await api.setUserQuota(user.username, next)
-      toast({ title: t('settings.toastSaved'), variant: 'success' })
       setEditing(false)
       onSaved()
     } catch (err) {
@@ -156,7 +154,6 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
     const next = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0
     try {
       await api.updateConfig({ default_new_user_quota_mtok: next })
-      toast({ title: t('settings.toastSaved'), variant: 'success' })
     } catch {
       fetchOidcProviders()
     }
@@ -198,7 +195,6 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
       : [...oidcProviders, oidcForm]
     await saveOidcProviders(updated)
     setOidcDialogOpen(false)
-    toast({ title: t('settings.toastOidcSaved'), variant: 'success' })
     setOidcSaving(false)
   }
 
@@ -322,8 +318,10 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
         <p className="text-muted-foreground">{t('settings.noUsers')}</p>
       ) : (
         <>
-          <div className="rounded-md border overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            {/* whitespace-nowrap：内容不换行 → 窄屏时溢出并触发容器横向滑动；
+                w-full：宽屏时撑满，不因禁止换行而收缩 */}
+            <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userUsername')}</th>
@@ -349,7 +347,6 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
                     <td className="px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <Button variant="ghost" size="sm" className="text-amber-600 hover:text-amber-700" onClick={() => handleForgetMemories(u.username)}>
-                          <Brain className="h-3.5 w-3.5 mr-1" />
                           {t('settings.userForget')}
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => handleToggleBan(u.username, !u.banned)}>

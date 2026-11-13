@@ -154,8 +154,10 @@ export function ReviewPanel() {
         <p className="text-muted-foreground">{t('settings.statsNoConversations')}</p>
       ) : (
         <>
-          <div className="rounded-md border overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            {/* whitespace-nowrap：内容不换行 → 窄屏时溢出并触发容器横向滑动；
+                w-full：宽屏时撑满，不因禁止换行而收缩 */}
+            <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left px-3 py-2 font-medium">{t('settings.statsUser')}</th>
@@ -178,7 +180,7 @@ export function ReviewPanel() {
                     </tr>
                     {expandedConvId === conv.id && (
                       <tr>
-                        <td colSpan={4} className="px-3 py-4 bg-muted/20">
+                        <td colSpan={4} className="px-3 py-4 bg-muted/20 whitespace-normal">
                           {loadingMessages ? (
                             <Loading className="py-4" size="sm" />
                           ) : expandedMessages.length === 0 ? (
