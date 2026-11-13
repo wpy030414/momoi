@@ -11,7 +11,7 @@
 //   · 起两个进程指向同一个 SQLite 文件会互相踩（写锁、缓存不一致）；
 //   · 反向代理后面的多实例负载均衡会让限流、IM 长连接、事件总线各自为政。
 //
-// 这不是「将来要修的 bug」，而是**刻意的架构取舍**（见 docs/DECISIONS.md D73）：
+// 这不是「将来要修的 bug」，而是**刻意的架构取舍**（见 docs/DECISIONS.md D76）：
 // 自托管的单人/小组织场景里，引入 Redis 做分布式状态，代价远大于收益。
 //
 // 本文件的作用不是「迁移状态」，而是把散落各处的进程内状态**登记在一处**，
@@ -35,7 +35,7 @@
 export const MULTI_INSTANCE_CAPABLE = false
 
 /** 论证依据的文档锚点（便于审查时对照） */
-export const SINGLE_INSTANCE_RATIONALE = 'docs/DECISIONS.md D73'
+export const SINGLE_INSTANCE_RATIONALE = 'docs/DECISIONS.md D76'
 
 /**
  * 启动自检：如果检测到明显的多实例信号，打一条显式告警。

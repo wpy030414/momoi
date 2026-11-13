@@ -2,7 +2,7 @@
 // Weekly Quota — 周额度（μtoken 整数账本）
 // ============================================================
 //
-// 口径（见 docs/DECISIONS.md D74）：
+// 口径（见 docs/DECISIONS.md D77）：
 //   1 MTok = 1e6 token = 1 积分；内部一律用 μtoken 整数记账，永不丢精度。
 //   token 数 × 1e6 = μtoken —— 因为上游 usage 已是整数 token，转 μtoken 不会有小数。
 //   （保留 μ 的单位是为了与未来可能的亚 token 计量口径对齐；当下等价于 token。）
