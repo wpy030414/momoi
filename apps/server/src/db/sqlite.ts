@@ -96,6 +96,14 @@ export async function initSqlite(dbPath?: string) {
     // Column already exists, safe to ignore
   }
 
+  // Migration: add weekly_quota_mtok（用户周额度；NULL = 不限制，见 lib/quota.ts）
+  try {
+    client.exec(`ALTER TABLE users ADD COLUMN weekly_quota_mtok INTEGER`)
+    console.log('[db] Migration: added weekly_quota_mtok to users')
+  } catch {
+    // Column already exists, safe to ignore
+  }
+
   // Migration: OAuth2 → OIDC（表 user_oauth_bindings 改名 user_oidc_bindings）
   // 旧表不删——已部署实例升级后可回退；INSERT OR IGNORE 依赖 UNIQUE(provider_id, provider_user_id)
   // 保证重复启动幂等。旧表不存在（全新部署）时 try 内语句会抛错，被 catch 吞掉。

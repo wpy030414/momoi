@@ -87,7 +87,8 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       first_login_at INTEGER NOT NULL,
       last_login_at INTEGER NOT NULL,
       last_active_at INTEGER,
-      banned BOOLEAN NOT NULL DEFAULT FALSE
+      banned BOOLEAN NOT NULL DEFAULT FALSE,
+      weekly_quota_mtok INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS user_oidc_bindings (
@@ -180,6 +181,18 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_workspaces_user ON workspaces(user_id);
+
+    CREATE TABLE IF NOT EXISTS usage_ledger (
+      id SERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL DEFAULT '',
+      micro INTEGER NOT NULL,
+      estimated INTEGER NOT NULL DEFAULT 0,
+      week_start INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_ledger_week ON usage_ledger(week_start, user_id);
+    CREATE INDEX IF NOT EXISTS idx_usage_ledger_user ON usage_ledger(user_id, created_at);
   `)
 
   // 既有 PG 部署补列（幂等）：分组工作区锚定列，见 docs/specs/module-workspace.md

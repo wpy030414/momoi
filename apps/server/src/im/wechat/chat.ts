@@ -159,7 +159,7 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
     // 状态条：IM 侧的生成同样计入会话消耗（账单口径）——先中继给网页端让状态条
     // 实时更新，再落库（顺序与 routes/chat.ts 一致）
     broadcastStream(userId, '', { conversation_id: convId, event: { type: 'stats', stats } })
-    await persistConversationStats(convId, stats, genUsage)
+    await persistConversationStats(convId, stats, genUsage, userId)
   }
 
   // ---- Realtime: 会话内容落库完毕，通知其他设备对齐（兜底重拉）----

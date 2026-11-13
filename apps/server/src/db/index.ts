@@ -45,4 +45,5 @@ export const {
   pushSubscriptions,
   worlds,
   workspaces,
+  usageLedger,
 } = result.schema

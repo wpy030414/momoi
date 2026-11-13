@@ -73,6 +73,8 @@ export const users = pgTable('users', {
   last_login_at: integer('last_login_at').notNull(),
   last_active_at: integer('last_active_at'),
   banned: boolean('banned').notNull().default(false),
+  /** 周额度（MTok/周）；NULL 或 0 = 不限制。与实例总额度先到者拦截。见 lib/quota.ts */
+  weekly_quota_mtok: integer('weekly_quota_mtok'),
 })
 
 export const userOidcBindings = pgTable('user_oidc_bindings', {
@@ -153,6 +155,21 @@ export const worlds = pgTable('worlds', {
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
 })
+
+// 用量流水（周额度账本）：每次生成一行，按 week_start 聚合。
+// micro = μtoken（1e6 μtoken = 1 token = 1 积分单位，整数永不丢精度）。
+export const usageLedger = pgTable('usage_ledger', {
+  id: serial('id').primaryKey(),
+  user_id: text('user_id').notNull(),
+  conversation_id: text('conversation_id').notNull().default(''),
+  micro: integer('micro').notNull(),
+  estimated: integer('estimated').notNull().default(0),
+  week_start: integer('week_start').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (t) => [
+  index('idx_usage_ledger_week').on(t.week_start, t.user_id),
+  index('idx_usage_ledger_user').on(t.user_id, t.created_at),
+])
 
 // 会话分组工作区：文件夹语义；同组成员会话共享文件沙箱目录 data/workspaces/ws-<id>
 export const workspaces = pgTable('workspaces', {

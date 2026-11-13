@@ -13,7 +13,8 @@ import { DEFAULT_API_ENDPOINT, DEFAULT_MODEL } from '@momoi/shared/constants'
 import fs from 'fs'
 import path from 'path'
 import { NEUTRAL_AGENT_ID, NEUTRAL_AGENT_NAME } from '@momoi/shared/constants'
-import { db, conversations, messages, users, userOidcBindings, agents, wechatBindings, qqBindings, qqGroupConversations, userAgentMemories } from '../db/index.js'
+import { db, conversations, messages, users, userOidcBindings, agents, wechatBindings, qqBindings, qqGroupConversations, userAgentMemories, usageLedger } from '../db/index.js'
+import { weekStartOf } from '../lib/quota.js'
 import { skillRegistry } from '../skills/loader.js'
 import { buildExportBundle, stringifyExportYAML, parseImportYAML, validateImportBundle, summarizeImport, applyImportBundle } from '../lib/config-transfer.js'
 import AdmZip from 'adm-zip'
@@ -407,6 +408,20 @@ adminRoute.get('/users', async (c) => {
     bindingsByUser.get(b.user_id)!.push(b.provider_id)
   }
 
+  // 本周用量（周额度账本，见 lib/quota.ts）：与用户列表同页返回，避免前端 N 次请求
+  const weekStart = weekStartOf()
+  const usedRows = usernames.length > 0
+    ? await db.select({
+        user_id: usageLedger.user_id,
+        total: sql<number>`COALESCE(SUM(${usageLedger.micro}), 0)`,
+      })
+        .from(usageLedger)
+        .where(sql`${usageLedger.week_start} = ${weekStart} AND ${usageLedger.user_id} IN (${sql.join(usernames.map((u: string) => sql`${u}`), sql`, `)})`)
+        .groupBy(usageLedger.user_id)
+        .all()
+    : []
+  const usedByUser = new Map<string, number>(usedRows.map((r: { user_id: string; total: number }) => [r.user_id, Number(r.total)]))
+
   return c.json({
     users: rows.map((r: typeof users.$inferSelect) => ({
       username: r.username,
@@ -415,10 +430,74 @@ adminRoute.get('/users', async (c) => {
       last_active_at: r.last_active_at ?? null,
       banned: r.banned,
       oidc_providers: bindingsByUser.get(r.username) ?? [],
+      weekly_quota_mtok: r.weekly_quota_mtok ?? null,
+      weekly_used_micro: usedByUser.get(r.username) ?? 0,
     })),
     total: total?.count ?? 0,
     page,
     page_size: pageSize,
+    week_start: weekStart,
+  })
+})
+
+// 设置 / 清除某用户的周额度（MTok/周；0 或 null = 不限制）
+adminRoute.put('/users/:username/quota', async (c) => {
+  const username = c.req.param('username')
+  const existing = await db.select().from(users).where(eq(users.username, username)).get()
+  if (!existing) {
+    throw new ApiError(ErrCode.ADMIN_USER_NOT_FOUND)
+  }
+  const body = await c.req.json<{ weekly_quota_mtok?: number | null }>()
+  const raw = body.weekly_quota_mtok
+  const value = typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.round(raw) : null
+  await db.update(users).set({ weekly_quota_mtok: value }).where(eq(users.username, username)).run()
+  return c.json({ success: true, weekly_quota_mtok: value })
+})
+
+// 成本看板：近 N 天按天 / 按用户聚合（审查 Tab）。
+// 按天分桶在 JS 侧用**本地时区**做（与周额度 weekStartOf 同一时区口径），
+// 不在 SQL 里硬编码时区偏移——避免两处口径打架。
+adminRoute.get('/stats/cost', async (c) => {
+  const days = Math.min(Math.max(Number(c.req.query('days')) || 7, 1), 90)
+  const since = Math.floor(Date.now() / 1000) - days * 86400
+  const rows = await db.select({
+    user_id: usageLedger.user_id,
+    created_at: usageLedger.created_at,
+    micro: usageLedger.micro,
+  })
+    .from(usageLedger)
+    .where(sql`${usageLedger.created_at} >= ${since}`)
+    .all()
+
+  /** epoch 秒 → 本地日期键 'YYYY-MM-DD' */
+  const dayKey = (ts: number): string => {
+    const d = new Date(ts * 1000)
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${d.getFullYear()}-${m}-${day}`
+  }
+
+  const byUser = new Map<string, number>()
+  const byDay = new Map<string, number>()
+  let totalMicro = 0
+  for (const r of rows as Array<{ user_id: string; created_at: number; micro: number }>) {
+    const micro = Number(r.micro)
+    totalMicro += micro
+    const owner = r.user_id || '（未知）'
+    byUser.set(owner, (byUser.get(owner) ?? 0) + micro)
+    const key = dayKey(Number(r.created_at))
+    byDay.set(key, (byDay.get(key) ?? 0) + micro)
+  }
+
+  return c.json({
+    days,
+    total_micro: totalMicro,
+    by_user: [...byUser.entries()]
+      .map(([username, micro]) => ({ username, micro }))
+      .sort((a, b) => b.micro - a.micro),
+    by_day: [...byDay.entries()]
+      .map(([date, micro]) => ({ date, micro }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
   })
 })
 

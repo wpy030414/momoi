@@ -19,6 +19,8 @@ import { ApiError } from '../lib/apiError.js'
 import { resolveQuestion, getPendingQuestion } from '../tools/ask-user-tool.js'
 import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
+import { generateGateMiddleware } from '../middleware/requestGate.js'
+import { checkWeeklyQuota } from '../lib/quota.js'
 import { SandboxFS } from '../tools/workspace.js'
 import { synthesizeAndSave, markVoiceComplete, createTtsProvider } from '../ai/tts.js'
 import { broadcastStream, broadcastConversationSync, broadcastConversationChanged, broadcastUnreadUpdate } from '../lib/realtime.js'
@@ -161,6 +163,9 @@ function parseStoredAttachments(raw: string | null | undefined): AttachmentMeta[
 
 // Apply user auth to all routes
 chatRoute.use('*', userAuthMiddleware)
+// 生成桶限流（分桶滑动窗口，见 middleware/requestGate.ts）：只作用于聊天入口——
+// 这里才是真正调用上游、产生账单的地方。必须排在 userAuthMiddleware 之后（要读 userId）。
+chatRoute.use('*', generateGateMiddleware())
 
 /**
  * POST /api/chat/infinite-mode — Toggle infinite mode on/off for a conversation
@@ -200,6 +205,19 @@ chatRoute.post('/', async (c) => {
   const userId = (c as any).get('userId') as string
   if (!userId) {
     throw new ApiError(ErrCode.UNAUTHORIZED)
+  }
+
+  // 周额度检查（见 lib/quota.ts）：生成**前**拦截，生成中不掐断。
+  // 超限的当前轮照常计费入账，下一次发起才会被这里拦下。
+  const quota = await checkWeeklyQuota(userId)
+  if (!quota.ok) {
+    // params 由前端 errT 二次加工（见 web/src/i18n/index.ts）：
+    //   scope     → 'personal' | 'instance'，前端翻译成对应语言
+    //   reset_at  → 下周重置时刻的 epoch 秒，前端口按**用户本地时区**格式化
+    throw new ApiError(ErrCode.QUOTA_EXCEEDED, {
+      reset_at: quota.resetAt ?? 0,
+      scope: quota.scope === 'instance' ? 'instance' : 'personal',
+    })
   }
 
   const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string; workspace_url?: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string; workspace_id?: string | null; world_laws?: string; world_states?: unknown; edit_message_id?: number }>()
@@ -824,7 +842,7 @@ chatRoute.post('/', async (c) => {
         })
         if (result.stats) {
           send({ type: 'stats', stats: result.stats })
-          persistConversationStats(convId, result.stats, result.genUsage)
+          persistConversationStats(convId, result.stats, result.genUsage, userId)
         }
       } else {
         const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId, trace, stats, genUsage } = await runPiAgentLoop({
@@ -842,7 +860,7 @@ chatRoute.post('/', async (c) => {
         })
         if (reply) {
           send({ type: 'stats', stats })
-          persistConversationStats(convId, stats, genUsage)
+          persistConversationStats(convId, stats, genUsage, userId)
           await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)
         }
       }
@@ -893,7 +911,7 @@ chatRoute.post('/', async (c) => {
           })
           if (infiniteResult.stats) {
             send({ type: 'stats', stats: infiniteResult.stats })
-            persistConversationStats(convId, infiniteResult.stats, infiniteResult.genUsage)
+            persistConversationStats(convId, infiniteResult.stats, infiniteResult.genUsage, userId)
           }
         } else {
           const { reply, suggestions, thinking, artifacts, agentId: resolvedAgentId, trace, stats, genUsage } = await runPiAgentLoop({
@@ -911,7 +929,7 @@ chatRoute.post('/', async (c) => {
           })
           if (reply) {
             send({ type: 'stats', stats })
-            persistConversationStats(convId, stats, genUsage)
+            persistConversationStats(convId, stats, genUsage, userId)
             await saveAssistantMsg(reply, thinking, suggestions, artifacts, resolvedAgentId, trace)
           } else {
             // Agent returned empty reply — stop
