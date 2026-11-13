@@ -316,7 +316,9 @@
     "pushDeniedHint": "Notification permission was denied. Enable it in browser settings.",
     "on": "On",
     "off": "Off",
-    "adminSettings": "Admin"
+    "adminSettings": "Admin",
+    "creditBalance": "Credit Balance",
+    "creditHint": "Remaining this week, resets Mon 00:00"
   },
   "docs": {
     "title": "Docs",
@@ -556,7 +558,10 @@
     "oidcProviderIssuerHint": "Endpoints are auto-discovered from this issuer",
     "workbuddyCopyLoginLink": "Copy sign-in link",
     "workbuddyCopyLoginLinkSuccess": "Link copied",
-    "workbuddyCopyLoginLinkFailed": "Copy failed — select the link and copy manually"
+    "workbuddyCopyLoginLinkFailed": "Copy failed — select the link and copy manually",
+    "creditUnit": "credits",
+    "defaultNewUserQuota": "Default new user weekly quota",
+    "defaultNewUserQuotaHint": "Initial weekly allowance for new accounts (credits/week; 0 = unlimited). Existing users are unaffected."
   },
   "login": {
     "title": "Welcome",

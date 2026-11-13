@@ -20,17 +20,17 @@ function newProvider(): OidcProvider {
 
 const PAGE_SIZE = 10
 
-/** μtoken → MTok 显示（1e6 μtoken = 1 token；1 MTok = 1e12 μtoken） */
-function formatMtok(micro: number): string {
-  const mtok = micro / 1e12
-  if (mtok >= 100) return mtok.toFixed(0)
-  if (mtok >= 1) return mtok.toFixed(2)
-  return mtok.toFixed(3)
+/** 微积分 → 积分显示（1e6 微积分 = 1 积分） */
+function formatCredits(micro: number): string {
+  const credits = micro / 1e6
+  if (credits >= 100) return credits.toFixed(0)
+  if (credits >= 1) return credits.toFixed(2)
+  return credits.toFixed(3)
 }
 
 /**
- * 周额度单元格：本周已用 + 个人额度（行内编辑）。
- * 额度单位 MTok/周；留空或 0 = 不限制。见 lib/quota.ts。
+ * 周限额单元格：已用 / 限额（行内编辑）。**统一以积分显示**（1 积分 = 1 MTok）。
+ * 留空或 0 = 不限制。见 lib/quota.ts。
  */
 function QuotaCell({ user, onSaved }: { user: AdminUserRow; onSaved: () => void }) {
   const { t } = useTranslation()
@@ -40,8 +40,9 @@ function QuotaCell({ user, onSaved }: { user: AdminUserRow; onSaved: () => void 
   const [saving, setSaving] = useState(false)
 
   const usedMicro = user.weekly_used_micro ?? 0
+  // 存储仍是 MTok（与后端同口径），展示时按积分计——1 MTok 数值即 1 积分
   const quotaMtok = user.weekly_quota_mtok ?? 0
-  const over = quotaMtok > 0 && usedMicro >= quotaMtok * 1e12
+  const over = quotaMtok > 0 && usedMicro >= quotaMtok * 1e6
 
   const save = async () => {
     setSaving(true)
@@ -67,10 +68,10 @@ function QuotaCell({ user, onSaved }: { user: AdminUserRow; onSaved: () => void 
         title={t('settings.weeklyQuotaHint')}
       >
         <span className={over ? 'text-destructive font-medium' : ''}>
-          {formatMtok(usedMicro)} MTok
+          {formatCredits(usedMicro)}
         </span>
         <span className="text-muted-foreground">
-          {' / '}{quotaMtok > 0 ? `${quotaMtok} MTok` : '∞'}
+          {' / '}{quotaMtok > 0 ? formatCredits(quotaMtok * 1e6) : '∞'}
         </span>
       </button>
     )
@@ -106,6 +107,8 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   const [directRegistrationOpen, setDirectRegistrationOpen] = useState(true)
   const [oidcRegistrationOpen, setOidcRegistrationOpen] = useState(true)
   const [oidcProviders, setOidcProviders] = useState<OidcProvider[]>([])
+  /** 默认新用户周限额（积分/周，留空或 0 = 不限制）——与 quota.ts 的 MTok 内部单位一致 */
+  const [defaultQuotaMtok, setDefaultQuotaMtok] = useState('')
   const [oidcDialogOpen, setOidcDialogOpen] = useState(false)
   const [oidcEditingId, setOidcEditingId] = useState<string | null>(null)
   const [oidcForm, setOidcForm] = useState(newProvider())
@@ -120,7 +123,12 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
   }, [])
 
   const fetchOidcProviders = () => {
-    api.getConfig().then((c) => { setOidcProviders(c.oidc_providers || []) }).catch(console.error)
+    api.getConfig().then((c) => {
+      setOidcProviders(c.oidc_providers || [])
+      // 默认新用户额度：0 / 未配置显示为空（= 不限制）
+      const q = c.default_new_user_quota_mtok ?? 0
+      setDefaultQuotaMtok(q > 0 ? String(q) : '')
+    }).catch(console.error)
   }
 
   // useCallback 包裹后既是 effect 的合法依赖（规则要求），也被增删改操作
@@ -139,6 +147,18 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
     setOidcProviders(updated)
     try { await api.updateConfig({ oidc_providers: updated }) }
     catch { fetchOidcProviders() }
+  }
+
+  /** 保存默认新用户额度：失焦即存（该字段独立于其他表单，无需统一「保存」按钮） */
+  const handleDefaultQuotaBlur = async () => {
+    const parsed = Number(defaultQuotaMtok)
+    const next = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0
+    try {
+      await api.updateConfig({ default_new_user_quota_mtok: next })
+      toast({ title: t('settings.toastSaved'), variant: 'success' })
+    } catch {
+      fetchOidcProviders()
+    }
   }
 
   const handleToggleDirectRegistration = async (open: boolean) => {
@@ -274,7 +294,23 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
         )}
       </div>
 
-      {/* All users section */}
+      {/* 默认新用户周限额：只影响此后新建的账号，不追溯已有用户 */}
+      <div className="pt-2 border-t">
+        <label className="text-sm font-medium">{t('settings.defaultNewUserQuota')}</label>
+        <div className="flex items-center gap-2 mt-1">
+          <Input
+            type="number"
+            min={0}
+            value={defaultQuotaMtok}
+            onChange={(e) => setDefaultQuotaMtok(e.target.value)}
+            onBlur={handleDefaultQuotaBlur}
+            placeholder="0"
+            className="w-32"
+          />
+          <span className="text-sm text-muted-foreground">{t('settings.creditUnit')}</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">{t('settings.defaultNewUserQuotaHint')}</p>
+      </div>
       <div>
         <label className="text-sm font-medium">{t('settings.allUsers')}</label>
         <div className="mt-1">
@@ -292,7 +328,7 @@ export const UserManager = forwardRef<UserManagerHandle>(function UserManager(_p
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userUsername')}</th>
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userOidcBindings')}</th>
                   <th className="text-left px-3 py-2 font-medium">{t('settings.userLastLogin')}</th>
-                  <th className="text-left px-3 py-2 font-medium">{t('settings.weeklyUsed')}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t('settings.weeklyQuota')}</th>
                   <th className="text-right px-3 py-2 font-medium">{t('settings.userActions')}</th>
                 </tr>
               </thead>

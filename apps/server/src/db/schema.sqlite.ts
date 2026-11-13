@@ -144,12 +144,12 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
 ])
 
 // 用量流水（周额度账本）：每次生成一行，按 week_start 聚合。
-// micro = μtoken（1e6 μtoken = 1 token = 1 积分单位，整数永不丢精度）。
+// micro = μtoken：1 token = 1e6 μtoken；1 MTok = 1e12 μtoken = 1 积分。整数存储不丢精度。
 export const usageLedger = sqliteTable('usage_ledger', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   user_id: text('user_id').notNull(),
   conversation_id: text('conversation_id').notNull().default(''),
-  micro: integer('micro').notNull(),
+  micro_credits: integer('micro_credits').notNull(),
   estimated: integer('estimated').notNull().default(0),
   week_start: integer('week_start').notNull(),
   created_at: integer('created_at').notNull(),

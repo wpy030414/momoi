@@ -228,7 +228,7 @@ export const api = {
     headers: { 'X-User': encodeURIComponent(username) }
   }),
   // Current user info (admin status detection)
-  getMe: () => request<{ username: string; is_admin: boolean }>('/api/user/me'),
+  getMe: () => request<{ username: string; is_admin: boolean; quota?: import('@momoi/shared/types').MyQuotaInfo | null }>('/api/user/me'),
   // Exchange a still-valid cookie for a fresh 14-day one (sliding session renewal)
   refreshToken: () => request<{ expires_at: number }>('/api/user/refresh', { method: 'POST' }),
   // Clear the HttpOnly cookie server-side (JS cannot delete it itself)

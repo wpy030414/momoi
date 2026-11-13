@@ -413,7 +413,7 @@ adminRoute.get('/users', async (c) => {
   const usedRows = usernames.length > 0
     ? await db.select({
         user_id: usageLedger.user_id,
-        total: sql<number>`COALESCE(SUM(${usageLedger.micro}), 0)`,
+        total: sql<number>`COALESCE(SUM(${usageLedger.micro_credits}), 0)`,
       })
         .from(usageLedger)
         .where(sql`${usageLedger.week_start} = ${weekStart} AND ${usageLedger.user_id} IN (${sql.join(usernames.map((u: string) => sql`${u}`), sql`, `)})`)
@@ -463,7 +463,7 @@ adminRoute.get('/stats/cost', async (c) => {
   const rows = await db.select({
     user_id: usageLedger.user_id,
     created_at: usageLedger.created_at,
-    micro: usageLedger.micro,
+    micro: usageLedger.micro_credits,
   })
     .from(usageLedger)
     .where(sql`${usageLedger.created_at} >= ${since}`)

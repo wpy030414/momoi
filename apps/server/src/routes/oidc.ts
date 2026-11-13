@@ -11,6 +11,7 @@ import { signUserToken, setAuthCookie, getAuthToken, verifyUserToken, verifyPin,
 import { ApiError } from '../lib/apiError.js'
 import { resolveEndpoints, type ResolvedEndpoints } from '../lib/oidc-discovery.js'
 import { verifyIdToken, OidcVerifyError } from '../lib/oidc-verify.js'
+import { getDefaultNewUserQuota } from '../lib/quota.js'
 
 export const oidcRoute = new Hono()
 
@@ -325,12 +326,14 @@ oidcRoute.post('/register', async (c) => {
   if (existingUser) throw new ApiError(ErrCode.USER_NAME_TAKEN)
 
   const hashed = hashPin(pin)
+  const defaultQuota = await getDefaultNewUserQuota()
   await db.insert(users).values({
     username,
     pin_hash: hashed,
     first_login_at: now,
     last_login_at: now,
     banned: false,
+    weekly_quota_mtok: defaultQuota,
   }).run()
 
   await db.insert(userOidcBindings).values({

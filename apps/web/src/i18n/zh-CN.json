@@ -316,7 +316,9 @@
     "pushDeniedHint": "通知权限已被拒绝，请在浏览器设置中手动开启",
     "on": "开",
     "off": "关",
-    "adminSettings": "后台管理"
+    "adminSettings": "后台管理",
+    "creditBalance": "积分余额",
+    "creditHint": "本周剩余，下周一零点重置"
   },
   "docs": {
     "title": "文档",
@@ -556,7 +558,10 @@
     "oidcProviderIssuerHint": "端点由该 Issuer 的 discovery 文档自动获取",
     "workbuddyCopyLoginLink": "复制登录页链接",
     "workbuddyCopyLoginLinkSuccess": "链接已复制",
-    "workbuddyCopyLoginLinkFailed": "复制失败，请手动选中链接复制"
+    "workbuddyCopyLoginLinkFailed": "复制失败，请手动选中链接复制",
+    "creditUnit": "积分",
+    "defaultNewUserQuota": "默认新用户周限额",
+    "defaultNewUserQuotaHint": "新创建账号的初始每周额度（积分/周；0 = 不限制）。已有用户不受影响。"
   },
   "login": {
     "title": "欢迎",

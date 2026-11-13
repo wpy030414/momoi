@@ -2177,7 +2177,7 @@ TDID `x-device-token` 依然 401。真正的原因在**会话 Cookie 的获取�
 - 新增 `lib/process-state.ts`（状态登记 + 启动自检），`index.ts` 启动时调用
 - 后续若真要做多实例，需一次性处理：限流、IM 连接、事件总线、配置缓存、无限模式状态五处
 
-## D77：限流分桶 + 周额度用 μtoken 整数账本
+## D77：限流分桶 + 周额度用积分账本
 
 **日期**：2026-11-13
 
@@ -2197,10 +2197,11 @@ TDID `x-device-token` 依然 401。真正的原因在**会话 Cookie 的获取�
 
 4. **普通桶「入口记 IP、出口补记 userId」**：`userId` 要等下游 `userAuthMiddleware` 执行完才有，为了不重复验签 / 查封禁（每次都查库），在 `await next()` 之后补记。补记只记账、不判拒绝——请求已经跑完
 
-5. **周额度用 μtoken 整数账本**（`usage_ledger` 表，纯追加）
-   - `micro = token × 1e6`，整数永不丢精度
-   - `1 MTok = 1e6 token = 1 积分`；展示时 `micro / 1e12` 换算成 MTok
-   - 表在内部按 μtoken 计量（等价于 token），保留 μ 是为将来亚 token 口径留位
+5. **周额度用积分账本**（`usage_ledger` 表，纯追加）
+   - **1 MTok = 1 积分**，账本只记积分，不引入 token 这层中间单位
+   - 存储用微积分整数：1 积分 = 1e6 微积分；展示时 ÷ 1e6
+   - 因为 1 MTok = 1e6 token，所以 **1 token 恰好 = 1 微积分**——记账直接存 token 数，数值相等
+   - 曾用 μtoken（token × 1e6）作中间单位，多一层换算导致 MTok 额度与用量单位差 1e6 倍、额度拦截实际失效，已废弃
 
 6. **两层额度，先到者拦截，都不设 = 不限制**
    - 个人：`users.weekly_quota_mtok`（NULL/0 = 不设）

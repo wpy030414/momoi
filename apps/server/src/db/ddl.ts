@@ -72,7 +72,7 @@ export const MIGRATION_SQL = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     conversation_id TEXT NOT NULL DEFAULT '',
-    micro INTEGER NOT NULL,
+    micro_credits INTEGER NOT NULL,
     estimated INTEGER NOT NULL DEFAULT 0,
     week_start INTEGER NOT NULL,
     created_at INTEGER NOT NULL

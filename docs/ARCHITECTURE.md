@@ -515,7 +515,7 @@ usage_ledger                       -- 用量流水（周额度账本，纯追加
 ├── id INTEGER PRIMARY KEY AUTOINCREMENT
 ├── user_id TEXT                   -- 消耗归属者（空串 = 计入实例总额度）
 ├── conversation_id TEXT           -- 来源会话
-├── micro INTEGER                  -- μtoken（1e6 μtoken = 1 token）
+├── micro_credits INTEGER          -- 微积分（1 token = 1 微积分；1e6 微积分 = 1 积分）
 ├── estimated INTEGER              -- 是否含字符估算
 ├── week_start INTEGER             -- 归属自然周的周一 00:00（本地时区）
 └── created_at INTEGER             -- Unix epoch (秒)

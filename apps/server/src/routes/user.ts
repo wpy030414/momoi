@@ -7,6 +7,7 @@ import { ApiError } from '../lib/apiError.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { isDirectRegistrationOpen, isOidcRegistrationOpen } from '../lib/config.js'
 import { getClientIp, checkIpBlocked, recordPinFailure, clearPinFailures } from '../lib/rateLimiter.js'
+import { getMyQuota, getDefaultNewUserQuota } from '../lib/quota.js'
 import { stopBotForUser, startBotForUser } from '../im/qq/manager.js'
 
 export const userRoute = new Hono()
@@ -24,7 +25,8 @@ async function trackUserLogin(username: string) {
   if (existing) {
     await db.update(users).set({ last_login_at: now }).where(eq(users.username, username)).run()
   } else {
-    await db.insert(users).values({ username, pin_hash: '', first_login_at: now, last_login_at: now, banned: false }).run()
+    const defaultQuota = await getDefaultNewUserQuota()
+    await db.insert(users).values({ username, pin_hash: '', first_login_at: now, last_login_at: now, banned: false, weekly_quota_mtok: defaultQuota }).run()
   }
 }
 
@@ -34,9 +36,11 @@ export async function trackUserActivity(username: string) {
 }
 
 // Current user info — used by the client to detect admin status
-userRoute.get('/me', userAuthMiddleware, (c) => {
+userRoute.get('/me', userAuthMiddleware, async (c) => {
   const username = (c as any).get('userId') as string
-  return c.json({ username, is_admin: isAdmin(username) })
+  // 积分余额：侧栏用户菜单第一项展示（见 lib/quota.ts）。失败开放，不阻塞身份返回。
+  const quota = await getMyQuota(username)
+  return c.json({ username, is_admin: isAdmin(username), quota })
 })
 
 // Refresh — exchange a still-valid token for a fresh 14-day one (sliding session).
@@ -138,7 +142,8 @@ userRoute.post('/set-pin', async (c) => {
   if (existing) {
     await db.update(users).set({ pin_hash: hashed, last_login_at: now }).where(eq(users.username, username)).run()
   } else {
-    await db.insert(users).values({ username, pin_hash: hashed, first_login_at: now, last_login_at: now, banned: false }).run()
+    const defaultQuota = await getDefaultNewUserQuota()
+    await db.insert(users).values({ username, pin_hash: hashed, first_login_at: now, last_login_at: now, banned: false, weekly_quota_mtok: defaultQuota }).run()
   }
 
   const result = await signUserToken(username)

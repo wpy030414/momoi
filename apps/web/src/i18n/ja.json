@@ -316,7 +316,9 @@
     "pushDeniedHint": "通知が拒否されました。ブラウザ設定から許可してください。",
     "on": "オン",
     "off": "オフ",
-    "adminSettings": "管理"
+    "adminSettings": "管理",
+    "creditBalance": "クレジット残高",
+    "creditHint": "今週の残り、月曜 0 時にリセット"
   },
   "docs": {
     "title": "ドキュメント",
@@ -556,7 +558,10 @@
     "oidcProviderIssuerHint": "エンドポイントはこの Issuer の discovery から自動取得されます",
     "workbuddyCopyLoginLink": "ログインリンクをコピー",
     "workbuddyCopyLoginLinkSuccess": "リンクをコピーしました",
-    "workbuddyCopyLoginLinkFailed": "コピーに失敗しました。リンクを選択して手動でコピーしてください"
+    "workbuddyCopyLoginLinkFailed": "コピーに失敗しました。リンクを選択して手動でコピーしてください",
+    "creditUnit": "クレジット",
+    "defaultNewUserQuota": "新規ユーザーのデフォルト週間枠",
+    "defaultNewUserQuotaHint": "新規アカウントの初期週間枠（クレジット/週; 0 = 無制限）。既存ユーザーは影響を受けません。"
   },
   "login": {
     "title": "ようこそ",

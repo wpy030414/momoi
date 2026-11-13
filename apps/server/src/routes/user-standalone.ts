@@ -8,5 +8,5 @@ import { Hono } from 'hono'
 export const standAloneUserRoute = new Hono()
 
 standAloneUserRoute.get('/me', (c) => {
-  return c.json({ username: 'admin', is_admin: true })
+  return c.json({ username: 'admin', is_admin: true, quota: null })
 })

@@ -4,9 +4,10 @@ import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
 import { MarqueeText } from '../ui/MarqueeText'
 import { Plus, MessageSquare, MessagesSquare, MoreVertical, Download, Trash2, Pencil, Settings, User, Users, LogOut, Key, Link, PencilLine, Languages, SunMoon, Wrench, Smartphone, GitMerge, BookOpen, Brain, Bell, BellOff, Map, Scale, Search, FolderPlus, ChevronDown, ChevronRight, Archive } from 'lucide-react'
-import { Github } from 'lucide-react'
+import { Github, Coins } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation, Workspace } from '@momoi/shared/types'
+import { api } from '../../lib/api'
 import type { Theme } from '../../hooks/useTheme'
 
 interface SidebarProps {
@@ -87,6 +88,18 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
   const settingsBtnRef = useRef<HTMLButtonElement>(null)
   const [userPopoverOpen, setUserPopoverOpen] = useState(false)
   const [settingsPopoverOpen, setSettingsPopoverOpen] = useState(false)
+
+  /** 积分余额（用户菜单首项）：首次打开菜单时拉取一次，之后复用。
+   *  失败静默——余额显示失败不该影响菜单本身。 */
+  const [quota, setQuota] = useState<import('@momoi/shared/types').MyQuotaInfo | null>(null)
+  const quotaFetchedRef = useRef(false)
+  useEffect(() => {
+    if (!userPopoverOpen || standAlone || quotaFetchedRef.current) return
+    quotaFetchedRef.current = true
+    api.getMe()
+      .then((r) => setQuota(r.quota ?? null))
+      .catch(() => { /* 静默：菜单照常可用 */ })
+  }, [userPopoverOpen, standAlone])
 
   /** 未分组 = 无 workspace_id，或指向已删除的工作区（悬空防御——删除工作区后
    *  成员会话的 workspace_id 原样保留，按未分组渲染但沙箱仍锚定原目录） */
@@ -600,6 +613,23 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
             left: '12px',
           }}
         >
+          {/* 积分余额：菜单首项，比其余条目更大更醒目（只读展示，不可点击） */}
+          {!standAlone && quota && (
+            <div className="mb-1 rounded-sm bg-accent/40 px-2.5 py-2">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Coins className="h-3.5 w-3.5" />
+                {t('menu.creditBalance')}
+              </div>
+              <div className="mt-0.5 flex items-baseline gap-1">
+                <span className="text-lg font-semibold leading-none tabular-nums">
+                  {quota.remaining_credits === null ? '∞' : quota.remaining_credits}
+                </span>
+                {quota.limit_credits !== null && (
+                  <span className="text-xs text-muted-foreground tabular-nums">/ {quota.limit_credits}</span>
+                )}
+              </div>
+            </div>
+          )}
           {onChangeUsername && (
             <button
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"

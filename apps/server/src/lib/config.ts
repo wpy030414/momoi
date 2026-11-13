@@ -145,6 +145,8 @@ function buildConfig(map: Map<string, string>): AppConfig {
     rate_limit_rest_per_min: parsePositiveInt(map.get('rate_limit_rest_per_min'), 120),
     // 实例周总额度（MTok）；0 = 不限制
     instance_weekly_quota_mtok: parseNonNegativeInt(map.get('instance_weekly_quota_mtok'), 0),
+    // 默认新用户周额度（MTok）；0 = 不限制，仅影响之后新建的账号
+    default_new_user_quota_mtok: parseNonNegativeInt(map.get('default_new_user_quota_mtok'), 0),
   }
 }
 
@@ -162,7 +164,7 @@ export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConf
   for (const [key, value] of Object.entries(partial)) {
     if (value !== undefined) {
       const boolKeys = ['support_attachments', 'support_infinite_mode', 'allow_im_conversations', 'show_github', 'use_external_image_hosting', 'rate_limit_enabled']
-      const numberKeys = ['context_window', 'rate_limit_generate_per_min', 'rate_limit_rest_per_min', 'instance_weekly_quota_mtok']
+      const numberKeys = ['context_window', 'rate_limit_generate_per_min', 'rate_limit_rest_per_min', 'instance_weekly_quota_mtok', 'default_new_user_quota_mtok']
       const jsonKeys = ['recommended_questions', 'followup_questions', 'oidc_providers']
       let stored: string
       if (jsonKeys.includes(key)) {

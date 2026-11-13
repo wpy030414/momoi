@@ -270,6 +270,9 @@ export interface AppConfig {
   /** 实例总额度（MTok/周，0 = 不限制）。与每个用户的个人额度同时生效，先到者拦截。
    *  1 MTok = 1e6 token = 1 积分。 */
   instance_weekly_quota_mtok: number
+  /** 默认新用户周额度（MTok/周，0 = 不限制）。新账号创建时写入其 users.weekly_quota_mtok；
+   *  已有用户不受影响（改这里不会追溯调整）。 */
+  default_new_user_quota_mtok: number
 }
 
 // ---- WorkBuddy 上游 ----
@@ -612,16 +615,29 @@ export interface AdminUserRow {
   oidc_providers: string[]  // OAuth2 provider ids linked to this user
   /** 个人周额度（MTok/周）；null = 不限制 */
   weekly_quota_mtok?: number | null
-  /** 本周已用（μtoken 整数，1e6 μtoken = 1 token = 1 积分） */
+  /** 本周已用（微积分整数：1 token = 1 微积分；1e6 微积分 = 1 积分） */
   weekly_used_micro?: number
 }
 
-/** 成本看板（审查 Tab）：近 N 天的用量聚合，单位 μtoken */
+/** 成本看板（审查 Tab）：近 N 天的用量聚合，单位微积分（1e6 微积分 = 1 积分） */
 export interface AdminCostBoard {
   days: number
   total_micro: number
   by_user: Array<{ username: string; micro: number }>
   by_day: Array<{ date: string; micro: number }>
+}
+
+/** 当前用户的积分余额（GET /api/user/me）——所有者自查，非管理员视图。
+ *  额度为 NULL/0 时 `limit_credits` 为 null，前端显示「∞」。 */
+export interface MyQuotaInfo {
+  /** 本周已用（积分，保留 2 位小数） */
+  used_credits: number
+  /** 本周额度（积分）；null = 不限制 */
+  limit_credits: number | null
+  /** 剩余积分；不限制时为 null */
+  remaining_credits: number | null
+  /** 额度重置时刻（epoch 秒，下周一 00:00） */
+  reset_at: number
 }
 
 // ---- API Responses ----

@@ -4,9 +4,9 @@ import { Button } from '../../ui/button'
 import { Loading } from '../../ui/spinner'
 import { api } from '../../../lib/api'
 
-/** μtoken → 积分（1e6 μtoken = 1 token；1 MTok = 1e12 μtoken = 1 积分） */
+/** 微积分 → 积分（1e6 微积分 = 1 积分；1 token = 1 微积分） */
 function microToCredits(micro: number): string {
-  const credits = micro / 1e12
+  const credits = micro / 1e6
   if (credits >= 100) return credits.toFixed(0)
   if (credits >= 1) return credits.toFixed(2)
   return credits.toFixed(3)
@@ -51,7 +51,7 @@ function CostBoard() {
       <div className="mb-4">
         <span className="text-xs text-muted-foreground">{t('settings.costBoardTotal')}</span>
         <span className="ml-2 text-lg font-semibold">{microToCredits(board.total_micro)}</span>
-        <span className="ml-1 text-xs text-muted-foreground">MTok</span>
+        <span className="ml-1 text-xs text-muted-foreground">{t('settings.creditUnit')}</span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
