@@ -413,7 +413,7 @@ adminRoute.get('/users', async (c) => {
   const usedRows = usernames.length > 0
     ? await db.select({
         user_id: usageLedger.user_id,
-        total: sql<number>`COALESCE(SUM(${usageLedger.micro_credits}), 0)`,
+        total: sql<number>`COALESCE(SUM(${usageLedger.tokens}), 0)`,
       })
         .from(usageLedger)
         .where(sql`${usageLedger.week_start} = ${weekStart} AND ${usageLedger.user_id} IN (${sql.join(usernames.map((u: string) => sql`${u}`), sql`, `)})`)
@@ -431,7 +431,8 @@ adminRoute.get('/users', async (c) => {
       banned: r.banned,
       oidc_providers: bindingsByUser.get(r.username) ?? [],
       weekly_quota_mtok: r.weekly_quota_mtok ?? null,
-      weekly_used_micro: usedByUser.get(r.username) ?? 0,
+      // 本周已用 token 数（积分由前端实时推算，不落库）
+      weekly_used_tokens: usedByUser.get(r.username) ?? 0,
     })),
     total: total?.count ?? 0,
     page,
@@ -455,6 +456,7 @@ adminRoute.put('/users/:username/quota', async (c) => {
 })
 
 // 成本看板：近 N 天按天 / 按用户聚合（审查 Tab）。
+// **按 token 聚合返回**，积分由前端实时换算（不在后端存积分）。
 // 按天分桶在 JS 侧用**本地时区**做（与周额度 weekStartOf 同一时区口径），
 // 不在 SQL 里硬编码时区偏移——避免两处口径打架。
 adminRoute.get('/stats/cost', async (c) => {
@@ -463,7 +465,7 @@ adminRoute.get('/stats/cost', async (c) => {
   const rows = await db.select({
     user_id: usageLedger.user_id,
     created_at: usageLedger.created_at,
-    micro: usageLedger.micro_credits,
+    tokens: usageLedger.tokens,
   })
     .from(usageLedger)
     .where(sql`${usageLedger.created_at} >= ${since}`)
@@ -479,24 +481,24 @@ adminRoute.get('/stats/cost', async (c) => {
 
   const byUser = new Map<string, number>()
   const byDay = new Map<string, number>()
-  let totalMicro = 0
-  for (const r of rows as Array<{ user_id: string; created_at: number; micro: number }>) {
-    const micro = Number(r.micro)
-    totalMicro += micro
+  let totalTokens = 0
+  for (const r of rows as Array<{ user_id: string; created_at: number; tokens: number }>) {
+    const tokens = Number(r.tokens)
+    totalTokens += tokens
     const owner = r.user_id || '（未知）'
-    byUser.set(owner, (byUser.get(owner) ?? 0) + micro)
+    byUser.set(owner, (byUser.get(owner) ?? 0) + tokens)
     const key = dayKey(Number(r.created_at))
-    byDay.set(key, (byDay.get(key) ?? 0) + micro)
+    byDay.set(key, (byDay.get(key) ?? 0) + tokens)
   }
 
   return c.json({
     days,
-    total_micro: totalMicro,
+    total_tokens: totalTokens,
     by_user: [...byUser.entries()]
-      .map(([username, micro]) => ({ username, micro }))
-      .sort((a, b) => b.micro - a.micro),
+      .map(([username, tokens]) => ({ username, tokens }))
+      .sort((a, b) => b.tokens - a.tokens),
     by_day: [...byDay.entries()]
-      .map(([date, micro]) => ({ date, micro }))
+      .map(([date, tokens]) => ({ date, tokens }))
       .sort((a, b) => a.date.localeCompare(b.date)),
   })
 })

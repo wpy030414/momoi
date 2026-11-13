@@ -186,7 +186,7 @@ export async function initPg(dbUrl: string, user: string, password: string) {
       id SERIAL PRIMARY KEY,
       user_id TEXT NOT NULL,
       conversation_id TEXT NOT NULL DEFAULT '',
-      micro_credits INTEGER NOT NULL,
+      tokens INTEGER NOT NULL,
       estimated INTEGER NOT NULL DEFAULT 0,
       week_start INTEGER NOT NULL,
       created_at INTEGER NOT NULL
@@ -206,21 +206,24 @@ export async function initPg(dbUrl: string, user: string, password: string) {
   await pool.query(`ALTER TABLE agents ADD COLUMN IF NOT EXISTS standing_art TEXT NOT NULL DEFAULT ''`)
   // 用户周额度（NULL = 不限制），见 docs/DECISIONS.md D77
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_quota_mtok INTEGER`)
-  // 用量流水口径从 μtoken 改为微积分（D77 修订）：旧列名只存在于首个开发版本
-  await pool.query(`
-    DO $$
-    BEGIN
-      IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'usage_ledger' AND column_name = 'micro'
-      ) AND NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'usage_ledger' AND column_name = 'micro_credits'
-      ) THEN
-        ALTER TABLE usage_ledger RENAME COLUMN micro TO micro_credits;
-      END IF;
-    END $$;
-  `)
+  // 用量流水口径演化（D77 两次修订）：micro（μtoken）→ micro_credits → tokens。
+  // 最终只存 token 数；积分由它实时推算。逐级改名，每级都先查 information_schema。
+  for (const [from, to] of [['micro', 'micro_credits'], ['micro_credits', 'tokens']] as const) {
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'usage_ledger' AND column_name = '${from}'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'usage_ledger' AND column_name = '${to}'
+        ) THEN
+          ALTER TABLE usage_ledger RENAME COLUMN ${from} TO ${to};
+        END IF;
+      END $$;
+    `)
+  }
 
   // drizzle-orm 1.0-rc.4：node-postgres 的 drizzle() 不再接受 (client, config) 位置参数，
   // 改用对象形式 { client }。schema 键已被 Omit（关系 API 改用 relations）；momoi 不使用

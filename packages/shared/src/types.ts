@@ -615,26 +615,26 @@ export interface AdminUserRow {
   oidc_providers: string[]  // OAuth2 provider ids linked to this user
   /** 个人周额度（MTok/周）；null = 不限制 */
   weekly_quota_mtok?: number | null
-  /** 本周已用（微积分整数：1 token = 1 微积分；1e6 微积分 = 1 积分） */
-  weekly_used_micro?: number
+  /** 本周已用 token 数（原始消耗量；积分由它实时推算，不落库） */
+  weekly_used_tokens?: number
 }
 
-/** 成本看板（审查 Tab）：近 N 天的用量聚合，单位微积分（1e6 微积分 = 1 积分） */
+/** 成本看板（审查 Tab）：近 N 天的用量聚合。**单位为 token**，积分由前端实时换算。 */
 export interface AdminCostBoard {
   days: number
-  total_micro: number
-  by_user: Array<{ username: string; micro: number }>
-  by_day: Array<{ date: string; micro: number }>
+  total_tokens: number
+  by_user: Array<{ username: string; tokens: number }>
+  by_day: Array<{ date: string; tokens: number }>
 }
 
 /** 当前用户的积分余额（GET /api/user/me）——所有者自查，非管理员视图。
- *  额度为 NULL/0 时 `limit_credits` 为 null，前端显示「∞」。 */
+ *  积分全部由 token 实时推算，**不存储**。额度为 NULL/0 时 `limit_credits` 为 null，前端显示「∞」。 */
 export interface MyQuotaInfo {
-  /** 本周已用（积分，保留 2 位小数） */
+  /** 本周已用（积分，固定 2 位小数） */
   used_credits: number
-  /** 本周额度（积分）；null = 不限制 */
+  /** 本周额度（积分，固定 2 位小数）；null = 不限制 */
   limit_credits: number | null
-  /** 剩余积分；不限制时为 null */
+  /** 剩余积分（固定 2 位小数）；不限制时为 null */
   remaining_credits: number | null
   /** 额度重置时刻（epoch 秒，下周一 00:00） */
   reset_at: number

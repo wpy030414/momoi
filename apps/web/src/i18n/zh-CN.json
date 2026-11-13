@@ -317,7 +317,7 @@
     "on": "开",
     "off": "关",
     "adminSettings": "后台管理",
-    "creditBalance": "积分余额",
+    "creditBalance": "周积分余额",
     "creditHint": "本周剩余，下周一零点重置"
   },
   "docs": {

@@ -2,22 +2,20 @@
  * 周额度口径单测（lib/quota 的纯函数部分）
  *
  * 库依赖（checkWeeklyQuota / recordUsage）需要真实 DB，这里只测最容易算错的
- * 口径函数：周窗口边界、积分与微积分的换算。
+ * 口径函数：周窗口边界、token ↔ 积分换算。
  *
- * 口径：**1 MTok = 1 积分**；存储单位为微积分（1 积分 = 1e6 微积分）。
- * 因为 1 MTok = 1e6 token，所以 token 数与微积分数值相等——这条恒等关系
- * 是记账能直接存 token 数的依据，必须锁住。
+ * 口径：**1 MTok = 1e6 token = 1 积分**。
+ * 账本只存 token 数，积分是**派生量**（读取时实时算），不落库。
  */
 
 import { describe, it, expect } from 'vitest'
 import {
   weekStartOf,
   nextWeekStartOf,
-  mtokToMicroCredits,
-  tokensToMicroCredits,
-  microCreditsToCredits,
-  MICRO_CREDITS_PER_CREDIT,
-  CREDITS_PER_MTOK,
+  mtokToTokens,
+  tokensToCredits,
+  tokensToCreditsFixed,
+  TOKENS_PER_CREDIT,
 } from '../src/lib/quota.js'
 
 describe('quota 口径', () => {
@@ -65,45 +63,44 @@ describe('quota 口径', () => {
     })
   })
 
-  describe('换算', () => {
-    it('0 是「不限制」的哨兵值', () => {
-      expect(mtokToMicroCredits(0)).toBe(0)
-      expect(tokensToMicroCredits(0)).toBe(0)
+  describe('换算（token 为唯一真实单位，积分是派生量）', () => {
+    it('1 积分 = 1 MTok = 1e6 token', () => {
+      expect(TOKENS_PER_CREDIT).toBe(1_000_000)
+      expect(mtokToTokens(1)).toBe(1_000_000)
+      expect(tokensToCredits(1_000_000)).toBe(1)
     })
 
-    it('1 MTok = 1 积分 = 1e6 微积分', () => {
-      expect(CREDITS_PER_MTOK).toBe(1)
-      expect(MICRO_CREDITS_PER_CREDIT).toBe(1_000_000)
-      expect(mtokToMicroCredits(1)).toBe(1_000_000)
+    it('额度与用量同单位：10 积分额度 = 1000 万 token', () => {
+      expect(mtokToTokens(10)).toBe(10e6)
+      // 用满 1000 万 token 时已用积分恰好到 10
+      expect(tokensToCredits(10e6)).toBe(10)
     })
 
-    it('token 数与微积分数值相等（1e6 token = 1 积分）', () => {
-      expect(tokensToMicroCredits(1_000_000)).toBe(1_000_000)
-      expect(tokensToMicroCredits(1)).toBe(1)
+    it('mtokToTokens：0 / 负数 / 非法 = 不限制', () => {
+      expect(mtokToTokens(0)).toBe(0)
+      expect(mtokToTokens(-5)).toBe(0)
+      expect(mtokToTokens(Number.NaN)).toBe(0)
     })
 
-    it('额度与用量同单位：10 积分额度可容纳 1000 万 token', () => {
-      const limit = mtokToMicroCredits(10)      // 10 MTok = 10 积分
-      const used = tokensToMicroCredits(10e6)   // 1000 万 token
-      expect(used).toBe(limit)
+    it('tokensToCredits：非正数归零', () => {
+      expect(tokensToCredits(0)).toBe(0)
+      expect(tokensToCredits(-1)).toBe(0)
+      expect(tokensToCredits(Number.POSITIVE_INFINITY)).toBe(0)
     })
 
-    it('小数 MTok 向下取整到微积分', () => {
-      expect(mtokToMicroCredits(0.5)).toBe(500_000)
-      expect(mtokToMicroCredits(1.0000004)).toBe(1_000_000)
+    it('显示固定 2 位小数（四舍五入）', () => {
+      expect(tokensToCreditsFixed(1_000_000)).toBe(1)
+      expect(tokensToCreditsFixed(1_234_567)).toBe(1.23)
+      expect(tokensToCreditsFixed(1_235_000)).toBe(1.24)
+      expect(tokensToCreditsFixed(30_000)).toBe(0.03)
+      expect(tokensToCreditsFixed(0)).toBe(0)
     })
 
-    it('负数/非法 MTok 视为不限制', () => {
-      expect(mtokToMicroCredits(-5)).toBe(0)
-      expect(mtokToMicroCredits(Number.NaN)).toBe(0)
-      expect(tokensToMicroCredits(-1)).toBe(0)
-      expect(tokensToMicroCredits(Number.POSITIVE_INFINITY)).toBe(0)
-    })
-
-    it('微积分 → 积分：保留 2 位', () => {
-      expect(microCreditsToCredits(1_000_000)).toBe(1)
-      expect(microCreditsToCredits(1_234_567)).toBe(1.23)
-      expect(microCreditsToCredits(0)).toBe(0)
+    it('小额用量不会被吞掉（这正是「实时推算」要保住的东西）', () => {
+      // 150 万 token = 1.5 积分
+      expect(tokensToCreditsFixed(1_500_000)).toBe(1.5)
+      // 单次几百 token 的零头也要保留到百分位
+      expect(tokensToCreditsFixed(5_000)).toBe(0.01)
     })
   })
 })

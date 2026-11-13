@@ -162,7 +162,7 @@ export const usageLedger = pgTable('usage_ledger', {
   id: serial('id').primaryKey(),
   user_id: text('user_id').notNull(),
   conversation_id: text('conversation_id').notNull().default(''),
-  micro_credits: integer('micro_credits').notNull(),
+  tokens: integer('tokens').notNull(),
   estimated: integer('estimated').notNull().default(0),
   week_start: integer('week_start').notNull(),
   created_at: integer('created_at').notNull(),

@@ -44,21 +44,28 @@
 
 ### 计量单位
 
-**1 MTok = 1 积分**。账本只记积分，不引入 token 这层中间单位。
+**1 MTok = 1e6 token = 1 积分**。
 
-存储用**微积分**整数：1 积分 = 1e6 微积分。
-展示时 `micro / 1e6` 得到积分。
+账本**只存 token 数**（`usage_ledger.tokens INTEGER`），**不存积分**。
+积分是**纯派生量**：每次读取时由 `SUM(tokens) / 1e6` 实时算出。
 
 | 单位 | 换算 |
 |---|---|
-| 1 积分 | `1e6` 微积分 |
+| 1 积分 | `1e6` token |
 | 1 MTok | `1` 积分 |
-| 1 token | `1` 微积分（恒等：1e6 token / 1e6 = 1 积分） |
+| 1 token | `1e-6` 积分 |
 
-因为 1 MTok = 1e6 token，且 1 积分 = 1e6 微积分，两个换算系数恰好相同，
-所以 **1 token 的数值 = 1 微积分的数值**——记账直接存 token 数即可。
+额度上限以 MTok（= 积分）配置，比较时乘成 token 再比——只做单向换算，
+不在中间落任何积分值。
 
-整数存储意味着并发累加**永不丢精度**。
+**这样做的好处**：积分永远不会与原始数据脱节。不存在「记账时攒下的误差」，
+改换算规则也不需要迁移历史数据。
+
+### 显示精度
+
+所有展示积分的地方**一律固定 2 位小数**（`toFixed(2)`）：`1.50`、`3.77`、`0.03`、`0.00`。
+服务端返回值同样是 2 位精度，前端再 `toFixed(2)` 补齐（JS 会把 `5.00` 序列化成 `5`）。
+无限额度显示 `∞`。
 
 ### 两层额度
 
@@ -107,9 +114,9 @@
 ```ts
 {
   days: number
-  total_micro: number
-  by_user: Array<{ username: string; micro: number }>
-  by_day:  Array<{ date: string; micro: number }>   // date = 'YYYY-MM-DD'（本地时区）
+  total_tokens: number
+  by_user: Array<{ username: string; tokens: number }>
+  by_day:  Array<{ date: string; tokens: number }>   // date = 'YYYY-MM-DD'（本地时区）
 }
 ```
 
@@ -135,3 +142,5 @@ UI 位置：后台「审查」Tab 顶部。
 - 额度 1 MTok、已用 2 MTok → 发起聊天返回 `QUOTA_EXCEEDED`
 - 额度清空 → 正常进入生成流程
 - `reset_at` 换算回本地时间为下周一 00:00
+- 1,234,567 token 显示为 1.23 积分（四舍五入到 2 位）
+- 积分随 token 数实时变化，不读取任何积分存储列

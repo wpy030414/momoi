@@ -1,19 +1,17 @@
 // ============================================================
-// Weekly Quota — 周额度（积分账本）
+// Weekly Quota — 周额度（token 账本，积分实时推算）
 // ============================================================
 //
 // 口径（见 docs/DECISIONS.md D77）：
-//   **1 MTok = 1 积分**。账本只记积分，不引入 token 这层中间单位。
+//   **1 MTok = 1e6 token = 1 积分**。
 //
-//   存储用「微积分」整数：1 积分 = 1e6 微积分（micro_credits）。
-//   理由只有一个——token 是整数，1e6 token = 1 积分，所以积分最多需要 6 位小数；
-//   用 1e-6 积分作最小单位既能精确表达任意 token 数，又永远是整数（不丢精度）。
-//   展示时除以 1e6 得到积分。
+//   **账本只存 token 消耗量（整数），不存积分。**
+//   积分是纯派生量：每次读取时由 SUM(tokens) / 1e6 实时算出来。
+//   这样积分永远不会与原始数据脱节——不存在「记账时攒下的误差」，
+//   改换算规则也不需要迁移历史数据。
 //
-//   换算只有一条：
-//     micro_credits = round(token 数 / 1e6 × 1e6) = token 数
-//   即 **1 token 恰好等于 1 微积分**——因为 1 MTok = 1e6 token = 1 积分 = 1e6 微积分。
-//   这个巧合让记账可以直接存 token 数，展示时才 ÷ 1e6。
+//   额度上限则以 MTok（= 积分）配置，比较时统一乘成 token 再比，
+//   同样只做一次单向换算，不做积分的中间存储。
 //
 // 两层额度，**先到者拦截**：
 //   · 个人额度 users.weekly_quota_mtok（NULL/0 = 不设）
@@ -32,11 +30,8 @@ import { eq, and, sql } from 'drizzle-orm'
 import { getConfig } from './config.js'
 import type { MyQuotaInfo } from '@momoi/shared/types'
 
-/** 1 积分 = 1e6 微积分（账本存储单位）；也等于 1 MTok 的 token 数 */
-export const MICRO_CREDITS_PER_CREDIT = 1_000_000
-
-/** 1 MTok = 1 积分 */
-export const CREDITS_PER_MTOK = 1
+/** 1 积分 = 1 MTok = 1e6 token */
+export const TOKENS_PER_CREDIT = 1_000_000
 
 /** 计算某个时刻所属自然周的周一 00:00（本地时区）的 epoch 秒 */
 export function weekStartOf(at: Date = new Date()): number {
@@ -58,21 +53,21 @@ export function nextWeekStartOf(at: Date = new Date()): number {
 
 // ---- 换算（唯一入口，避免单位散落各处）----
 
-/** MTok（= 积分）额度 → 微积分。负数/非法视为不限制（0）。 */
-export function mtokToMicroCredits(mtok: number): number {
+/** MTok（= 积分）额度 → token 上限。负数/非法视为不限制（0）。 */
+export function mtokToTokens(mtok: number): number {
   if (!Number.isFinite(mtok) || mtok <= 0) return 0
-  return Math.round(mtok * CREDITS_PER_MTOK * MICRO_CREDITS_PER_CREDIT)
+  return Math.round(mtok * TOKENS_PER_CREDIT)
 }
 
-/** token 数 → 微积分。因为 1 token = 1 微积分（1e6 token = 1 积分），恒等返回。 */
-export function tokensToMicroCredits(tokens: number): number {
+/** token 数 → 积分（**派生值**，不落库）。 */
+export function tokensToCredits(tokens: number): number {
   if (!Number.isFinite(tokens) || tokens <= 0) return 0
-  return Math.round(tokens)
+  return tokens / TOKENS_PER_CREDIT
 }
 
-/** 微积分 → 积分（保留 2 位小数，展示用） */
-export function microCreditsToCredits(micro: number): number {
-  return Math.round((micro / MICRO_CREDITS_PER_CREDIT) * 100) / 100
+/** token 数 → 积分显示值（固定 2 位小数，返回数字）。 */
+export function tokensToCreditsFixed(tokens: number): number {
+  return Math.round(tokensToCredits(tokens) * 100) / 100
 }
 
 // ---- 个人额度 ----
@@ -104,20 +99,20 @@ export async function getDefaultNewUserQuota(): Promise<number | null> {
   }
 }
 
-// ---- 用量读取 ----
+// ---- 用量读取（返回 token 数，积分由调用方派生）----
 
-/** 某用户在某周已用（微积分） */
-export async function getWeeklyUsedMicro(username: string, weekStart: number): Promise<number> {
-  const row = await db.select({ total: sql<number>`COALESCE(SUM(${usageLedger.micro_credits}), 0)` })
+/** 某用户在某周已用 token 数 */
+export async function getWeeklyUsedTokens(username: string, weekStart: number): Promise<number> {
+  const row = await db.select({ total: sql<number>`COALESCE(SUM(${usageLedger.tokens}), 0)` })
     .from(usageLedger)
     .where(and(eq(usageLedger.user_id, username), eq(usageLedger.week_start, weekStart)))
     .get()
   return Number(row?.total ?? 0)
 }
 
-/** 全实例在某周已用（微积分，各用户之和） */
-export async function getInstanceWeeklyUsedMicro(weekStart: number): Promise<number> {
-  const row = await db.select({ total: sql<number>`COALESCE(SUM(${usageLedger.micro_credits}), 0)` })
+/** 全实例在某周已用 token 数（各用户之和） */
+export async function getInstanceWeeklyUsedTokens(weekStart: number): Promise<number> {
+  const row = await db.select({ total: sql<number>`COALESCE(SUM(${usageLedger.tokens}), 0)` })
     .from(usageLedger).where(eq(usageLedger.week_start, weekStart)).get()
   return Number(row?.total ?? 0)
 }
@@ -125,7 +120,8 @@ export async function getInstanceWeeklyUsedMicro(weekStart: number): Promise<num
 // ---- 记账 ----
 
 /**
- * 记录一次生成的消耗。**失败开放**：账本写失败只打日志，绝不中断对话。
+ * 记录一次生成的消耗：**只写 token 数**（整数，来自上游 usage 或字符估算）。
+ * **失败开放**：账本写失败只打日志，绝不中断对话。
  *
  * @param username   消耗归属者；空串表示无法归属（计入实例总额度，不计个人额度）
  * @param billTokens 本次生成的账单口径 token 数
@@ -137,13 +133,13 @@ export async function recordUsage(
   billTokens: number,
   estimated: boolean,
 ): Promise<void> {
-  const micro = tokensToMicroCredits(billTokens)
-  if (micro <= 0) return
+  const tokens = Math.round(billTokens)
+  if (!Number.isFinite(tokens) || tokens <= 0) return
   try {
     await db.insert(usageLedger).values({
       user_id: username || '',
       conversation_id: conversationId || '',
-      micro_credits: micro,
+      tokens,
       estimated: estimated ? 1 : 0,
       week_start: weekStartOf(),
       created_at: Math.floor(Date.now() / 1000),
@@ -167,6 +163,7 @@ export interface QuotaCheckResult {
 
 /**
  * 检查某用户本周是否还有额度。两层额度先到者拦截；都不设 = 放行。
+ * 比较统一在 **token** 单位上进行（额度配置乘成 token），不做积分中间值。
  * **失败开放**：查询异常时不拦人（账本坏了不该让全站停摆）。
  */
 export async function checkWeeklyQuota(username: string): Promise<QuotaCheckResult> {
@@ -180,17 +177,17 @@ export async function checkWeeklyQuota(username: string): Promise<QuotaCheckResu
     ])
 
     // 个人额度
-    const userLimit = mtokToMicroCredits(userQuotaMtok)
-    if (username && userLimit > 0) {
-      const used = await getWeeklyUsedMicro(username, weekStart)
-      if (used >= userLimit) return { ok: false, scope: 'user', resetAt }
+    const userLimitTokens = mtokToTokens(userQuotaMtok)
+    if (username && userLimitTokens > 0) {
+      const used = await getWeeklyUsedTokens(username, weekStart)
+      if (used >= userLimitTokens) return { ok: false, scope: 'user', resetAt }
     }
 
     // 实例总额度
-    const instanceLimit = mtokToMicroCredits(config.instance_weekly_quota_mtok)
-    if (instanceLimit > 0) {
-      const used = await getInstanceWeeklyUsedMicro(weekStart)
-      if (used >= instanceLimit) return { ok: false, scope: 'instance', resetAt }
+    const instanceLimitTokens = mtokToTokens(config.instance_weekly_quota_mtok)
+    if (instanceLimitTokens > 0) {
+      const used = await getInstanceWeeklyUsedTokens(weekStart)
+      if (used >= instanceLimitTokens) return { ok: false, scope: 'instance', resetAt }
     }
 
     return { ok: true }
@@ -202,6 +199,7 @@ export async function checkWeeklyQuota(username: string): Promise<QuotaCheckResu
 
 /**
  * 取当前用户的积分余额（所有者自查，用于侧栏用户菜单）。
+ * 全部由 token 实时推算，不读任何「积分存储」。
  *
  * 两层额度取**更紧的那一个**作为对外的「余额」：个人额度与实例总额度先到者拦截，
  * 所以用户真正还能用多少 = min(个人剩余, 实例剩余)。任一未设则取另一个；
@@ -218,39 +216,40 @@ export async function getMyQuota(username: string): Promise<MyQuotaInfo> {
       username ? getUserWeeklyQuotaMtok(username) : Promise.resolve(0),
     ])
 
-    const usedMicro = username ? await getWeeklyUsedMicro(username, weekStart) : 0
+    const usedTokens = username ? await getWeeklyUsedTokens(username, weekStart) : 0
 
-    // 个人额度（微积分容量）。剩余可为负（超额），保留原值供取 min 比较。
-    const personalLimit = mtokToMicroCredits(userQuotaMtok)
-    const personalRemaining = personalLimit > 0 ? personalLimit - usedMicro : null
+    // 个人剩余（token 口径）。可为负（超额），保留原值供取 min 比较。
+    const personalLimitTokens = mtokToTokens(userQuotaMtok)
+    const personalRemaining = personalLimitTokens > 0 ? personalLimitTokens - usedTokens : null
 
-    // 实例额度：全实例已用 vs 实例上限
+    // 实例剩余（token 口径）
     let instanceRemaining: number | null = null
-    const instanceLimit = mtokToMicroCredits(config.instance_weekly_quota_mtok)
-    if (instanceLimit > 0) {
-      const instanceUsed = await getInstanceWeeklyUsedMicro(weekStart)
-      instanceRemaining = instanceLimit - instanceUsed
+    const instanceLimitTokens = mtokToTokens(config.instance_weekly_quota_mtok)
+    if (instanceLimitTokens > 0) {
+      const instanceUsed = await getInstanceWeeklyUsedTokens(weekStart)
+      instanceRemaining = instanceLimitTokens - instanceUsed
     }
 
     // 取更紧的那一个。上限统一表示为「本人已用 + 剩余」——对使用者可见的分母
     // 永远是他自己的口径，不会因为别人花得多而突然变小到看不懂。
-    let remaining: number | null
+    let remainingTokens: number | null
     if (personalRemaining !== null && instanceRemaining !== null) {
-      remaining = Math.min(personalRemaining, instanceRemaining)
+      remainingTokens = Math.min(personalRemaining, instanceRemaining)
     } else if (personalRemaining !== null) {
-      remaining = personalRemaining
+      remainingTokens = personalRemaining
     } else if (instanceRemaining !== null) {
-      remaining = instanceRemaining
+      remainingTokens = instanceRemaining
     } else {
-      remaining = null
+      remainingTokens = null
     }
 
-    const limit = remaining === null ? null : usedMicro + Math.max(0, remaining)
+    const limitTokens = remainingTokens === null ? null : usedTokens + Math.max(0, remainingTokens)
 
     return {
-      used_credits: microCreditsToCredits(usedMicro),
-      limit_credits: limit === null ? null : microCreditsToCredits(limit),
-      remaining_credits: remaining === null ? null : microCreditsToCredits(Math.max(0, remaining)),
+      // 显示统一 2 位小数（派生自 token，不落库）
+      used_credits: tokensToCreditsFixed(usedTokens),
+      limit_credits: limitTokens === null ? null : tokensToCreditsFixed(limitTokens),
+      remaining_credits: remainingTokens === null ? null : tokensToCreditsFixed(Math.max(0, remainingTokens)),
       reset_at: resetAt,
     }
   } catch (err) {

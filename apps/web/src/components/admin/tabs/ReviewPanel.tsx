@@ -4,12 +4,9 @@ import { Button } from '../../ui/button'
 import { Loading } from '../../ui/spinner'
 import { api } from '../../../lib/api'
 
-/** 微积分 → 积分（1e6 微积分 = 1 积分；1 token = 1 微积分） */
-function microToCredits(micro: number): string {
-  const credits = micro / 1e6
-  if (credits >= 100) return credits.toFixed(0)
-  if (credits >= 1) return credits.toFixed(2)
-  return credits.toFixed(3)
+/** token 数 → 积分显示（1e6 token = 1 积分）。**一律固定 2 位小数**。 */
+function tokensToCredits(tokens: number): string {
+  return (tokens / 1e6).toFixed(2)
 }
 
 const COST_RANGE_DAYS = 7
@@ -31,7 +28,7 @@ function CostBoard() {
   }, [])
 
   if (loading) return <Loading />
-  if (!board || board.total_micro === 0) {
+  if (!board || board.total_tokens === 0) {
     return (
       <div className="rounded-md border p-4">
         <h3 className="text-sm font-semibold mb-1">{t('settings.costBoard')}</h3>
@@ -40,7 +37,7 @@ function CostBoard() {
     )
   }
 
-  const maxDay = Math.max(...board.by_day.map((d) => d.micro), 1)
+  const maxDay = Math.max(...board.by_day.map((d) => d.tokens), 1)
 
   return (
     <div className="rounded-md border p-4">
@@ -50,7 +47,7 @@ function CostBoard() {
       </div>
       <div className="mb-4">
         <span className="text-xs text-muted-foreground">{t('settings.costBoardTotal')}</span>
-        <span className="ml-2 text-lg font-semibold">{microToCredits(board.total_micro)}</span>
+        <span className="ml-2 text-lg font-semibold">{tokensToCredits(board.total_tokens)}</span>
         <span className="ml-1 text-xs text-muted-foreground">{t('settings.creditUnit')}</span>
       </div>
 
@@ -63,9 +60,9 @@ function CostBoard() {
               <div key={d.date} className="flex items-center gap-2 text-xs">
                 <span className="w-20 shrink-0 text-muted-foreground">{d.date.slice(5)}</span>
                 <div className="flex-1 h-2 rounded bg-muted overflow-hidden">
-                  <div className="h-full bg-primary" style={{ width: `${(d.micro / maxDay) * 100}%` }} />
+                  <div className="h-full bg-primary" style={{ width: `${(d.tokens / maxDay) * 100}%` }} />
                 </div>
-                <span className="w-16 text-right tabular-nums">{microToCredits(d.micro)}</span>
+                <span className="w-16 text-right tabular-nums">{tokensToCredits(d.tokens)}</span>
               </div>
             ))}
           </div>
@@ -78,7 +75,7 @@ function CostBoard() {
             {board.by_user.map((u) => (
               <div key={u.username} className="flex items-center justify-between text-xs">
                 <span className="truncate">{u.username}</span>
-                <span className="tabular-nums ml-2 shrink-0">{microToCredits(u.micro)}</span>
+                <span className="tabular-nums ml-2 shrink-0">{tokensToCredits(u.tokens)}</span>
               </div>
             ))}
           </div>

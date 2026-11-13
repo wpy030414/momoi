@@ -149,7 +149,7 @@ export const usageLedger = sqliteTable('usage_ledger', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   user_id: text('user_id').notNull(),
   conversation_id: text('conversation_id').notNull().default(''),
-  micro_credits: integer('micro_credits').notNull(),
+  tokens: integer('tokens').notNull(),
   estimated: integer('estimated').notNull().default(0),
   week_start: integer('week_start').notNull(),
   created_at: integer('created_at').notNull(),

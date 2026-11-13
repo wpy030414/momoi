@@ -622,10 +622,10 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
               </div>
               <div className="mt-0.5 flex items-baseline gap-1">
                 <span className="text-lg font-semibold leading-none tabular-nums">
-                  {quota.remaining_credits === null ? '∞' : quota.remaining_credits}
+                  {quota.remaining_credits === null ? '∞' : quota.remaining_credits.toFixed(2)}
                 </span>
                 {quota.limit_credits !== null && (
-                  <span className="text-xs text-muted-foreground tabular-nums">/ {quota.limit_credits}</span>
+                  <span className="text-xs text-muted-foreground tabular-nums">/ {quota.limit_credits.toFixed(2)}</span>
                 )}
               </div>
             </div>
